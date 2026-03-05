@@ -1,0 +1,11 @@
+[0;1;32m●[0m gunicorn.service - Gunicorn service for Django project
+     Loaded: loaded (]8;;file://classifiedmeets/etc/systemd/system/gunicorn.service/etc/systemd/system/gunicorn.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Fri 2025-09-26 07:55:24 UTC; 15ms ago
+   Main PID: 355977 (gunicorn)
+      Tasks: 1 (limit: 9258)
+     Memory: 3.4M (peak: 3.4M)
+        CPU: 11ms
+     CGroup: /system.slice/gunicorn.service
+             └─[0;38;5;245m355977 /home/webtracktechnologies-fitness/htdocs/fitness.webtracktechnologies.com.au/public/venv/bin/python3 /home/webtracktechnologies-fitness/htdocs/fitness.webtracktechnologies.com.au/public/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 fitnessbackend.wsgi:application[0m
+
+Sep 26 07:55:24 classifiedmeets systemd[1]: Started gunicorn.service - Gunicorn service for Django project.

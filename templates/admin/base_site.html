@@ -1,0 +1,11 @@
+{% extends "admin/base_site.html" %}
+{% load static %}  {# ← this is required to use the {% static %} tag #}
+
+{% comment %} {% block title %}Your Admin Title{% endcomment %}
+
+{% block branding %}
+  <a href="{% url 'admin:index' %}" class="brand">
+    {% comment %} <img src="{% static 'img/logo.png' %}" alt="Your Logo" height="40"> {% endcomment %}
+    <h2 class="main-logo">Height Max Dashboard</h2>
+  </a>
+{% endblock %}

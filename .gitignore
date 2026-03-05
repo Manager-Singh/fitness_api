@@ -1,0 +1,88 @@
+# ==========================================
+# Django & Python .gitignore
+# ==========================================
+
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv_backup/
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+heightmax.json
+# Django stuff
+*.log
+*.pot
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+static/
+local_settings.py
+apibackend/settings.py
+
+# Environment variables
+.env
+.env.*
+*.env
+.envrc
+
+# VS Code / IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+test_results/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# PyCharm
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Docker / Deployment
+*.pid
+celerybeat-schedule
+*.pid.lock
+docker-compose.override.yml
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup / temp files
+*.bak
+*.swp
+*~

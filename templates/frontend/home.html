@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Height Max AI — Futuristic 3D</title>
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Techy fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --neon:#00eaff;
+      --neon-2:#7b5cff;
+      --glass-bg: rgba(255,255,255,.06);
+      --glass-brd: rgba(255,255,255,.18);
+      --txt:#eaf6ff;
+    }
+    html,body{background:#0b0f17;color:var(--txt)}
+    body{font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
+
+    /* ===== Utilities ===== */
+    .section-title{
+      font-family: Orbitron, sans-serif;
+      letter-spacing:.5px;
+      text-align:center;
+      font-weight:700;
+      text-shadow:0 0 16px rgba(123,92,255,.6), 0 0 28px rgba(0,234,255,.35);
+    }
+    .subtitle{opacity:.9;max-width:900px;margin-inline:auto}
+
+    .grid-overlay::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(255,255,255,.08), transparent 60%),
+        radial-gradient(800px 400px at 110% 10%, rgba(255,255,255,.05), transparent 60%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px),
+        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px);
+      pointer-events:none;
+    }
+
+    /* ===== Gradients per section ===== */
+    .sec-hero{background:linear-gradient(135deg,#0e1030,#151e53 35%,#2a1a80 70%,#0a6b98)}
+    .sec-what{background:linear-gradient(135deg,#0b2b3a,#0e3d55 45%,#116f8a)}
+    .sec-features{background:linear-gradient(135deg,#3b0d2f,#7d1a4a 45%,#d44666)}
+    .sec-how{background:linear-gradient(135deg,#062a1f,#0a3f32 45%,#0ea47f)}
+    .sec-cta{background:linear-gradient(135deg,#0a0a0a,#1a1f2b)}
+
+    section{position:relative; overflow:hidden}
+
+    /* ===== Hero ===== */
+    .hero-wrap{min-height:56vh;display:grid;place-items:center;padding:90px 0;position:relative;z-index:2}
+    .glow-ring{
+      position:absolute;inset:auto;top:-120px;left:50%;transform:translateX(-50%);
+      width:900px;height:900px;border-radius:50%;
+      background:radial-gradient(circle, rgba(0,234,255,.35), transparent 60%),
+                 radial-gradient(circle at 70% 30%, rgba(123,92,255,.35), transparent 55%);
+      filter:blur(40px);opacity:.55;pointer-events:none;
+    }
+    .hero-h1{
+      font-family: Orbitron, sans-serif;
+      font-weight:700;
+      font-size:clamp(2.2rem,5vw,3.6rem);
+      line-height:1.1; text-align:center;
+      text-shadow:0 0 22px rgba(0,234,255,.45), 0 0 44px rgba(123,92,255,.35);
+    }
+    .hero-cta{box-shadow:0 12px 28px rgba(0,234,255,.25)}
+    .hero-cta:hover{transform:translateY(-2px); box-shadow:0 18px 40px rgba(0,234,255,.35)}
+
+    /* ===== Floating Neon Objects ===== */
+    .floating-sphere {
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, rgba(0,234,255,.8), rgba(123,92,255,.4));
+      box-shadow: 0 0 40px rgba(0,234,255,.5), 0 0 80px rgba(123,92,255,.4);
+      opacity: 0.7;
+      animation: float 10s ease-in-out infinite;
+      z-index:1;
+    }
+    .sphere1 { width: 120px; height: 120px; top: 20%; left: 10%; animation-delay: 0s; }
+    .sphere2 { width: 90px; height: 90px; bottom: 15%; right: 15%; animation-delay: 2s; }
+    .sphere3 { width: 60px; height: 60px; top: 35%; right: 30%; animation-delay: 4s; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) translateX(0) scale(1); }
+      50% { transform: translateY(-40px) translateX(20px) scale(1.1); }
+    }
+
+    /* ===== Scan Beam ===== */
+    .scan-beam {
+      position: absolute;
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 140%; height: 100%;
+      background: linear-gradient(to bottom, rgba(0,234,255,.05), rgba(0,234,255,.2), rgba(0,234,255,.05));
+      mix-blend-mode: screen;
+      animation: scan 6s linear infinite;
+      opacity: 0.4;
+      z-index:1;
+    }
+    @keyframes scan {
+      0% { transform: translateX(-50%) translateY(-100%); }
+      100% { transform: translateX(-50%) translateY(100%); }
+    }
+
+    /* ===== 3D Card ===== */
+    .card-3d{
+      background:var(--glass-bg);
+      border:1px solid var(--glass-brd);
+      border-radius:22px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      position:relative;
+      padding:34px 24px;
+      box-shadow:
+        0 18px 40px rgba(0,0,0,.55),
+        inset 0 0 24px rgba(255,255,255,.04),
+        0 0 34px rgba(0,234,255,.18);
+      transition: transform .35s ease, box-shadow .35s ease;
+      transform-style:preserve-3d;
+    }
+    .card-3d::after{
+      content:""; position:absolute; inset:1px;
+      border-radius:20px;
+      background:linear-gradient(145deg, rgba(255,255,255,.08), rgba(255,255,255,0) 40%);
+      pointer-events:none;
+    }
+    .card-3d:hover{
+      transform: translateY(-12px) perspective(900px) rotateX(2deg) rotateY(-2deg) scale(1.03);
+      box-shadow:
+        0 28px 60px rgba(0,0,0,.75),
+        inset 0 0 28px rgba(255,255,255,.06),
+        0 0 50px rgba(0,234,255,.45);
+    }
+    .icon-wrap{
+      width:72px;height:72px;margin:0 auto 14px;
+      display:grid;place-items:center;border-radius:16px;
+      background:radial-gradient(circle at 30% 30%, rgba(0,234,255,.55), rgba(123,92,255,.45) 60%, transparent 62%);
+      box-shadow:0 0 26px rgba(0,234,255,.5), inset 0 0 14px rgba(255,255,255,.15);
+      transform:translateZ(20px);
+    }
+    .icon-wrap span{font-size:1.9rem; text-shadow:0 0 14px rgba(255,255,255,.4)}
+    .card-title{
+      font-family: Orbitron, sans-serif; letter-spacing:.4px;
+      margin-top:8px; margin-bottom:10px;
+      text-shadow:0 0 10px rgba(255,255,255,.3)
+    }
+    .card-3d p{opacity:.92}
+
+    /* Force equal height cards */
+    .equal .col {display:flex}
+    .equal .card-3d{display:flex; flex-direction:column; justify-content:flex-start; width:100%}
+
+    /* ===== How We Work tiles ===== */
+    .step-3d{
+      --glow: rgba(14,164,127,.45);
+      background:linear-gradient(145deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border:1px solid rgba(255,255,255,.16);
+      border-radius:20px; padding:28px;
+      box-shadow:0 16px 36px rgba(0,0,0,.55), 0 0 28px var(--glow);
+      transition:transform .3s ease, box-shadow .3s ease;
+      height:100%;
+    }
+    .step-3d:hover{ transform:translateY(-10px); box-shadow:0 24px 56px rgba(0,0,0,.7), 0 0 40px var(--glow)}
+    .step-3d svg{width:64px;height:64px;margin-bottom:10px;filter:drop-shadow(0 0 12px rgba(255,255,255,.35))}
+
+    /* ===== CTA ===== */
+    .cta-panel{
+      background:linear-gradient(135deg, rgba(123,92,255,.18), rgba(0,234,255,.18));
+      border:1px solid rgba(255,255,255,.16);
+      border-radius:24px; padding:34px;
+      box-shadow:0 18px 44px rgba(0,0,0,.6), 0 0 38px rgba(0,234,255,.2);
+      text-align:center;
+    }
+
+    /* Respect reduced motion */
+    @media (prefers-reduced-motion: reduce){
+      .card-3d,.step-3d,.hero-cta{transition:none}
+      .hero-wrap{animation:none}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================= HERO ================= -->
+  <section class="sec-hero text-center py-5 grid-overlay">
+    <div class="glow-ring"></div>
+
+    <!-- Floating neon spheres -->
+    <div class="floating-sphere sphere1"></div>
+    <div class="floating-sphere sphere2"></div>
+    <div class="floating-sphere sphere3"></div>
+
+    <!-- Scan beam -->
+    <div class="scan-beam"></div>
+
+    <div class="container hero-wrap">
+      <div>
+        <h1 class="hero-h1 mb-3">Height Max AI</h1>
+        <p class="lead subtitle mb-4">
+          Posture intelligence + Workout, Nutrition & Lifestyle coaching — all powered by AI — 
+          to unlock your maximum growth potential.
+        </p>
+        <a href="#" class="btn btn-lg btn-outline-info px-4 hero-cta">Try Free Scan</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= WHAT WE DO ================= -->
+  <section class="sec-what py-5 grid-overlay">
+    <div class="container py-3">
+      <h2 class="section-title mb-3">✨ What We Do</h2>
+      <p class="subtitle text-center">
+        We analyze posture from a single image, map it with lifestyle and nutrition inputs, and generate a science-backed, daily plan.
+        Our growth engine combines <b>Postural AI Scan</b>, <b>Height Projection</b>, and <b>Personalized Routines</b> to keep you progressing.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================= FEATURES ================= -->
+  <section class="sec-features py-5 grid-overlay">
+    <div class="container">
+      <h2 class="section-title mb-4">🚀 Our Features</h2>
+
+      <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 equal">
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>📸</span></div>
+            <h4 class="card-title">Postural AI Scan</h4>
+            <p>Upload a photo—our vision models detect tilt, rounding, pelvic tilt & asymmetries to build a personalized correction plan.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>📈</span></div>
+            <h4 class="card-title">Maximize Height Growth</h4>
+            <p>Targeted mobility + decompression + strength protocols designed to realize natural height potential safely.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>💪</span></div>
+            <h4 class="card-title">Workout Guidance</h4>
+            <p>AI-curated routines (core, recommended, beast mode) adjusted by age and scan score, with progressive overload.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>🥗</span></div>
+            <h4 class="card-title">Nutrition Plans</h4>
+            <p>Macro & micro targets with meal templates that support bone health, sleep quality, and growth-hormone friendly timing.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>🌙</span></div>
+            <h4 class="card-title">Lifestyle Coaching</h4>
+            <p>Daily habit scores for sleep, posture breaks, hydration and sunlight—tiny wins that stack into visible change.</p>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card-3d">
+            <div class="icon-wrap"><span>📊</span></div>
+            <h4 class="card-title">Height Projection</h4>
+            <p>Predictive model estimates your trajectory by age, posture metrics, adherence, and recovery—updated every week.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= HOW WE WORK ================= -->
+  <section class="sec-how py-5 grid-overlay">
+    <div class="container">
+      <h2 class="section-title mb-4">⚡ How We Work</h2>
+      <div class="row g-4 align-items-stretch">
+        <div class="col-12 col-md-6 col-lg-3">
+          <div class="step-3d h-100 text-center">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+              <path d="M24 6l10 12h-7v8h-6v-8h-7l10-12zM8 34h32v8H8z" fill="#a7ffeb"/>
+            </svg>
+            <h5 class="mt-2">1) Upload Image</h5>
+            <p class="mb-0">Take a front/side posture photo. No special gear needed.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-3">
+          <div class="step-3d h-100 text-center" style="--glow:rgba(0,234,255,.45)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+              <path d="M24 4a20 20 0 100 40 20 20 0 000-40z" stroke="#9be7ff" stroke-width="2"/>
+              <path d="M24 30v4M24 14v12" stroke="#9be7ff" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+            <h5 class="mt-2">2) AI Analysis</h5>
+            <p class="mb-0">Computer vision scores posture; planner mixes workout, nutrition, lifestyle.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-3">
+          <div class="step-3d h-100 text-center" style="--glow:rgba(123,92,255,.5)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+              <path d="M10 8h28v32H10z" stroke="#d2c6ff" stroke-width="2"/>
+              <path d="M16 16h16M16 24h10M16 32h12" stroke="#d2c6ff" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+            <h5 class="mt-2">3) Personalized Plan</h5>
+            <p class="mb-0">Daily routine with videos, reminders, nutrition and lifestyle cues.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-3">
+          <div class="step-3d h-100 text-center" style="--glow:rgba(212,70,102,.5)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="20" stroke="#ff9ebd" stroke-width="2"/>
+              <path d="M16 24h16M24 16v16" stroke="#ff9ebd" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+            <h5 class="mt-2">4) Track Progress</h5>
+            <p class="mb-0">Visual growth charts, weekly projection updates, and habit scores.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CTA ================= -->
+  <section class="sec-cta py-5">
+    <div class="container py-4">
+      <div class="cta-panel">
+        <h2 class="section-title mb-3">🌌 Ready to Unlock Your Potential?</h2>
+        <p class="subtitle">Join Height Max AI today and experience the science of growth. Get your first scan free and see your projection instantly.</p>
+        <a href="#" class="btn btn-lg btn-info mt-3">Start Now</a>
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>
