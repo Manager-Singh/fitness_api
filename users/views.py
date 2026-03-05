@@ -86,13 +86,35 @@ class RegisterView(APIView):
                 code=otp_code,
                 expires_at=expires_at
             )
+            subject = "Your One-Time Password (OTP)"
+            message = f"""Hello,
 
+            We received a request to verify your account.
+
+            Your One-Time Password (OTP) is:
+
+            {otp_code}
+
+            This OTP is valid for 15 minutes. Please do not share it with anyone.
+
+            If you did not request this OTP, you can safely ignore this email.
+
+            Thanks,
+            Team HeightMax
+            """
             # Send email
+            # send_mail(
+            #     subject,
+            #     message,
+            #     settings.DEFAULT_FROM_EMAIL,
+            #     [user.email],
+            #     fail_silently=False,
+            # )
             send_mail(
-                'OTP Authentication',
-                f'Your OTP is: {otp_code}',
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
                 fail_silently=False,
             )
 
@@ -313,58 +335,78 @@ class VerifyOTPView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    
+   
+
 class ResendOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        user_id = request.data.get('user_id')
 
-        if not user_id:
-            return Response(
-                {'success': False, 'message': 'User ID is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        request_type = request.data.get("type")  # forgot-otp or normal
+        user = None
 
-        try:
-            user = User.objects.get(id=int(user_id))
-        except (User.DoesNotExist, ValueError, TypeError):
-            return Response(
-                {'success': False, 'message': 'User not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        # ✅ Case 1: Forgot Password → Use Email
+        if request_type == "forgot-otp":
+            email = request.data.get("email")
 
-        # Generate OTP
+            if not email:
+                return Response(
+                    {"success": False, "message": "Email is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response(
+                    {"success": False, "message": "User with this email not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        # ✅ Case 2: Normal OTP → Use user_id
+        else:
+            user_id = request.data.get("user_id")
+
+            if not user_id:
+                return Response(
+                    {"success": False, "message": "User ID is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                user = User.objects.get(id=int(user_id))
+            except (User.DoesNotExist, ValueError, TypeError):
+                return Response(
+                    {"success": False, "message": "User not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        # ✅ Generate OTP
         otp_code = f"{secrets.randbelow(10000):04d}"
         expires_at = timezone.now() + datetime.timedelta(minutes=15)
 
-        # Save OTP
         OTP.objects.update_or_create(
             user=user,
             defaults={
-                'code': otp_code,
-                'expires_at': expires_at,
+                "code": otp_code,
+                "expires_at": expires_at,
             }
         )
 
-        # Email content
+        # ✅ Send Email
         subject = "Your One-Time Password (OTP)"
-        message = f"""Hello,
+        message = f"""
+            Hello,
 
-        We received a request to verify your account.
+            Your OTP is: {otp_code}
 
-        Your One-Time Password (OTP) is:
+            This OTP is valid for 15 minutes.
 
-        {otp_code}
+            If you did not request this, please ignore.
 
-        This OTP is valid for 15 minutes. Please do not share it with anyone.
-
-        If you did not request this OTP, you can safely ignore this email.
-
-        Thanks,
-        Team HeightMax
-        """
+            Thanks,
+            Team HeightMax
+                    """
 
         send_mail(
             subject=subject,
@@ -376,9 +418,9 @@ class ResendOTPView(APIView):
 
         return Response(
             {
-                'success': True,
-                'message': 'OTP resent successfully.',
-                'user_id': user.id
+                "success": True,
+                "message": "OTP sent successfully.",
+                "user_id": user.id
             },
             status=status.HTTP_200_OK
         )
@@ -407,12 +449,34 @@ class ForgotPasswordView(APIView):
                 'created_at': timezone.now()
             }
         )
+        subject = "Reset Password - OTP Verification"
+        message = f"""Hello,
 
+    We received a request to reset password your account.
+
+    Your One-Time Password (OTP) is:
+
+    {otp_code}
+
+    This OTP is valid for 15 minutes. Please do not share it with anyone.
+
+    If you did not request this OTP, you can safely ignore this email.
+
+    Thanks,
+    Team HeightMax
+    """
+        # send_mail(
+        #     'Reset Password - OTP Verification',
+        #     f'Your password reset OTP is: {otp_code}',
+        #     settings.DEFAULT_FROM_EMAIL,
+        #     [email],
+        #     fail_silently=False,
+        # )
         send_mail(
-            'Reset Password - OTP Verification',
-            f'Your password reset OTP is: {otp_code}',
-            settings.DEFAULT_FROM_EMAIL,
-            [email],
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
             fail_silently=False,
         )
 

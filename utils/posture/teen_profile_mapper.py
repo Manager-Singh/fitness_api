@@ -4,6 +4,8 @@ from utils.posture.posture_utils import compute_posture_potential_cm
 
 
 def map_userprofile_to_teenprofile(profile, posture_breakdown) -> TeenProfile:
+    print('hello\n')
+    print(profile)
     return TeenProfile(
         sex=(profile.gender or "male").lower(),
 

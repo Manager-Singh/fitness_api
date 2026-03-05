@@ -52,7 +52,6 @@ from posture_questions.services.teen_height_optimization_service import TeenHeig
 from typing import Dict, Any, List
 
 
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upsert_posture_questions(request):
@@ -122,41 +121,252 @@ def get_profile_fields(
 
     return result
 
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_posture_questions(request):
+#     user = request.user
+#     rescan = request.query_params.get('rescan')
+#     gpt_response = None
+#     user_dict: Dict[str, Any] = model_to_dict(user)
+    
+#     # ── 1. Check subscription ──────────────────────────────
+#     subscription_status = check_subscription_or_response(user)
+
+#     # If subscription expired, return that same Response directly
+#     if subscription_status.data.get("expired", True):
+#         return subscription_status  # contains message + 403 status
+    
+#     # ── 2. Fetch profile ──────────────────────────────
+#     try:
+#         profile = UserProfile.objects.get(user=user)
+#     except UserProfile.DoesNotExist:
+#         return Response({"error": "User profile not found."}, status=404)
+
+#     profile_dict: Dict[str, Any] = model_to_dict(profile)
+
+#     # ── 3. Fetch latest posture report ─────────────────
+#     posture_report = PostureReport.objects.filter(user=user).order_by('-created_at').first()
+
+#     # ── 4. Genetic Height Estimate using service ─────────────────────
+#     genetic_estimate = GeneticHeightService.get_or_create_genetic_estimate(user, profile_dict)
+
+#     # ── 5. Build height projections using service ─────
+#     projections = GrowthProjectionService.get_projection_data(genetic_estimate)
+
+#     score_summary = get_user_score_summary(user=user)
+#     today_total_score = get_user_score_summary(user=user, mode="today_total_score")
+
+#     date_str = request.query_params.get("date")
+#     try:
+#         target_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
+#     except ValueError:
+#         return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+#     green_dots = calculate_green_dots(user=user, target_date=target_date)
+
+#     # ── 6. Human-readable heights using helpers ──────────────────────
+#     current_height = height_str(profile_dict.get("current_height_foot"), profile_dict.get("current_height_inch"))
+#     ideal_height = height_str(profile_dict.get("ideal_height_foot"), profile_dict.get("ideal_height_inch"))
+#     father_height = height_str(profile_dict.get("father_height_foot"), profile_dict.get("father_height_inch"))
+#     mother_height = height_str(profile_dict.get("mother_height_foot"), profile_dict.get("mother_height_inch"))
+
+#     dad_cm = ft_in_to_cm(profile_dict.get("father_height_foot"), profile_dict.get("father_height_inch"))
+#     mom_cm = ft_in_to_cm(profile_dict.get("mother_height_foot"), profile_dict.get("mother_height_inch"))
+
+#     gender = (profile_dict.get("gender") or "").strip().lower()
+#     mph_cm = GrowthProjectionService.calculate_mph_cm(dad_cm, mom_cm, gender)
+#     mph_cm_display = fmt_cm(mph_cm)
+
+#     # ── 7. Growth Math using service ─────────────────────────────────
+#     current_cm = ft_in_to_cm(profile_dict.get("current_height_foot"), profile_dict.get("current_height_inch")) or 0.0
+#     age_years = int(profile_dict.get("age", 0))
+#     daily_genetic_cm = PostureAnalysisService.daily_genetic_gain_cm(current_cm, age_years)
+
+#     posture_points_today = profile_dict.get("posture_points_today", 0)
+#     segment_gains_today = PostureAnalysisService.calculate_segment_gains(posture_points_today)
+
+#     current_cm_val = float(profile_dict.get("current_height_cm", 0.0))
+#     estimated_height_user = genetic_estimate.estimated_height_cm
+#     genetic_diff, genetic_status = GrowthProjectionService.calculate_genetic_status(
+#         current_cm_val, estimated_height_user
+#     )
+
+#     # ── 8. Posture analysis using service ────────────────────────────
+#     ai_analysis, optimization_breakdown = PostureAnalysisService.get_posture_analysis(
+#         user=user,
+#         profile_dict=profile_dict,
+#         rescan=rescan
+#     )
+
+#     # ── 9. Final Response ──────────────────────────────
+#     chart_breakdown = calculate_height_projection(
+#         current_height, 
+#         estimated_height_user + 5, 
+#         estimated_height_user, 
+#         estimated_height_user - 5, 
+#         gender
+#     )
+    
+#     # Only generate new routine if one doesn't exist using service
+#     RoutineService.ensure_active_routine(user, optimization_breakdown)
+
+#     if user.profile_step != "completed":
+#         user.profile_step = "completed"
+#         user.save(update_fields=["profile_step"])
+
+#     subscription_data = subscription_status.data
+#     streaks = get_user_streaks(user)    
+
+#     # Check paid status
+#     is_paid = subscription_data.get("is_paid", False)
+
+#     # Optimized height (ONLY if paid teen) using service
+#     age = int(profile.age)
+#     posture_breakdown = optimization_breakdown
+#     total_score = score_summary.get("total_score", False)
+
+#     # teen_profile = map_userprofile_to_teenprofile(profile, posture_breakdown)
+#     # print(teen_profile)
+
+#     optimized_height_cm = TeenHeightOptimizationService.get_optimized_height(
+#         profile=teen_profile,
+#         is_paid=is_paid,
+#         posture_breakdown=posture_breakdown
+#     )
+
+#     # Call the MAIN utility
+#     response_data = get_height_view(
+#         user=user,
+#         profile=teen_profile,
+#         is_paid=is_paid,
+#         optimized_height_cm=optimized_height_cm,
+#         total_score=total_score
+#     )
+
+
+#     estimated_genetic_height_cm = estimated_height_user
+
+#     optimized_estimated_genetic_height_cm = estimated_genetic_height_cm + 5
+#     unoptimized_estimated_genetic_height_cm = estimated_genetic_height_cm - 5
+
+#     # If user already exceeded optimized ceiling
+#     if current_cm_val > optimized_estimated_genetic_height_cm:
+#         estimated_genetic_height_cm = current_cm_val
+#         optimized_estimated_genetic_height_cm = current_cm_val + 5
+#         unoptimized_estimated_genetic_height_cm = current_cm_val - 5
+
+#     profile_fields = get_profile_fields(profile_dict, ["age", "gender"], default=None)
+#     total_max_loss = sum(
+#         segment["max_loss_cm"]
+#         for segment in optimization_breakdown.values()
+#     )
+#     total_current_loss = sum(
+#         segment["current_loss_cm"]
+#         for segment in optimization_breakdown.values()
+#     )
+
+#     # ── Scan Limit Logic ──────────────────────────────
+#     is_paid = subscription_data.get("is_paid", False)
+#     last_scan = profile.last_scan
+#     now = timezone.now()
+
+#     can_scan = True
+#     remaining_scans = "unlimited"
+#     scan_message = "Unlimited scans available."
+
+#     if not is_paid:
+#         remaining_scans = 1
+        
+#         if last_scan and last_scan.year == now.year and last_scan.month == now.month:
+#             can_scan = False
+#             remaining_scans = 0
+#             scan_message = "Free plan allows only 1 scan per month."
+#         else:
+#             can_scan = True
+#             remaining_scans = 1
+#             scan_message = "You can use your 1 free scan for this month."
+
+#     return Response(
+#         {
+#             "message": "Posture Questions retrieved successfully",
+#             "user": {
+#                 "id": user.id,
+#                 "username": user.username,
+#                 "email": user.email,
+#             },
+#             "scan_access": {
+#                 "can_scan": can_scan,
+#                 "remaining_scans": remaining_scans,
+#                 "scan_message": scan_message,
+#             },
+#             'subscription': subscription_data, 
+#             "today_total_score": today_total_score,
+#             "last_scan": profile_dict.get("last_scan"),
+#             "scan_days": 30,
+#             "profile": profile_fields,
+#             "ai_analysis": ai_analysis,
+#             "optimization_breakdown": optimization_breakdown,
+#             "total_max_loss": total_max_loss,
+#             "total_current_loss": total_current_loss,
+#             "chart_breakdown": chart_breakdown,
+#             "growth_projection": {
+#                 "father_height_cm": float(profile_dict.get("father_height_cm", 0.0)),
+#                 "mother_height_cm": float(profile_dict.get("mother_height_cm", 0.0)),
+#                 "current_height_cm": current_cm_val,
+#                 "optimized_estimated_genetic_height_cm": optimized_estimated_genetic_height_cm,
+#                 "estimated_genetic_height_cm": estimated_genetic_height_cm,
+#                 "unoptimized_estimated_genetic_height_cm": unoptimized_estimated_genetic_height_cm,
+#                 "genetic_height_difference": genetic_diff,
+#                 "genetic_status": genetic_status,
+#                 "green_dots": green_dots,
+#                 "growth_projections": projections,
+#                 "score_summary": score_summary,
+#                 "segment_gain_cm": segment_gains_today,
+#             },
+#             "streaks": streaks,
+#             "max_height": 5.3,
+#             "response_data": response_data
+#         },
+#         status=status.HTTP_200_OK,
+#     )
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_posture_questions(request):
     user = request.user
     rescan = request.query_params.get('rescan')
-    gpt_response = None
-    user_dict: Dict[str, Any] = model_to_dict(user)
-    
+
     # ── 1. Check subscription ──────────────────────────────
     subscription_status = check_subscription_or_response(user)
 
-    # If subscription expired, return that same Response directly
     if subscription_status.data.get("expired", True):
-        return subscription_status  # contains message + 403 status
-    
+        return subscription_status
+
     # ── 2. Fetch profile ──────────────────────────────
     try:
         profile = UserProfile.objects.get(user=user)
     except UserProfile.DoesNotExist:
         return Response({"error": "User profile not found."}, status=404)
 
-    profile_dict: Dict[str, Any] = model_to_dict(profile)
+    profile_dict = model_to_dict(profile)
 
-    # ── 3. Fetch latest posture report ─────────────────
+    # ── 3. Latest posture report ─────────────────
     posture_report = PostureReport.objects.filter(user=user).order_by('-created_at').first()
 
-    # ── 4. Genetic Height Estimate using service ─────────────────────
-    genetic_estimate = GeneticHeightService.get_or_create_genetic_estimate(user, profile_dict)
-
-    # ── 5. Build height projections using service ─────
+    # ── 4. Genetic Height Estimate ─────────────────────
+    genetic_estimate = GeneticHeightService.get_or_create_genetic_estimate(
+        user, profile_dict
+    )
+    print('genetic_estimate\n')
+    print(genetic_estimate)
+    # ── 5. Growth projections ─────
     projections = GrowthProjectionService.get_projection_data(genetic_estimate)
-
+    print('projections\n')
+    print(projections)
     score_summary = get_user_score_summary(user=user)
     today_total_score = get_user_score_summary(user=user, mode="today_total_score")
 
+    # ── 6. Date handling ─────────────────────
     date_str = request.query_params.get("date")
     try:
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
@@ -165,50 +375,22 @@ def get_posture_questions(request):
 
     green_dots = calculate_green_dots(user=user, target_date=target_date)
 
-    # ── 6. Human-readable heights using helpers ──────────────────────
-    current_height = height_str(profile_dict.get("current_height_foot"), profile_dict.get("current_height_inch"))
-    ideal_height = height_str(profile_dict.get("ideal_height_foot"), profile_dict.get("ideal_height_inch"))
-    father_height = height_str(profile_dict.get("father_height_foot"), profile_dict.get("father_height_inch"))
-    mother_height = height_str(profile_dict.get("mother_height_foot"), profile_dict.get("mother_height_inch"))
-
-    dad_cm = ft_in_to_cm(profile_dict.get("father_height_foot"), profile_dict.get("father_height_inch"))
-    mom_cm = ft_in_to_cm(profile_dict.get("mother_height_foot"), profile_dict.get("mother_height_inch"))
-
-    gender = (profile_dict.get("gender") or "").strip().lower()
-    mph_cm = GrowthProjectionService.calculate_mph_cm(dad_cm, mom_cm, gender)
-    mph_cm_display = fmt_cm(mph_cm)
-
-    # ── 7. Growth Math using service ─────────────────────────────────
-    current_cm = ft_in_to_cm(profile_dict.get("current_height_foot"), profile_dict.get("current_height_inch")) or 0.0
-    age_years = int(profile_dict.get("age", 0))
-    daily_genetic_cm = PostureAnalysisService.daily_genetic_gain_cm(current_cm, age_years)
-
-    posture_points_today = profile_dict.get("posture_points_today", 0)
-    segment_gains_today = PostureAnalysisService.calculate_segment_gains(posture_points_today)
-
+    # ── 7. Height calculations ─────────────────────
     current_cm_val = float(profile_dict.get("current_height_cm", 0.0))
     estimated_height_user = genetic_estimate.estimated_height_cm
+
     genetic_diff, genetic_status = GrowthProjectionService.calculate_genetic_status(
         current_cm_val, estimated_height_user
     )
 
-    # ── 8. Posture analysis using service ────────────────────────────
+    # ── 8. Posture AI analysis ────────────────────────────
     ai_analysis, optimization_breakdown = PostureAnalysisService.get_posture_analysis(
         user=user,
         profile_dict=profile_dict,
         rescan=rescan
     )
 
-    # ── 9. Final Response ──────────────────────────────
-    chart_breakdown = calculate_height_projection(
-        current_height, 
-        estimated_height_user + 5, 
-        estimated_height_user, 
-        estimated_height_user - 5, 
-        gender
-    )
-    
-    # Only generate new routine if one doesn't exist using service
+    # ── 9. Ensure routine exists ───────────────────────────
     RoutineService.ensure_active_routine(user, optimization_breakdown)
 
     if user.profile_step != "completed":
@@ -216,54 +398,115 @@ def get_posture_questions(request):
         user.save(update_fields=["profile_step"])
 
     subscription_data = subscription_status.data
-    streaks = get_user_streaks(user)    
-
-    # Check paid status
     is_paid = subscription_data.get("is_paid", False)
+    streaks = get_user_streaks(user)
 
-    # Optimized height (ONLY if paid teen) using service
-    age = int(profile.age)
-    posture_breakdown = optimization_breakdown
-    total_score = score_summary.get("total_score", False)
-
-    teen_profile = map_userprofile_to_teenprofile(profile, posture_breakdown)
-
-    optimized_height_cm = TeenHeightOptimizationService.get_optimized_height(
-        profile=teen_profile,
-        is_paid=is_paid,
-        posture_breakdown=posture_breakdown
+     # ───────────────────────────────────────────────────────
+    # ✅ CONVERT TO TEEN PROFILE (AI DOMAIN MODEL)
+    # ───────────────────────────────────────────────────────
+    teen_profile = map_userprofile_to_teenprofile(
+        profile,
+        optimization_breakdown
     )
 
-    # Call the MAIN utility
+    # ── 6. Optimized Height Calculation ────────────────────
+    optimized_height_cm = None
+
+    if is_paid and 13 <= teen_profile.age_years <= 20:
+        optimized_result = compute_optimized_height(teen_profile)
+        optimized_height_cm = optimized_result.get("optimized_height_cm")
+
+    current_height_cm = teen_profile.current_height_cm
+
+    # Base genetic estimate
+    genetic_height_cm = genetic_estimate.estimated_height_cm
+
+    # Lower conservative estimate (2cm below genetic)
+    lower_bound_cm = genetic_height_cm - 2
+
+    # Optimized ceiling (only if paid teen)
+    if optimized_height_cm:
+        optimized_ceiling_cm = optimized_height_cm
+    else:
+        optimized_ceiling_cm = genetic_height_cm
+
+    chart_breakdown = calculate_height_projection(
+        current_height_cm,
+        optimized_ceiling_cm,
+        genetic_height_cm,
+        lower_bound_cm,
+        teen_profile.sex,
+    )
+
+
+    # Pass TeenProfile to height engine
     response_data = get_height_view(
         user=user,
-        profile=teen_profile,
+        profile=teen_profile,   # ✅ ALWAYS TeenProfile
         is_paid=is_paid,
         optimized_height_cm=optimized_height_cm,
-        total_score=total_score
+        total_score=score_summary.get("total_score", 0),
     )
 
+    # ── 12. Projection adjustments ───────────────────────────
+    optimized_estimated_genetic_height_cm = estimated_height_user + 5
+    unoptimized_estimated_genetic_height_cm = estimated_height_user - 5
 
-    estimated_genetic_height_cm = estimated_height_user
-
-    optimized_estimated_genetic_height_cm = estimated_genetic_height_cm + 5
-    unoptimized_estimated_genetic_height_cm = estimated_genetic_height_cm - 5
-
-    # If user already exceeded optimized ceiling
     if current_cm_val > optimized_estimated_genetic_height_cm:
-        estimated_genetic_height_cm = current_cm_val
+        estimated_height_user = current_cm_val
         optimized_estimated_genetic_height_cm = current_cm_val + 5
         unoptimized_estimated_genetic_height_cm = current_cm_val - 5
 
     profile_fields = get_profile_fields(profile_dict, ["age", "gender"], default=None)
+
     total_max_loss = sum(
         segment["max_loss_cm"]
         for segment in optimization_breakdown.values()
     )
+
     total_current_loss = sum(
         segment["current_loss_cm"]
         for segment in optimization_breakdown.values()
     )
+
+    # ── 13. Scan Limit Logic ──────────────────────────────
+    last_scan = profile.last_scan
+    now = timezone.now()
+
+    can_scan = True
+    remaining_scans = "unlimited"
+    scan_message = "Unlimited scans available."
+
+    if not is_paid:
+        remaining_scans = 1
+        
+        if last_scan and last_scan.year == now.year and last_scan.month == now.month:
+            can_scan = False
+            remaining_scans = 0
+            scan_message = "Free plan allows only 1 scan per month."
+        else:
+            scan_message = "You can use your 1 free scan for this month."
+    max_height_cm = None
+
+    age = teen_profile.age_years
+
+    if 13 <= age <= 20:
+        if is_paid:
+            optimized_result = compute_optimized_height(teen_profile)
+            max_height_cm = optimized_result["optimized_height_cm"]
+        else:
+            max_height_cm = genetic_estimate.estimated_height_cm
+
+    elif age >= 21:
+        if is_paid:
+            max_height_cm = (
+                teen_profile.current_height_cm +
+                teen_profile.posture_potential_cm
+            )
+        else:
+            max_height_cm = teen_profile.current_height_cm
+
+    # ── 14. FINAL RESPONSE ──────────────────────────────
     return Response(
         {
             "message": "Posture Questions retrieved successfully",
@@ -272,33 +515,44 @@ def get_posture_questions(request):
                 "username": user.username,
                 "email": user.email,
             },
-            'subscription': subscription_data, 
+            "scan_access": {
+                "can_scan": can_scan,
+                "remaining_scans": remaining_scans,
+                "scan_message": scan_message,
+            },
+            "subscription": subscription_data,
             "today_total_score": today_total_score,
             "last_scan": profile_dict.get("last_scan"),
-            "scan_days": 30,
             "profile": profile_fields,
             "ai_analysis": ai_analysis,
             "optimization_breakdown": optimization_breakdown,
+            "chart_breakdown": chart_breakdown,
             "total_max_loss": total_max_loss,
             "total_current_loss": total_current_loss,
-            "chart_breakdown": chart_breakdown,
+            "total_max_height":round(
+                teen_profile.current_height_cm +
+                teen_profile.posture_potential_cm,
+                1
+            ),
+            "max_height":round(
+                teen_profile.posture_potential_cm,
+                1
+            ),
             "growth_projection": {
                 "father_height_cm": float(profile_dict.get("father_height_cm", 0.0)),
                 "mother_height_cm": float(profile_dict.get("mother_height_cm", 0.0)),
                 "current_height_cm": current_cm_val,
                 "optimized_estimated_genetic_height_cm": optimized_estimated_genetic_height_cm,
-                "estimated_genetic_height_cm": estimated_genetic_height_cm,
+                "estimated_genetic_height_cm": estimated_height_user,
                 "unoptimized_estimated_genetic_height_cm": unoptimized_estimated_genetic_height_cm,
                 "genetic_height_difference": genetic_diff,
                 "genetic_status": genetic_status,
                 "green_dots": green_dots,
                 "growth_projections": projections,
                 "score_summary": score_summary,
-                "segment_gain_cm": segment_gains_today,
             },
             "streaks": streaks,
-            "max_height": 5.3,
-            "response_data": response_data
+            "response_data": response_data,
         },
         status=status.HTTP_200_OK,
     )

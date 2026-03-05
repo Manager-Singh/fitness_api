@@ -80,80 +80,124 @@ def update_profile_users_old(request):
         }
     }, status=status.HTTP_200_OK)
 
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def update_profile_users(request):
+
+#     body = request.body  # raw bytes
+#     body_data = json.loads(body.decode('utf-8'))  # convert to dict
+#     print(body_data)
+#     user = request.user
+    
+#     try:
+#         profile = UserProfile.objects.get(user=user)
+#     except UserProfile.DoesNotExist:
+#         return Response({'error': 'User profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+    
+#     # List of all possible fields that can be updated
+#     update_fields = [
+#         'language', 'gender', 'age', 'ethnicity',
+#         'current_height_foot', 'current_height_inch', 'current_height_cm', 'current_height_type',
+#         'ideal_height_foot', 'ideal_height_inch', 'ideal_height_cm', 'ideal_height_type',
+#         'father_height_foot', 'father_height_inch', 'father_height_cm', 'father_height_type',
+#         'mother_height_foot', 'mother_height_inch', 'mother_height_cm', 'mother_height_type',
+#         'activity_level_question', 'activity_level_answer', 'activity_level_all_option',
+#         'sitting_hours_question',
+#         'sitting_hours_options',
+#         'sitting_hours_answer',
+#         'posture_and_flexibility_question_one', 'posture_and_flexibility_answer_one',
+#         'posture_and_flexibility_question_one_all_option',
+#         'posture_and_flexibility_question_two', 'posture_and_flexibility_answer_two',
+#         'posture_and_flexibility_question_two_all_option',
+#         'posture_and_flexibility_question_three', 'posture_and_flexibility_answer_three',
+#         'posture_and_flexibility_question_three_all_option',
+#         'sleep_quality_and_position_question_one', 'sleep_quality_and_position_answer_one',
+#         'sleep_quality_and_position_question_two', 'sleep_quality_and_position_answer_two',
+#         'sleep_quality_and_position_question_two_all_option',
+#         'sleep_hours_question',
+#         'sleep_hours_options',
+#         'sleep_hours_answer',
+#         'touch_toes_wt_bending_knees_question',
+#         'touch_toes_wt_bending_knees_options',
+#         'touch_toes_wt_bending_knees_answer',
+#         'discomfort_in_body_during_movement_question',
+#         'discomfort_in_body_during_movement_options',
+#         'discomfort_in_body_during_movement_answer',
+#         'main_goal_with_heightmax_question',
+#         'main_goal_with_heightmax_options',
+#         'main_goal_with_heightmax_answer',
+#         # 'sitting_hours_question',
+#         # 'sitting_hours_options',
+#         # 'sitting_hours_answer',
+#         'g_p_height_change',
+#         'g_p_shoe_pant_growth',
+#         'g_p_voice_stage',
+#         'g_p_facial_armpit_hair',
+#         'g_p_looks',
+        
+#     ]
+
+    
+#     # Create update dictionary with only the fields that exist in the request
+#     update_data = {}
+#     for field in update_fields:
+#         if field in request.data:
+#             update_data[field] = request.data[field]
+    
+#     # Update the profile
+#     for key, value in update_data.items():
+#         setattr(profile, key, value)
+#     profile.save()
+    
+#     # Update profile step if provided
+#     if 'profile_step' in request.data:
+#         user.profile_step = request.data['profile_step']
+#         user.save()
+    
+#     profile_data = model_to_dict(profile)
+
+#     return Response({
+#         'message': 'Profile updated successfully',
+#         'user': {
+#             'id': user.id,
+#             'username': user.username,
+#             'email': user.email,
+#             'profile_step': getattr(user, 'profile_step', None),
+#             'profile': profile_data
+#         }
+#     }, status=status.HTTP_200_OK)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def update_profile_users(request):
 
-    body = request.body  # raw bytes
-    body_data = json.loads(body.decode('utf-8'))  # convert to dict
-    print(body_data)
     user = request.user
-    
+
     try:
         profile = UserProfile.objects.get(user=user)
     except UserProfile.DoesNotExist:
         return Response({'error': 'User profile not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # List of all possible fields that can be updated
-    update_fields = [
-        'language', 'gender', 'age', 'ethnicity',
-        'current_height_foot', 'current_height_inch', 'current_height_cm', 'current_height_type',
-        'ideal_height_foot', 'ideal_height_inch', 'ideal_height_cm', 'ideal_height_type',
-        'father_height_foot', 'father_height_inch', 'father_height_cm', 'father_height_type',
-        'mother_height_foot', 'mother_height_inch', 'mother_height_cm', 'mother_height_type',
-        'activity_level_question', 'activity_level_answer', 'activity_level_all_option',
-        'sitting_hours_question',
-        'sitting_hours_options',
-        'sitting_hours_answer',
-        'posture_and_flexibility_question_one', 'posture_and_flexibility_answer_one',
-        'posture_and_flexibility_question_one_all_option',
-        'posture_and_flexibility_question_two', 'posture_and_flexibility_answer_two',
-        'posture_and_flexibility_question_two_all_option',
-        'posture_and_flexibility_question_three', 'posture_and_flexibility_answer_three',
-        'posture_and_flexibility_question_three_all_option',
-        'sleep_quality_and_position_question_one', 'sleep_quality_and_position_answer_one',
-        'sleep_quality_and_position_question_two', 'sleep_quality_and_position_answer_two',
-        'sleep_quality_and_position_question_two_all_option',
-        'sleep_hours_question',
-        'sleep_hours_options',
-        'sleep_hours_answer',
-        'touch_toes_wt_bending_knees_question',
-        'touch_toes_wt_bending_knees_options',
-        'touch_toes_wt_bending_knees_answer',
-        'discomfort_in_body_during_movement_question',
-        'discomfort_in_body_during_movement_options',
-        'discomfort_in_body_during_movement_answer',
-        'main_goal_with_heightmax_question',
-        'main_goal_with_heightmax_options',
-        'main_goal_with_heightmax_answer',
-        # 'sitting_hours_question',
-        # 'sitting_hours_options',
-        # 'sitting_hours_answer',
-        'g_p_height_change',
-        'g_p_shoe_pant_growth',
-        'g_p_voice_stage',
-        'g_p_facial_armpit_hair',
-        'g_p_looks',
-        
-    ]
 
-    
-    # Create update dictionary with only the fields that exist in the request
-    update_data = {}
-    for field in update_fields:
-        if field in request.data:
-            update_data[field] = request.data[field]
-    
-    # Update the profile
-    for key, value in update_data.items():
-        setattr(profile, key, value)
+    # Get all model fields dynamically
+    model_fields = [field.name for field in profile._meta.fields]
+
+    # Remove protected fields (important ⚠️)
+    protected_fields = ['id', 'user']
+    allowed_fields = [f for f in model_fields if f not in protected_fields]
+
+    # Update dynamically
+    for key, value in request.data.items():
+        if key in allowed_fields:
+            setattr(profile, key, value)
+
     profile.save()
-    
-    # Update profile step if provided
+
+    # Update profile_step separately (belongs to User model)
     if 'profile_step' in request.data:
         user.profile_step = request.data['profile_step']
         user.save()
-    
+
     profile_data = model_to_dict(profile)
 
     return Response({

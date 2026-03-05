@@ -29,6 +29,8 @@ staticfiles/
 static/
 local_settings.py
 apibackend/settings.py
+apibackend/
+fitnessbackend/
 
 # Environment variables
 .env

@@ -291,7 +291,6 @@ def analyze_posture(front=None, side=None, back=None, t_pose=None):
         "pelvic_tilt_back": 0,
         "leg_hamstring": 0,
     }
-
     # ---------------- SIDE VIEW (SPINE + PELVIS) ----------------
     if side and isinstance(side, dict) and "landmarks" in side:
         lm = side["landmarks"]
@@ -370,7 +369,8 @@ def analyze_posture(front=None, side=None, back=None, t_pose=None):
     metrics["max_height_gain_inches"] = round(
         min(1.5, metrics["spinal_compression"] * 0.015), 2
     )
-
+    print("metrics")
+    print(metrics)
     return metrics
 
 

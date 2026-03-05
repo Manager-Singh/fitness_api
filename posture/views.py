@@ -1067,7 +1067,7 @@ class FullPostureAnalysisAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-
+        print("Top-level keys:", list(request.data.keys()))
         front = request.FILES.get("front")
         side = request.FILES.get("side")
         back = request.FILES.get("back")
@@ -1084,12 +1084,19 @@ class FullPostureAnalysisAPIView(APIView):
         side_data  = parse_payload(request.data.get("side_data"))
         back_data  = parse_payload(request.data.get("back_data"))
         t_pose_data = parse_payload(request.data.get("t_pose_data"))
-
+        print("front_data")
+        print(front_data)
+        print("side_data")
+        print(side_data)
+        print("back_data")
+        print(back_data)
+        print("t_pose_data")
+        print(t_pose_data)
         metrics = analyze_posture(
-            front=front_data,
-            side=side_data,
-            back=back_data,
-            t_pose=t_pose_data
+            front={"landmarks": front_data},
+            side={"landmarks": side_data},
+            back={"landmarks": back_data},
+            t_pose={"landmarks": t_pose_data},
         )
 
         optimization = build_optimization_breakdown(metrics)
