@@ -31,6 +31,7 @@ local_settings.py
 apibackend/settings.py
 apibackend/
 fitnessbackend/
+requirements.txt
 
 # Environment variables
 .env

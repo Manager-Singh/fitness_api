@@ -85,6 +85,10 @@ def upsert_posture_questions(request):
         user=user,
         request_data=request.data
     )
+    subscription_status = check_subscription_or_response(user)
+
+    subscription_data = subscription_status.data
+    is_paid = subscription_data.get("is_paid", False)
 
     message = 'Posture Questions created successfully' if created else 'Posture Questions updated successfully'
     status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
@@ -95,6 +99,8 @@ def upsert_posture_questions(request):
             'id': user.id,
             'username': user.username,
             'email': user.email,
+            'is_paid':is_paid,
+            'subscription_data':subscription_data,
             'posture_questions': posture_question_data,
             'estimated_genetic_height_cm': genetic_estimate.estimated_height_cm
         }
