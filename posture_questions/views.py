@@ -447,13 +447,7 @@ def get_posture_questions(request):
 
 
     # Pass TeenProfile to height engine
-    response_data = get_height_view(
-        user=user,
-        profile=teen_profile,   # ✅ ALWAYS TeenProfile
-        is_paid=is_paid,
-        optimized_height_cm=optimized_height_cm,
-        total_score=score_summary.get("total_score", 0),
-    )
+    
 
     # ── 12. Projection adjustments ───────────────────────────
     optimized_estimated_genetic_height_cm = estimated_height_user + 5
@@ -498,6 +492,13 @@ def get_posture_questions(request):
     age = teen_profile.age_years
 
     if 13 <= age <= 20:
+        response_data = get_height_view(
+            user=user,
+            profile=teen_profile,   # ✅ ALWAYS TeenProfile
+            is_paid=is_paid,
+            optimized_height_cm=optimized_height_cm,
+            total_score=score_summary.get("total_score", 0),
+        )
         if is_paid:
             optimized_result = compute_optimized_height(teen_profile)
             max_height_cm = optimized_result["optimized_height_cm"]
@@ -505,6 +506,13 @@ def get_posture_questions(request):
             max_height_cm = genetic_estimate.estimated_height_cm
 
     elif age >= 21:
+        response_data = get_height_view(
+            user=user,
+            profile=teen_profile,   # ✅ ALWAYS TeenProfile
+            is_paid=is_paid,
+            optimized_height_cm=total_current_loss,
+            total_score=score_summary.get("total_score", 0),
+        )
         if is_paid:
             max_height_cm = (
                 teen_profile.current_height_cm +
