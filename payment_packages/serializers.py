@@ -128,37 +128,37 @@ class PaymentPackageSerializer(serializers.ModelSerializer):
         if not user:
             return False
 
-        if self._has_active_free_plan(user):
-            return obj.is_free
-
-        payment = Payment.objects.filter(
+        latest_payment = Payment.objects.filter(
             user=user,
-            package=obj,
             payment_status='succeeded'
         ).order_by('-created_at').first()
 
-        if not payment:
+        if not latest_payment:
             return False
 
-        expiry_date = payment.created_at + timedelta(days=30 * int(obj.duration))
-        return timezone.now() < expiry_date
+        expiry_date = latest_payment.created_at + timedelta(days=30 * int(latest_payment.package.duration))
+
+        if timezone.now() > expiry_date:
+            return False
+
+        return latest_payment.package_id == obj.id
 
     def get_days_left(self, obj):
         user = self._get_user()
         if not user:
             return 0
 
-        if self._has_active_free_plan(user) and not obj.is_free:
-            return 0
-
-        payment = Payment.objects.filter(
+        latest_payment = Payment.objects.filter(
             user=user,
-            package=obj,
             payment_status='succeeded'
         ).order_by('-created_at').first()
 
-        if not payment:
+        if not latest_payment:
             return 0
 
-        expiry_date = payment.created_at + timedelta(days=30 * int(obj.duration))
+        if latest_payment.package_id != obj.id:
+            return 0
+
+        expiry_date = latest_payment.created_at + timedelta(days=30 * int(latest_payment.package.duration))
+
         return max((expiry_date - timezone.now()).days, 0)
