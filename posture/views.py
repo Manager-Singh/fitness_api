@@ -1025,12 +1025,16 @@ from user_profile.models import UserProfile
 
 import base64, json, magic
 from openai import OpenAI
+from django.forms.models import model_to_dict
+import re
+from typing import Any, Dict
 
 from utils.posture_calculations import (
     parse_payload,
     analyze_posture,
     build_optimization_breakdown,
 )
+from utils.check_payment import check_subscription_or_response
 from utils.ai_analysis import save_ai_analysis_full_scan
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -1084,14 +1088,14 @@ class FullPostureAnalysisAPIView(APIView):
         side_data  = parse_payload(request.data.get("side_data"))
         back_data  = parse_payload(request.data.get("back_data"))
         t_pose_data = parse_payload(request.data.get("t_pose_data"))
-        print("front_data")
-        print(front_data)
-        print("side_data")
-        print(side_data)
-        print("back_data")
-        print(back_data)
-        print("t_pose_data")
-        print(t_pose_data)
+        # print("front_data")
+        # print(front_data)
+        # print("side_data")
+        # print(side_data)
+        # print("back_data")
+        # print(back_data)
+        # print("t_pose_data")
+        # print(t_pose_data)
         metrics = analyze_posture(
             front={"landmarks": front_data},
             side={"landmarks": side_data},
@@ -1149,9 +1153,28 @@ Return JSON ONLY:
         )
 
         ai = safe_json_loads(response.output_text)
+        nuser = request.user
+        profile = UserProfile.objects.get(user=nuser)
+        profile_dict = model_to_dict(profile)
+        subscription_status = check_subscription_or_response(user)
+        gender = profile_dict["gender"]
+        current_age = int(profile_dict.get("age"))
+
+        subscription_data = subscription_status.data
+        is_paid = subscription_data.get("is_paid", False)
 
         final_response = {
-            
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'gender':gender,
+                'age':current_age,
+                'is_paid':is_paid,
+                'subscription_data':subscription_data,
+                'posture_questions': posture_question_data,
+                'estimated_genetic_height_cm': genetic_estimate.estimated_height_cm
+            },
             "summary": {
                 "summary": ai["summary"].get("summary", ""),
                 "max_height_gain_inches": metrics["max_height_gain_inches"],

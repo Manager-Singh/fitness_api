@@ -58,7 +58,6 @@ def upsert_posture_questions(request):
     user = request.user
     profile = UserProfile.objects.get(user=user)
     profile_dict = model_to_dict(profile)
-    print('request', request.data)
     
     # Convert and extract safely
     try:
@@ -99,6 +98,8 @@ def upsert_posture_questions(request):
             'id': user.id,
             'username': user.username,
             'email': user.email,
+            'gender':gender,
+            'age':current_age,
             'is_paid':is_paid,
             'subscription_data':subscription_data,
             'posture_questions': posture_question_data,
