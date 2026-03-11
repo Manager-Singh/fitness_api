@@ -78,7 +78,7 @@ def get_height_view(user, profile, is_paid, optimized_height_cm=None,total_score
             "tier": "adult_paid",
             **adult_paid(
                 profile.current_height_cm,
-                profile.posture_loss_cm,
+                optimized_height_cm,
                 total_score,
             ),
             "can_rescan": True,
