@@ -1156,7 +1156,7 @@ Return JSON ONLY:
         nuser = request.user
         profile = UserProfile.objects.get(user=nuser)
         profile_dict = model_to_dict(profile)
-        subscription_status = check_subscription_or_response(user)
+        subscription_status = check_subscription_or_response(nuser)
         gender = profile_dict["gender"]
         current_age = int(profile_dict.get("age"))
 
@@ -1165,15 +1165,13 @@ Return JSON ONLY:
 
         final_response = {
             'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
+                'id': nuser.id,
+                'username': nuser.username,
+                'email': nuser.email,
                 'gender':gender,
                 'age':current_age,
                 'is_paid':is_paid,
-                'subscription_data':subscription_data,
-                'posture_questions': posture_question_data,
-                'estimated_genetic_height_cm': genetic_estimate.estimated_height_cm
+                'subscription_data':subscription_data
             },
             "summary": {
                 "summary": ai["summary"].get("summary", ""),
