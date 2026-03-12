@@ -10,23 +10,97 @@ from .serializers_leaderboard import LeaderboardEntrySerializer
 
 User = get_user_model()
 
+# class LeaderboardAPIView(APIView):
+#     """
+#     Returns leaderboard globally or filtered by routine_type.
+#     Current user always included at the top, with rank info.
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         routine_type = request.query_params.get("routine_type")
+
+#         # Base queryset: users with workout entries
+#         qs = User.objects.filter(workout_sessions__entries__isnull=False)
+
+#         if routine_type:
+#             qs = qs.filter(workout_sessions__user_routine__routine_type=routine_type)
+
+#         # Annotate with totals + global rank
+#         qs = qs.annotate(
+#             score=Sum("workout_sessions__entries__points"),
+#             sessions_completed=Count("workout_sessions", distinct=True),
+#             rank=Window(
+#                 expression=Rank(),
+#                 order_by=F("score").desc()
+#             )
+#         )
+
+#         # Top 20 leaderboard
+#         top_leaderboard = list(qs.order_by("-score")[:20])
+
+#         # Current user entry (with rank)
+#         try:
+#             current_user_entry = qs.get(id=request.user.id)
+#         except User.DoesNotExist:
+#             current_user_entry = None
+
+#         # If current user not in top 20, prepend them
+#         if current_user_entry and current_user_entry not in top_leaderboard:
+#             leaderboard = [current_user_entry] + top_leaderboard
+#         else:
+#             leaderboard = top_leaderboard
+
+#         serializer = LeaderboardEntrySerializer(leaderboard, many=True)
+#         return Response(serializer.data)
+
+
 class LeaderboardAPIView(APIView):
     """
-    Returns leaderboard globally or filtered by routine_type.
-    Current user always included at the top, with rank info.
+    Leaderboard filters:
+    TODAY
+    WEEK
+    MONTH
+    ALL
     """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        routine_type = request.query_params.get("routine_type")
 
-        # Base queryset: users with workout entries
+        routine_type = request.query_params.get("routine_type")
+        period = request.query_params.get("period", "all")
+
+        now = timezone.now()
+
         qs = User.objects.filter(workout_sessions__entries__isnull=False)
 
         if routine_type:
-            qs = qs.filter(workout_sessions__user_routine__routine_type=routine_type)
+            qs = qs.filter(
+                workout_sessions__user_routine__routine_type=routine_type
+            )
 
-        # Annotate with totals + global rank
+        # ---------- PERIOD FILTER ----------
+
+        if period == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            qs = qs.filter(workout_sessions__entries__created_at__gte=start)
+
+        elif period == "week":
+            start = now - timedelta(days=now.weekday())
+            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            qs = qs.filter(workout_sessions__entries__created_at__gte=start)
+
+        elif period == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            qs = qs.filter(workout_sessions__entries__created_at__gte=start)
+
+        # ALL = no filter
+
+        # ---------- SCORE + RANK ----------
+
         qs = qs.annotate(
             score=Sum("workout_sessions__entries__points"),
             sessions_completed=Count("workout_sessions", distinct=True),
@@ -36,24 +110,21 @@ class LeaderboardAPIView(APIView):
             )
         )
 
-        # Top 20 leaderboard
         top_leaderboard = list(qs.order_by("-score")[:20])
 
-        # Current user entry (with rank)
         try:
             current_user_entry = qs.get(id=request.user.id)
         except User.DoesNotExist:
             current_user_entry = None
 
-        # If current user not in top 20, prepend them
         if current_user_entry and current_user_entry not in top_leaderboard:
             leaderboard = [current_user_entry] + top_leaderboard
         else:
             leaderboard = top_leaderboard
 
         serializer = LeaderboardEntrySerializer(leaderboard, many=True)
-        return Response(serializer.data)
 
+        return Response(serializer.data)
 
 # class LeaderboardAPIView(APIView):
 #     permission_classes = [IsAuthenticated]
