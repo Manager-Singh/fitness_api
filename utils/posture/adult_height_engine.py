@@ -18,6 +18,10 @@ def adult_paid(
     posture_loss_cm,
     total_points,
 ):
+    current_height_cm = safe_float(current_height_cm, 0)
+    posture_loss_cm = safe_float(posture_loss_cm, 0)
+    total_points = safe_int(total_points, 0)
+
     recovered = total_points * POINT_TO_CM
     recovered = min(recovered, posture_loss_cm)
 
