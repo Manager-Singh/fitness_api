@@ -107,3 +107,38 @@ def ai_chat(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def chat_history(request):
+    user = request.user
+
+    page = int(request.GET.get("page", 1))
+    limit = int(request.GET.get("limit", 20))
+
+    offset = (page - 1) * limit
+
+    qs = ChatMessage.objects.filter(user=user).order_by("-created_at")
+
+    total = qs.count()
+
+    chats = qs[offset:offset + limit]
+
+    data = [
+        {
+            "id": chat.id,
+            "user_message": chat.user_message,
+            "ai_reply": chat.ai_response,
+            "created_at": chat.created_at
+        }
+        for chat in chats
+    ]
+
+    return Response({
+        "success": True,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "data": data
+    })
