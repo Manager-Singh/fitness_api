@@ -25,11 +25,11 @@ class GeneticHeightService:
     def _create_genetic_estimate(user, profile_dict: Dict[str, Any]) -> GeneticHeightEstimate:
         """Create new genetic height estimate"""
         try:
-            father_cm = float(profile_dict.get("father_height_cm", 0.0))
-            mother_cm = float(profile_dict.get("mother_height_cm", 0.0))
+            father_cm = float(profile_dict.get("father_height_cm") or 0)
+            mother_cm = float(profile_dict.get("mother_height_cm") or 0)
             gender = (profile_dict.get("gender") or "").strip().lower()
-            current_age = int(profile_dict.get("age", 0))
-            current_height = float(profile_dict.get("current_height_cm", 0.0))
+            current_age = int(profile_dict.get("age") or 0)
+            current_height = float(profile_dict.get("current_height_cm") or 0)
         except (ValueError, TypeError):
             raise ValueError("Invalid data in profile for genetic calculation.")
 
@@ -95,9 +95,13 @@ class GeneticHeightService:
     def upsert_genetic_estimate(user, father_height: float, mother_height: float, 
                                gender: str, current_age: int, current_height: float) -> GeneticHeightEstimate:
         """Create or update genetic estimate with growth projections"""
-        estimated_height = GeneticHeightService.calculate_estimated_genetic_height(
-            father_height, mother_height, gender
-        )
+        # If parents height not available
+        if father_height is None or mother_height is None:
+            estimated_height = current_height+2
+        else:
+            estimated_height = GeneticHeightService.calculate_estimated_genetic_height(
+                father_height, mother_height, gender
+            )
 
         genetic_estimate, _ = GeneticHeightEstimate.objects.update_or_create(
             user=user,

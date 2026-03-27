@@ -174,4 +174,5 @@ def compute_optimized_height(p: TeenProfile):
         "growth_window_boost_cm": round(growth_window_boost_cm, 1),
         "posture_potential_cm": round(posture_cm, 1),
         "optimized_height_cm": round(optimized_height_cm, 1),
+        "mph_height_cm": round(mph, 1),
     }

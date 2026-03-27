@@ -58,14 +58,16 @@ def upsert_posture_questions(request):
     user = request.user
     profile = UserProfile.objects.get(user=user)
     profile_dict = model_to_dict(profile)
-    
+    print(profile_dict)
     # Convert and extract safely
     try:
-        father_height = float(profile_dict["father_height_cm"])
-        mother_height = float(profile_dict["mother_height_cm"])
-        gender = profile_dict["gender"]
         current_age = int(profile_dict.get("age"))
+        gender = profile_dict["gender"]
         current_height = float(profile_dict.get("current_height_cm"))
+
+        father_height = float(profile_dict.get("father_height_cm")) if current_age < 21 else None
+        mother_height = float(profile_dict.get("mother_height_cm")) if current_age < 21 else None
+
     except (TypeError, ValueError, KeyError) as e:
         return Response({'error': f'Invalid profile data: {e}'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -78,7 +80,8 @@ def upsert_posture_questions(request):
         current_age=current_age,
         current_height=current_height
     )
-
+    print(genetic_estimate)
+    print(request.data)
     # ───── 2. Upsert Posture Questions using service ─────
     posture_question_data, created = PostureQuestionService.upsert_posture_questions(
         user=user,
@@ -389,8 +392,12 @@ def get_posture_questions(request):
     genetic_diff, genetic_status = GrowthProjectionService.calculate_genetic_status(
         current_cm_val, estimated_height_user
     )
-
+    subscription_data = subscription_status.data
+    is_paid = subscription_data.get("is_paid", False)
+    streaks = get_user_streaks(user)
     # ── 8. Posture AI analysis ────────────────────────────
+
+    
     ai_analysis, optimization_breakdown = PostureAnalysisService.get_posture_analysis(
         user=user,
         profile_dict=profile_dict,
@@ -404,9 +411,7 @@ def get_posture_questions(request):
         user.profile_step = "completed"
         user.save(update_fields=["profile_step"])
 
-    subscription_data = subscription_status.data
-    is_paid = subscription_data.get("is_paid", False)
-    streaks = get_user_streaks(user)
+    
 
      # ───────────────────────────────────────────────────────
     # ✅ CONVERT TO TEEN PROFILE (AI DOMAIN MODEL)
@@ -418,15 +423,24 @@ def get_posture_questions(request):
 
     # ── 6. Optimized Height Calculation ────────────────────
     optimized_height_cm = None
-
+    optimized_result = compute_optimized_height(teen_profile)
     if is_paid and 13 <= teen_profile.age_years <= 20:
-        optimized_result = compute_optimized_height(teen_profile)
         optimized_height_cm = optimized_result.get("optimized_height_cm")
-
+        genetic_height_cm = genetic_estimate.estimated_height_cm
+    else:
+        optimized_height_cm = optimized_result.get("mph_height_cm")+2
+        genetic_height_cm = optimized_result.get("mph_height_cm")
+        
+   
     current_height_cm = teen_profile.current_height_cm
-
+    print('optimized_height_cm')
+    print(optimized_height_cm)
+    print('current_height_cm')
+    print(current_height_cm)
+    print('genetic_height_cm')
+    print(genetic_height_cm)
     # Base genetic estimate
-    genetic_height_cm = genetic_estimate.estimated_height_cm
+    
 
     # Lower conservative estimate (2cm below genetic)
     lower_bound_cm = genetic_height_cm - 2
@@ -554,8 +568,8 @@ def get_posture_questions(request):
                 1
             ),
             "growth_projection": {
-                "father_height_cm": float(profile_dict.get("father_height_cm", 0.0)),
-                "mother_height_cm": float(profile_dict.get("mother_height_cm", 0.0)),
+                "father_height_cm": float(profile_dict.get("father_height_cm") or 0.0),
+                "mother_height_cm": float(profile_dict.get("mother_height_cm") or 0.0),
                 "current_height_cm": current_cm_val,
                 "optimized_estimated_genetic_height_cm": optimized_estimated_genetic_height_cm,
                 "estimated_genetic_height_cm": estimated_height_user,
