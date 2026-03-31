@@ -180,7 +180,7 @@ def _leaderboard_qs(routine_type=None, until_date=None):
     return qs
 
 
-def get_user_leaderboard_rank(user, routine_type=None):
+def get_user_leaderboard_rank(user, subscription_data, routine_type=None):
     """
     Returns:
     - total rank
@@ -245,7 +245,8 @@ def get_user_leaderboard_rank(user, routine_type=None):
 
     elif total_rank and not yesterday_rank:
         direction = "new"
-
+    print('subscription_data')
+    print(subscription_data)
     data = {
         "total_rank": total_rank or 0,
         "my_rank": total_rank or 0,

@@ -5,7 +5,7 @@ from workouts.models import WorkoutSession
 from .leaderboard import get_user_leaderboard_rank
 
 
-def get_user_streaks(user):
+def get_user_streaks(user,subscription_data):
     """
     Returns all streak-related data in one call.
     """
@@ -75,6 +75,7 @@ def get_user_streaks(user):
 
     leaderboard_data = get_user_leaderboard_rank(
         user,
+        subscription_data,
         routine_type=None   # or "POSTURE" / "HGH" if needed
     )
     return {

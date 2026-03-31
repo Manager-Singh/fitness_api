@@ -87,6 +87,12 @@ def upsert_posture_questions(request):
         user=user,
         request_data=request.data
     )
+    nrescan = request.data.get("lastscan")
+    if nrescan == "yes":
+        mprofile = UserProfile.objects.get(user=user)
+        mprofile.last_scan = timezone.now()
+        mprofile.save()
+
     subscription_status = check_subscription_or_response(user)
 
     subscription_data = subscription_status.data
@@ -394,7 +400,7 @@ def get_posture_questions(request):
     )
     subscription_data = subscription_status.data
     is_paid = subscription_data.get("is_paid", False)
-    streaks = get_user_streaks(user)
+    streaks = get_user_streaks(user,subscription_data)
     # ── 8. Posture AI analysis ────────────────────────────
 
     

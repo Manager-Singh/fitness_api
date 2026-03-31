@@ -1162,7 +1162,11 @@ Return JSON ONLY:
 
         subscription_data = subscription_status.data
         is_paid = subscription_data.get("is_paid", False)
-
+        nrescan = request.data.get("lastscan")
+        if nrescan == "yes":
+            mprofile = UserProfile.objects.get(user=user)
+            mprofile.last_scan = timezone.now()
+            mprofile.save()
         final_response = {
             'user': {
                 'id': nuser.id,
