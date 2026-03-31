@@ -1036,6 +1036,7 @@ from utils.posture_calculations import (
 )
 from utils.check_payment import check_subscription_or_response
 from utils.ai_analysis import save_ai_analysis_full_scan
+from datetime import timedelta
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 

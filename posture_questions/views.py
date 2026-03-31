@@ -51,6 +51,8 @@ from posture_questions.services.routine_service import RoutineService
 from posture_questions.services.teen_height_optimization_service import TeenHeightOptimizationService
 from typing import Dict, Any, List
 
+from datetime import timedelta
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
