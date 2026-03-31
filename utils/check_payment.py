@@ -47,25 +47,119 @@ from rest_framework import status
 from user_profile.models import Payment
 
 
-def check_subscription_or_response(user):
-    """
-    ✅ Check if user has an active subscription (free or paid).
-    Free vs Paid is determined by package.is_free
-    """
+# def check_subscription_or_response(user):
+#     """
+#     ✅ Check if user has an active subscription (free or paid).
+#     Free vs Paid is determined by package.is_free
+#     """
+#     now = timezone.now()
 
+#     # Trial check
+#     is_trial = False
+#     trial_start = user.trial_start
+#     trial_end = user.trial_end
+
+#     if trial_start and trial_end:
+#         if trial_start <= now <= trial_end:
+#             is_trial = True
+
+#     latest_payment = (
+#         Payment.objects.filter(
+#             user=user,
+#             payment_status="succeeded"   # ✅ FIX
+#         )
+#         .select_related("package")
+#         .order_by("-created_at")
+#         .first() 
+#     )
+
+#     print(latest_payment)
+
+#     # ❌ No subscription
+#     if not latest_payment:
+#         return Response({
+#             "expired": True,
+#             "days_left": 0,
+#             "plan": None,
+#             "plan_type": None,
+#             "is_paid": None,
+#             "is_trial": is_trial,
+#             "trial_start": trial_start,
+#             "trial_end": trial_end,
+#             "message": "No active subscription found."
+#         }, status=status.HTTP_403_FORBIDDEN)
+
+#     package = latest_payment.package
+
+#     # Safe duration
+#     try:
+#         duration_months = int(package.duration)
+#     except (ValueError, TypeError):
+#         duration_months = 3
+
+#     expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
+#     now = timezone.now()
+
+#     # ❌ Expired
+#     if expiry_date < now:
+#         return Response({
+#             "expired": True,
+#             "days_left": 0,
+#             "plan": package.name,
+#             "plan_type": "Free" if package.is_free else "Paid",
+#             "is_paid" : not package.is_free,
+#             "message": f"Your {package.name} plan has expired."
+#         }, status=status.HTTP_403_FORBIDDEN)
+
+#     # ✅ Active
+#     days_left = (expiry_date - now).days
+
+#     return Response({
+#         "expired": False,
+#         "days_left": days_left,
+#         "plan": package.name,
+#         "plan_type": "Free" if package.is_free else "Paid",
+#         "is_paid" : not package.is_free,
+#         "duration": package.get_duration_display(),
+#         "message": f"{'Free' if package.is_free else 'Paid'} subscription active ({days_left} days left)."
+#     }, status=status.HTTP_200_OK)
+
+
+def check_subscription_or_response(user):
+
+    now = timezone.now()
+
+    trial_start = user.trial_start
+    trial_end = user.trial_end
+
+    # ✅ Trial check
+    if trial_start and trial_end and trial_start <= now <= trial_end:
+
+        days_left = (trial_end - now).days
+
+        return Response({
+            "expired": False,
+            "days_left": days_left,
+            "plan": "Trial",
+            "plan_type": "Free",
+            "is_paid": False,
+            "is_trial": True,
+            "trial_start": trial_start,
+            "trial_end": trial_end,
+            "message": f"Trial active ({days_left} days left)."
+        }, status=status.HTTP_200_OK)
+
+    # 🔎 Check subscription
     latest_payment = (
         Payment.objects.filter(
             user=user,
-            payment_status="succeeded"   # ✅ FIX
+            payment_status="succeeded"
         )
         .select_related("package")
         .order_by("-created_at")
-        .first() 
+        .first()
     )
 
-    print(latest_payment)
-
-    # ❌ No subscription
     if not latest_payment:
         return Response({
             "expired": True,
@@ -73,32 +167,34 @@ def check_subscription_or_response(user):
             "plan": None,
             "plan_type": None,
             "is_paid": None,
+            "is_trial": False,
+            "trial_start": trial_start,
+            "trial_end": trial_end,
             "message": "No active subscription found."
         }, status=status.HTTP_403_FORBIDDEN)
 
     package = latest_payment.package
 
-    # Safe duration
     try:
         duration_months = int(package.duration)
     except (ValueError, TypeError):
         duration_months = 3
 
     expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
-    now = timezone.now()
 
-    # ❌ Expired
     if expiry_date < now:
         return Response({
             "expired": True,
             "days_left": 0,
             "plan": package.name,
             "plan_type": "Free" if package.is_free else "Paid",
-            "is_paid" : not package.is_free,
+            "is_paid": not package.is_free,
+            "is_trial": False,
+            "trial_start": trial_start,
+            "trial_end": trial_end,
             "message": f"Your {package.name} plan has expired."
         }, status=status.HTTP_403_FORBIDDEN)
 
-    # ✅ Active
     days_left = (expiry_date - now).days
 
     return Response({
@@ -106,7 +202,10 @@ def check_subscription_or_response(user):
         "days_left": days_left,
         "plan": package.name,
         "plan_type": "Free" if package.is_free else "Paid",
-        "is_paid" : not package.is_free,
+        "is_paid": not package.is_free,
+        "is_trial": False,
+        "trial_start": trial_start,
+        "trial_end": trial_end,
         "duration": package.get_duration_display(),
         "message": f"{'Free' if package.is_free else 'Paid'} subscription active ({days_left} days left)."
     }, status=status.HTTP_200_OK)

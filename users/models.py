@@ -29,6 +29,10 @@ class User(AbstractUser):
     social_auth_code = models.CharField(max_length=255, null=True, blank=True)
     verified = models.DateTimeField(null=True, blank=True)
     fcm_token= models.TextField(blank=True, null=True)
+    trial_start = models.DateTimeField(null=True, blank=True)
+    trial_end = models.DateTimeField(null=True, blank=True)
+
+    
      
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']  # username still exists but email is used for login

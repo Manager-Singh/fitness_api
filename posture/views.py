@@ -1167,6 +1167,15 @@ Return JSON ONLY:
             mprofile = UserProfile.objects.get(user=user)
             mprofile.last_scan = timezone.now()
             mprofile.save()
+            tuser = request.user
+
+            if tuser.trial_start is None:
+                tuser.trial_start = timezone.now()
+
+            if tuser.trial_end is None:
+                tuser.trial_end = tuser.trial_start + timedelta(days=7)
+
+            tuser.save()
         final_response = {
             'user': {
                 'id': nuser.id,
