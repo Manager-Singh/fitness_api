@@ -87,7 +87,37 @@ class PostureAnalysisService:
 
         except UserPosturalOptimizationData.DoesNotExist:
             prompt = PostureAnalysisService._build_analysis_prompt(user, profile_dict)
-            gpt_response = generate_chatgpt_response(prompt, system_role="You are a health and posture expert.")
+            # gpt_response = generate_chatgpt_response(prompt, system_role="You are a health and posture expert.")
+
+            #  prompt = PostureAnalysisService._build_analysis_prompt(user, profile_dict)
+
+            MAX_RETRIES = 5
+            gpt_response = None
+
+            for attempt in range(MAX_RETRIES):
+
+                gpt_response = generate_chatgpt_response(
+                    prompt,
+                    system_role="You are a health and posture expert."
+                )
+
+                if not gpt_response:
+                    continue
+
+                posture = gpt_response.get("postural_optimization", {})
+
+                spinal = float(posture.get("spinal_compression", 0) or 0)
+                collapse = float(posture.get("posture_collapse", 0) or 0)
+                pelvic = float(posture.get("pelvic_tilt_back", 0) or 0)
+                leg = float(posture.get("leg_hamstring", 0) or 0)
+
+                values = [spinal, collapse, pelvic, leg]
+                print('attempt')
+                print(attempt)
+                # Stop retry if any value > 0
+                if any(v > 0 for v in values):
+                    break
+
             
             # Update last scan time
             from user_profile.models import UserProfile
