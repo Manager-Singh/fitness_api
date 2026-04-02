@@ -391,8 +391,10 @@ def get_posture_questions(request):
     projections = GrowthProjectionService.get_projection_data(genetic_estimate)
     print('projections\n')
     print(projections)
-    score_summary = get_user_score_summary(user=user)
-    today_total_score = get_user_score_summary(user=user, mode="today_total_score")
+    subscription_data = subscription_status.data
+
+    score_summary = get_user_score_summary(user=user,subscription_data=subscription_data)
+    today_total_score = get_user_score_summary(user=user,subscription_data=subscription_data, mode="today_total_score")
 
     # ── 6. Date handling ─────────────────────
     date_str = request.query_params.get("date")
@@ -410,7 +412,6 @@ def get_posture_questions(request):
     genetic_diff, genetic_status = GrowthProjectionService.calculate_genetic_status(
         current_cm_val, estimated_height_user
     )
-    subscription_data = subscription_status.data
     is_paid = subscription_data.get("is_paid", False)
     streaks = get_user_streaks(user,subscription_data)
     # ── 8. Posture AI analysis ────────────────────────────
@@ -490,7 +491,7 @@ def get_posture_questions(request):
         optimized_estimated_genetic_height_cm = current_cm_val + 5
         unoptimized_estimated_genetic_height_cm = current_cm_val - 5
 
-    profile_fields = get_profile_fields(profile_dict, ["age", "gender"], default=None)
+    profile_fields = get_profile_fields(profile_dict, ["age", "gender", "g_p_height_change"], default=None)
 
     total_max_loss = sum(
         segment["max_loss_cm"]

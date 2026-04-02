@@ -481,7 +481,7 @@ import calendar
 from utils.age import get_user_age
 
 
-def get_user_score_summary(user, mode=None):
+def get_user_score_summary(user, subscription_data, mode=None):
     today = date.today()
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
@@ -622,6 +622,20 @@ def get_user_score_summary(user, mode=None):
 
     if mode == "today_total_score":
         return today_summary.get("total_score", 0)
+
+    if subscription_data.get("is_trial") and not df.empty:
+
+        trial_start = subscription_data.get("trial_start")
+        trial_end = subscription_data.get("trial_end")
+
+        if trial_start and trial_end:
+            trial_start = pd.to_datetime(trial_start).normalize()
+            trial_end = pd.to_datetime(trial_end).normalize()
+
+            df = df[
+                (df["entry_date"] >= trial_start) &
+                (df["entry_date"] <= trial_end)
+            ]
 
     # overall_summary = summarize(df, "year")
     # total_posture_gain = sum(item["total_score"] for item in overall_summary) * 0.001

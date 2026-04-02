@@ -213,6 +213,10 @@ def get_user_leaderboard_rank(user, subscription_data, routine_type=None):
         total_rank = None
         total_score = 0
         sessions_completed = 0
+    # If user not in leaderboard
+    if not total_rank:
+        total_users = User.objects.count()
+        total_rank = total_users + 1
 
     # ─────────────────────────────
     # YESTERDAY RANK
@@ -245,6 +249,8 @@ def get_user_leaderboard_rank(user, subscription_data, routine_type=None):
 
     elif total_rank and not yesterday_rank:
         direction = "new"
+    print('user')
+    print(user)
     print('subscription_data')
     print(subscription_data)
     data = {
