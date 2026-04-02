@@ -632,6 +632,9 @@ def get_user_score_summary(user, subscription_data, mode=None):
             trial_start = pd.to_datetime(trial_start).normalize()
             trial_end = pd.to_datetime(trial_end).normalize()
 
+            # Convert entry_date to datetime
+            df["entry_date"] = pd.to_datetime(df["entry_date"]).dt.normalize()
+
             df = df[
                 (df["entry_date"] >= trial_start) &
                 (df["entry_date"] <= trial_end)
