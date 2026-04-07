@@ -445,19 +445,21 @@ def get_posture_questions(request):
     optimized_result = compute_optimized_height(teen_profile)
     if is_paid and 13 <= teen_profile.age_years <= 20:
         optimized_height_cm = optimized_result.get("optimized_height_cm")
-        genetic_height_cm = genetic_estimate.estimated_height_cm
+        genetic_height_cm = optimized_result.get("mph_height_cm")
+        # optimized_height_cm
+        # genetic_height_cm = genetic_estimate.estimated_height_cm
     else:
         optimized_height_cm = optimized_result.get("mph_height_cm")+2
         genetic_height_cm = optimized_result.get("mph_height_cm")
         
    
     current_height_cm = teen_profile.current_height_cm
-    print('optimized_height_cm')
-    print(optimized_height_cm)
-    print('current_height_cm')
-    print(current_height_cm)
-    print('genetic_height_cm')
-    print(genetic_height_cm)
+    # print('optimized_height_cm')
+    # print(optimized_height_cm)
+    # print('current_height_cm')
+    # print(current_height_cm)
+    # print('genetic_height_cm')
+    # print(genetic_height_cm)
     # Base genetic estimate
     
 
@@ -601,6 +603,7 @@ def get_posture_questions(request):
             },
             "streaks": streaks,
             "response_data": response_data,
+            "optimized_result":optimized_result
         },
         status=status.HTTP_200_OK,
     )
