@@ -1165,7 +1165,7 @@ Return JSON ONLY:
         is_paid = subscription_data.get("is_paid", False)
         nrescan = request.data.get("lastscan")
         if nrescan == "yes":
-            mprofile = UserProfile.objects.get(user=user)
+            mprofile = UserProfile.objects.get(user=nuser)
             mprofile.last_scan = timezone.now()
             mprofile.save()
             tuser = request.user

@@ -28,6 +28,10 @@ def compute_posture_potential_cm(posture_breakdown: dict) -> float:
     if not posture_breakdown:
         return 0.0
 
+    
+    print('posture_breakdown')
+    print(posture_breakdown)
+
     weights = {
         "spinal_compression": 1.0,
         "posture_collapse": 0.8,
@@ -41,5 +45,9 @@ def compute_posture_potential_cm(posture_breakdown: dict) -> float:
         loss = safe_float(zone_data.get("current_loss_cm", 0))
         weight = weights.get(zone, 1.0)
         total += loss * weight
+
+    
+    print('posture_potential_cm')
+    print(total)
 
     return clamp(total, 0.0, 4.0)
