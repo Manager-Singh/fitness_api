@@ -177,7 +177,6 @@
 #         "mph_height_cm": round(mph, 1),
 #     }
 
-
 from dataclasses import dataclass
 from typing import Literal, Optional
 from datetime import datetime
@@ -194,7 +193,7 @@ LooksStage = Literal["younger", "same", "older"]
 
 
 # =====================================================
-# INPUT MODEL
+# PROFILE MODEL
 # =====================================================
 @dataclass
 class TeenProfile:
@@ -227,32 +226,43 @@ def clamp(v, lo, hi):
 def safe_float(v, default=0.0):
     try:
         return float(v)
-    except (TypeError, ValueError):
+    except:
         return default
 
 
 def compute_age_decimal(p: TeenProfile):
-    return p.age_years + (p.age_months / 12.0)
+    return p.age_years + (p.age_months / 12)
 
 
 # =====================================================
-# 1️⃣ MID-PARENT HEIGHT
+# VALIDATION
+# =====================================================
+def validate_height(height):
+    return clamp(height, 80, 220)
+
+
+def validate_parent_height(height):
+    return clamp(height, 140, 210)
+
+
+# =====================================================
+# MID PARENT HEIGHT
 # =====================================================
 def compute_mph(sex, father_cm, mother_cm):
 
-    father_cm = safe_float(father_cm)
-    mother_cm = safe_float(mother_cm)
+    father_cm = validate_parent_height(safe_float(father_cm))
+    mother_cm = validate_parent_height(safe_float(mother_cm))
 
     if sex == "male":
         return (father_cm + mother_cm + 13) / 2
-
-    return (father_cm + mother_cm - 13) / 2
+    else:
+        return (father_cm + mother_cm - 13) / 2
 
 
 # =====================================================
-# 2️⃣ BIOLOGICAL AGE MODIFIER
+# BIO AGE MODIFIER
 # =====================================================
-def compute_bio_age_modifier(p: TeenProfile) -> float:
+def compute_bio_age_modifier(p):
 
     score = 0
 
@@ -281,22 +291,11 @@ def compute_bio_age_modifier(p: TeenProfile) -> float:
     elif p.looks_vs_peers == "older":
         score -= 1
 
-    if score >= 3:
-        return 3.0
-    if score == 2:
-        return 2.0
-    if score == 1:
-        return 1.0
-    if score == 0:
-        return 0.0
-    if score == -1:
-        return -1.0
-
-    return -2.0
+    return clamp(score, -2, 3)
 
 
 # =====================================================
-# 3️⃣ REMAINING GROWTH MODEL
+# REMAINING GROWTH
 # =====================================================
 def compute_remaining_growth(age, sex):
 
@@ -315,9 +314,9 @@ def compute_remaining_growth(age, sex):
 
 
 # =====================================================
-# 4️⃣ GROWTH SCORE
+# GROWTH SCORE
 # =====================================================
-def compute_growth_score(p: TeenProfile):
+def compute_growth_score(p):
 
     score = 0
 
@@ -342,11 +341,44 @@ def compute_growth_score(p: TeenProfile):
 
 
 # =====================================================
-# 5️⃣ FINAL HEIGHT PREDICTION
+# EXPECTED HEIGHT FROM MPH
+# =====================================================
+def expected_height_from_mph(mph, age, sex):
+
+    if sex == "male":
+        adult_age = 21
+    else:
+        adult_age = 18
+
+    ratio = clamp(age / adult_age, 0, 1)
+
+    return mph * ratio
+
+
+# =====================================================
+# MPH TRUST SCORE
+# =====================================================
+def compute_mph_weight(current_height, expected_height):
+
+    diff = abs(current_height - expected_height)
+
+    if diff < 10:
+        return 0.7
+
+    if diff < 25:
+        return 0.5
+
+    return 0.2
+
+
+# =====================================================
+# FINAL HEIGHT PREDICTION
 # =====================================================
 def compute_optimized_height(p: TeenProfile):
 
     age = compute_age_decimal(p)
+
+    current_height = validate_height(p.current_height_cm)
 
     mph = compute_mph(
         p.sex,
@@ -354,7 +386,7 @@ def compute_optimized_height(p: TeenProfile):
         p.mother_height_cm
     )
 
-    bio_age_cm = compute_bio_age_modifier(p)
+    bio_modifier = compute_bio_age_modifier(p)
 
     remaining_growth = compute_remaining_growth(
         age,
@@ -365,17 +397,33 @@ def compute_optimized_height(p: TeenProfile):
 
     growth_gain = remaining_growth * growth_score
 
-    posture_cm = clamp(
+    posture_gain = clamp(
         safe_float(p.posture_potential_cm),
-        0.0,
-        4.0
+        0,
+        4
+    )
+
+    growth_prediction = (
+        current_height
+        + growth_gain
+        + posture_gain
+        + bio_modifier
+    )
+
+    expected_height = expected_height_from_mph(
+        mph,
+        age,
+        p.sex
+    )
+
+    mph_weight = compute_mph_weight(
+        current_height,
+        expected_height
     )
 
     predicted_height = (
-        p.current_height_cm
-        + growth_gain
-        + posture_cm
-        + bio_age_cm
+        mph * mph_weight
+        + growth_prediction * (1 - mph_weight)
     )
 
     genetic_min = mph - 8.5
@@ -387,19 +435,26 @@ def compute_optimized_height(p: TeenProfile):
         genetic_max
     )
 
+    if p.sex == "male":
+        predicted_height = clamp(predicted_height, 120, 210)
+    else:
+        predicted_height = clamp(predicted_height, 120, 195)
+
     return {
 
-        "current_height_cm": round(p.current_height_cm, 1),
+        "current_height_cm": round(current_height, 1),
 
         "growth_gain_cm": round(growth_gain, 1),
 
-        "bio_age_modifier_cm": round(bio_age_cm, 1),
+        "posture_gain_cm": round(posture_gain, 1),
 
-        "posture_potential_cm": round(posture_cm, 1),
-
-        "optimized_height_cm": round(predicted_height, 1),
+        "bio_age_modifier_cm": round(bio_modifier, 1),
 
         "mph_height_cm": round(mph, 1),
+
+        "mph_weight": round(mph_weight, 2),
+
+        "optimized_height_cm": round(predicted_height, 1),
 
         "genetic_range_cm": [
             round(genetic_min, 1),
