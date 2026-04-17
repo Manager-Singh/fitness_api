@@ -1,0 +1,84 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block content %}
+  <div class="content">
+    <h1>{{ title }}</h1>
+
+    <div class="module">
+      <h2>Run</h2>
+      <ul>
+        <li><strong>ID:</strong> {{ run.id }}</li>
+        <li><strong>Status:</strong> {{ run.status }}</li>
+        <li><strong>Created at:</strong> {{ run.created_at }}</li>
+        <li><strong>Created by:</strong> {{ run.created_by|default:"-" }}</li>
+        <li><strong>Target user:</strong> {{ run.target_user.email|default:run.target_user.id }} (id={{ run.target_user.id }})</li>
+        <li><strong>Action:</strong> {{ params.action|default:"seed" }}</li>
+        <li><strong>Date:</strong> {{ params.date }}</li>
+        <li><strong>Previous days:</strong> {{ params.days|default:"0" }}</li>
+        <li><strong>Variant:</strong> {{ params.variant|default:"auto" }}</li>
+        <li><strong>Include scan:</strong> {{ params.include_scan }}</li>
+      </ul>
+    </div>
+
+    <div class="module">
+      <h2>Tables affected</h2>
+      <ul>
+        {% for model, table in tables.items %}
+          <li><strong>{{ model }}</strong>: <code>{{ table }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="module">
+      <h2>What was generated / deleted</h2>
+      {% if result.generated_recipe %}
+        <p><strong>Recipe</strong></p>
+        <pre style="white-space: pre-wrap;">{{ result.generated_recipe|safe }}</pre>
+      {% endif %}
+
+      {% if result.scan_created is not None %}
+        <p><strong>Scan reports created:</strong> {{ result.scan_created }}</p>
+      {% endif %}
+      {% if result.deleted_scan_reports is not None %}
+        <p><strong>Scan reports deleted:</strong> {{ result.deleted_scan_reports }}</p>
+      {% endif %}
+
+      {% if days %}
+        <table class="adminlist">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Deleted</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in days %}
+              <tr>
+                <td>{{ row.date }}</td>
+                <td><pre style="margin:0; white-space: pre-wrap;">{{ row.deleted }}</pre></td>
+                <td><pre style="margin:0; white-space: pre-wrap;">{{ row.created }}</pre></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No per-day log found for this run.</p>
+      {% endif %}
+    </div>
+
+    <div class="submit-row">
+      {% if params.action|default:"seed" == "seed" %}
+        <form method="post" action="{{ delete_url }}" style="display:inline;">
+          {% csrf_token %}
+          <input type="submit" class="deletelink" value="Delete data for this run"
+                 onclick="return confirm('Delete seeded data for this user and date range? This removes workout/nutrition logs in the range.');">
+        </form>
+      {% endif %}
+      <a class="button" href="../change/">Back to run</a>
+      <a class="button" href="../">Back to list</a>
+    </div>
+  </div>
+{% endblock %}
+

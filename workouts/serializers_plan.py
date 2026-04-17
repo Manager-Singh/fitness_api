@@ -8,6 +8,7 @@ Workout-plan serializers
 from django.apps import apps
 from django.utils import timezone
 from rest_framework import serializers
+from utils.exercise_library import section6_display_copy_for_exercise
 
 # ── lazy model look-ups (avoids circular imports) ───────────────────────
 Exercise         = apps.get_model("workouts", "Exercise")
@@ -43,13 +44,14 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
 
     # NEW ▶︎ has the user completed this exercise today?
     completed = serializers.SerializerMethodField()
+    section6_display_copy = serializers.SerializerMethodField()
 
     class Meta:
         model  = VariantExercise
         fields = (
             "id", "name","short_name", "points", "category", "image", "description",
             "order", "tier",'type', "sets", "qty_min", "qty_max", "unit",
-            "completed",
+            "completed", "section6_display_copy",
         )
 
     # helper --------------------------------------------------------------
@@ -70,9 +72,11 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
         return WorkoutEntry.objects.filter(
             session__user=request.user,
             session__date=today,
-            session__routine_variant=obj.variant,
             exercise=obj.exercise,
         ).exists()
+
+    def get_section6_display_copy(self, obj):
+        return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
 
 
 # ─────────────────────────────────────────────────────────────────────────

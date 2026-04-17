@@ -8,6 +8,7 @@ from workouts.models import Track
 from .models import RoutineVariant
 from .serializers_plan import RoutinePlanSerializer
 from utils.age import get_user_age
+from utils.check_payment import check_subscription_or_response
 
 
 # class MyWorkoutPlanView(APIView):
@@ -59,6 +60,16 @@ class MyWorkoutPlanView(APIView):
             age = get_user_age(request.user)
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        subscription_data = check_subscription_or_response(request.user).data
+        if age >= 21 and not bool(subscription_data.get("is_paid", False)):
+            return Response(
+                {
+                    "detail": "Workout plan is locked for free adult accounts.",
+                    "paywall_required": True,
+                    "gate": "adult_diagnosis_gate",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # input: 'posture' or 'hgh'
         track_group = request.query_params.get("track")

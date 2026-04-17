@@ -7,8 +7,12 @@ from posture.models import PostureReport
 from posture_analysis.models import UserPosturalOptimizationData
 from posture_analysis.serializers import UserPosturalOptimizationDataSerializer
 from utils.chatgpt_service import generate_chatgpt_response
-from utils.ai_analysis import save_ai_analysis
+from utils.ai_analysis import save_ai_text_analysis
 from utils.posture_optimizer import calculate_optimization_breakdown
+from utils.posture.height_constants import (
+    POINT_TO_CM,
+    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
+)
 
 
 class PostureAnalysisService:
@@ -26,13 +30,8 @@ class PostureAnalysisService:
         20: 0.0020,
     }
 
-    # Share of posture gains per segment
-    POSTURE_SEGMENT_SPLIT: Dict[str, float] = {
-        "spinal_compression": 0.30,
-        "posture_collapse":   0.35,
-        "pelvic_tilt_back":   0.25,
-        "leg_hamstring":      0.10,
-    }
+    # Section 1.2 / 3 — share of gains per segment (canonical constants)
+    POSTURE_SEGMENT_SPLIT: Dict[str, float] = POSTURE_SEGMENT_DISTRIBUTION_RATIO
 
     @staticmethod
     def annual_growth_percent(age: int) -> float:
@@ -47,7 +46,7 @@ class PostureAnalysisService:
     @staticmethod
     def posture_gain_cm_from_points(points: int | float) -> float:
         """Convert posture points to cm gain"""
-        return points * 0.001  # 1 point = 0.001 cm
+        return float(points) * POINT_TO_CM
 
     @staticmethod
     def get_posture_analysis(user, profile_dict: Dict[str, Any], rescan: Optional[str] = None) -> tuple:
@@ -87,10 +86,6 @@ class PostureAnalysisService:
 
         except UserPosturalOptimizationData.DoesNotExist:
             prompt = PostureAnalysisService._build_analysis_prompt(user, profile_dict)
-            # gpt_response = generate_chatgpt_response(prompt, system_role="You are a health and posture expert.")
-
-            #  prompt = PostureAnalysisService._build_analysis_prompt(user, profile_dict)
-
             MAX_RETRIES = 5
             gpt_response = None
 
@@ -104,19 +99,12 @@ class PostureAnalysisService:
                 if not gpt_response:
                     continue
 
-                posture = gpt_response.get("postural_optimization", {})
-
-                spinal = float(posture.get("spinal_compression", 0) or 0)
-                collapse = float(posture.get("posture_collapse", 0) or 0)
-                pelvic = float(posture.get("pelvic_tilt_back", 0) or 0)
-                leg = float(posture.get("leg_hamstring", 0) or 0)
-
-                values = [spinal, collapse, pelvic, leg]
-                print('attempt')
-                print(attempt)
-                # Stop retry if any value > 0
-                if any(v > 0 for v in values):
-                    break
+                # Spec-aligned: GPT must not drive numeric posture math.
+                # Validate only that we got usable text + recommendations.
+                if isinstance(gpt_response, dict) and not gpt_response.get("error"):
+                    recs = gpt_response.get("recommendations") or []
+                    if isinstance(recs, list) and len(recs) >= 1:
+                        break
 
             
             # Update last scan time
@@ -127,7 +115,7 @@ class PostureAnalysisService:
                 profile.save()
 
             if gpt_response:
-                user_data = save_ai_analysis(user, gpt_response)
+                user_data = save_ai_text_analysis(user, gpt_response)
                 serializer = UserPosturalOptimizationDataSerializer(user_data)
                 ai_analysis = serializer.data
             else:
@@ -361,7 +349,7 @@ class PostureAnalysisService:
         prompt = f"""
             You are a certified physiotherapist and posture expert.
 
-            Analyze the user's posture, lifestyle, and growth potential.
+            Analyze the user's posture habits and provide motivational, practical guidance.
 
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -371,19 +359,6 @@ class PostureAnalysisService:
             • Provide 5 recommendations.
             • Estimate possible height gain from posture correction (0–1.5 inches).
             • Mention that genetics and age influence results.
-
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-            TASK 2 — Postural Optimization Breakdown
-
-            Provide severity scores (0–100):
-
-            - spinal_compression
-            - posture_collapse
-            - pelvic_tilt_back
-            - leg_hamstring
-
-            If posture questionnaire is missing, estimate based on typical posture patterns.
 
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -414,12 +389,6 @@ class PostureAnalysisService:
 
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-            POSTURE SEGMENT SPLIT
-
-            {json.dumps(PostureAnalysisService.POSTURE_SEGMENT_SPLIT, indent=2)}
-
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
             OUTPUT FORMAT (JSON ONLY)
 
             {{
@@ -431,14 +400,7 @@ class PostureAnalysisService:
 
             "max_height_gain_inches": 0.0,
 
-            "note": "...",
-
-            "postural_optimization": {{
-            "spinal_compression": 0,
-            "posture_collapse": 0,
-            "pelvic_tilt_back": 0,
-            "leg_hamstring": 0
-            }}
+            "note": "..."
             }}
             """
 

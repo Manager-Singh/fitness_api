@@ -222,12 +222,13 @@ class UserRoutine(models.Model):
         indexes = [
             models.Index(fields=["user", "routine_type", "is_active"])
         ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["user", "routine_type", "is_active"],
-                name="unique_active_routine_per_type"
-            )
-        ]
+        # NOTE:
+        # We intentionally do NOT enforce uniqueness on (user, routine_type, is_active)
+        # because that would allow only one inactive row too, and MySQL cannot express
+        # a partial unique constraint (is_active=true) cleanly across versions.
+        #
+        # Invariants are enforced in code: at most one active routine per user+type.
+        constraints = []
 
     def __str__(self):
         return f"{self.get_routine_type_display()} for {self.user} ({self.created_at.date()})"

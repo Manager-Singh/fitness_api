@@ -14,12 +14,15 @@ class UserProfile(models.Model):
     language = models.CharField(max_length=100, null=True, blank=True)
     gender = models.CharField(max_length=100, null=True, blank=True)
     age = models.CharField(max_length=255, null=True, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
     ethnicity = models.CharField(max_length=100, null=True, blank=True)
     
     # Height fields
     current_height_foot = models.CharField(max_length=255, null=True, blank=True)
     current_height_inch = models.CharField(max_length=255, null=True, blank=True)
     current_height_cm = models.CharField(max_length=255, null=True, blank=True)
+    # Section 2 — canonical Base_Height from onboarding; immutable once set.
+    base_height_cm = models.CharField(max_length=255, null=True, blank=True)
     current_height_type = models.CharField(max_length=20, null=True, blank=True)
     
     ideal_height_foot = models.CharField(max_length=255, null=True, blank=True)

@@ -39,9 +39,11 @@ urlpatterns = [
     path('api/', include('posture_questions.urls')),
     path("api/", include("workouts.urls")),
     path("api/", include("nutration.urls")),
+    path("api/", include("apibackend.spec_urls")),
     path('api/posture/', include('posture.urls')),
     path("api/packages/", include("payment_packages.urls")),
     path("api/chatbot/", include("chatbot.urls")),
+    path("api/test/", include("apibackend.test_seed_urls")),
     path('stumalitation', include('stumalitationdata.urls')),
 ]
 

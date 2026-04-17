@@ -16,7 +16,10 @@ router.register("workout-logs",  WorkoutLogViewSet, basename="workout-log")
 
 urlpatterns = [
     path("my-workouts", MyWorkoutPlanView.as_view(), name="my-workouts"),
+    path("my-workouts/", MyWorkoutPlanView.as_view(), name="my-workouts-slash"),
     path("my-routine", UserRoutineListView.as_view(), name="my-routine"),
+    path("my-routine/", UserRoutineListView.as_view(), name="my-routine-slash"),
     path("leaderboard", LeaderboardAPIView.as_view(), name="leaderboard"),
+    path("leaderboard/", LeaderboardAPIView.as_view(), name="leaderboard-slash"),
     path("", include(router.urls)),
 ]

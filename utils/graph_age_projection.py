@@ -79,14 +79,6 @@ def calculate_height_projection(
       it will safely fall back to genetic_height for math,
       while UI can still lock/hide those lines.
     """
-    print('current_height')
-    print(current_height)
-    print('optimized_height')
-    print(optimized_height)
-    print('genetic_height')
-    print(genetic_height)
-    print('unoptimized_height')
-    print(unoptimized_height)
     gender = gender.lower()
 
     if gender == "male":

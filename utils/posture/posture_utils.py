@@ -1,4 +1,5 @@
 from utils.posture.height_helpers import safe_float, clamp
+from utils.posture.height_constants import POSTURE_BOOST_MAX_CM
 
 
 # def compute_posture_potential_cm(posture_breakdown: dict) -> float:
@@ -28,26 +29,25 @@ def compute_posture_potential_cm(posture_breakdown: dict) -> float:
     if not posture_breakdown:
         return 0.0
 
-    
-    print('posture_breakdown')
-    print(posture_breakdown)
+    total_ratio = 0.0
+    counted_segments = 0
 
-    weights = {
-        "spinal_compression": 1.0,
-        "posture_collapse": 0.8,
-        "pelvic_tilt_back": 0.6,
-        "leg_hamstring": 0.4,
-    }
+    for zone_data in posture_breakdown.values():
+        current_loss = safe_float(zone_data.get("current_loss_cm", 0))
+        max_loss = safe_float(zone_data.get("max_loss_cm", 0))
 
-    total = 0.0
+        if max_loss <= 0:
+            continue
 
-    for zone, zone_data in posture_breakdown.items():
-        loss = safe_float(zone_data.get("current_loss_cm", 0))
-        weight = weights.get(zone, 1.0)
-        total += loss * weight
+        loss_ratio = clamp(current_loss / max_loss, 0.0, 1.0)
+        total_ratio += loss_ratio
+        counted_segments += 1
 
-    
-    print('posture_potential_cm')
-    print(total)
+    if counted_segments == 0:
+        return 0.0
 
-    return clamp(total, 0.0, 4.0)
+    # Section 5.6 — True Optimized Height posture boost (distinct from §1.3 Optimization_Gap 5.5 cm).
+    missing_fraction = total_ratio / counted_segments
+    posture_boost_cm = POSTURE_BOOST_MAX_CM * missing_fraction
+
+    return clamp(posture_boost_cm, 0.0, POSTURE_BOOST_MAX_CM)

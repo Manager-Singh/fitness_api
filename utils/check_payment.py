@@ -45,6 +45,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework import status
 from user_profile.models import Payment
+from utils.age import get_user_age_exact
 
 
 # def check_subscription_or_response(user):
@@ -131,11 +132,15 @@ def check_subscription_or_response(user):
 
     trial_start = user.trial_start
     trial_end = user.trial_end
+    age_exact = get_user_age_exact(user)
+    is_teen = bool(age_exact is not None and 13.0 <= float(age_exact) < 21.0)
+    trial_day = None
 
     # ✅ Trial check
-    if trial_start and trial_end and trial_start <= now <= trial_end:
+    if is_teen and trial_start and trial_end and trial_start <= now <= trial_end:
 
         days_left = (trial_end - now).days
+        trial_day = int((now - trial_start).total_seconds() // 86400) + 1
 
         return Response({
             "expired": False,
@@ -146,6 +151,8 @@ def check_subscription_or_response(user):
             "is_trial": True,
             "trial_start": trial_start,
             "trial_end": trial_end,
+            "trial_day": trial_day,
+            "age_exact": age_exact,
             "message": f"Trial active ({days_left} days left)."
         }, status=status.HTTP_200_OK)
 
@@ -161,17 +168,21 @@ def check_subscription_or_response(user):
     )
 
     if not latest_payment:
+        trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None
+        # Spec-aligned free continuation after trial: app remains usable.
         return Response({
-            "expired": True,
+            "expired": False,
             "days_left": 0,
-            "plan": None,
-            "plan_type": None,
-            "is_paid": None,
+            "plan": "Free",
+            "plan_type": "Free",
+            "is_paid": False,
             "is_trial": False,
             "trial_start": trial_start,
             "trial_end": trial_end,
-            "message": "No active subscription found."
-        }, status=status.HTTP_403_FORBIDDEN)
+            "trial_day": trial_day,
+            "age_exact": age_exact,
+            "message": "Free access active."
+        }, status=status.HTTP_200_OK)
 
     package = latest_payment.package
 
@@ -183,17 +194,20 @@ def check_subscription_or_response(user):
     expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
 
     if expiry_date < now:
+        trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None
         return Response({
-            "expired": True,
+            "expired": False,
             "days_left": 0,
-            "plan": package.name,
-            "plan_type": "Free" if package.is_free else "Paid",
-            "is_paid": not package.is_free,
+            "plan": "Free",
+            "plan_type": "Free",
+            "is_paid": False,
             "is_trial": False,
             "trial_start": trial_start,
             "trial_end": trial_end,
-            "message": f"Your {package.name} plan has expired."
-        }, status=status.HTTP_403_FORBIDDEN)
+            "trial_day": trial_day,
+            "age_exact": age_exact,
+            "message": f"{package.name} expired. Free access active."
+        }, status=status.HTTP_200_OK)
 
     days_left = (expiry_date - now).days
 
@@ -206,6 +220,8 @@ def check_subscription_or_response(user):
         "is_trial": False,
         "trial_start": trial_start,
         "trial_end": trial_end,
+        "trial_day": int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None,
+        "age_exact": age_exact,
         "duration": package.get_duration_display(),
         "message": f"{'Free' if package.is_free else 'Paid'} subscription active ({days_left} days left)."
     }, status=status.HTTP_200_OK)

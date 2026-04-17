@@ -181,6 +181,8 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 from datetime import datetime
 
+from utils.posture.height_constants import POSTURE_BOOST_MAX_CM
+
 
 # =====================================================
 # INPUT TYPES
@@ -199,7 +201,8 @@ LooksStage = Literal["younger", "same", "older"]
 class TeenProfile:
     sex: Literal["male", "female"]
 
-    age_years: int
+    # Decimal years when DOB-backed (Section 5.6); falls back to whole-year profile.age.
+    age_years: float
     age_months: int
 
     current_height_cm: float
@@ -214,6 +217,18 @@ class TeenProfile:
 
     posture_potential_cm: float
     last_scan: Optional[datetime]
+
+    # Premium scan/questionnaire inputs (spec v3.2 section 5.6).
+    voice_depth_score: int = 0
+    facial_hair_score: int = 0
+    axillary_hair_score: int = 0
+    adams_apple_score: int = 0
+    wingspan_cm: float = 0.0
+    scan_density_result: int = 1
+    collapse_score: float = 0.0
+    pelvic_score: float = 0.0
+    leg_ham_score: float = 0.0
+    spinal_score: float = 0.0
 
 
 # =====================================================
@@ -230,19 +245,18 @@ def safe_float(v, default=0.0):
         return default
 
 
-def compute_age_decimal(p: TeenProfile):
-    return p.age_years + (p.age_months / 12)
-
-
-# =====================================================
-# VALIDATION
-# =====================================================
 def validate_height(height):
-    return clamp(height, 80, 220)
+    """Section 12.4 — user/onboarding height cm bounds."""
+    from utils.posture.height_constants import USER_HEIGHT_CM_MAX, USER_HEIGHT_CM_MIN
+
+    return clamp(height, USER_HEIGHT_CM_MIN, USER_HEIGHT_CM_MAX)
 
 
 def validate_parent_height(height):
-    return clamp(height, 140, 210)
+    """Section 12.4 — parent height cm bounds."""
+    from utils.posture.height_constants import PARENT_HEIGHT_CM_MAX, PARENT_HEIGHT_CM_MIN
+
+    return clamp(height, PARENT_HEIGHT_CM_MIN, PARENT_HEIGHT_CM_MAX)
 
 
 # =====================================================
@@ -262,202 +276,94 @@ def compute_mph(sex, father_cm, mother_cm):
 # =====================================================
 # BIO AGE MODIFIER
 # =====================================================
-def compute_bio_age_modifier(p):
-
-    score = 0
-
-    if p.height_change_12m == "5+":
-        score += 1
-    elif p.height_change_12m == "0-1":
-        score -= 1
-
-    if p.shoe_pant_growth == "fast":
-        score += 1
-    elif p.shoe_pant_growth == "stable":
-        score -= 1
-
-    if p.voice_stage == "child":
-        score += 1
-    elif p.voice_stage == "deep":
-        score -= 1
-
-    if p.hair_stage == "none":
-        score += 1
-    elif p.hair_stage == "full":
-        score -= 1
-
-    if p.looks_vs_peers == "younger":
-        score += 1
-    elif p.looks_vs_peers == "older":
-        score -= 1
-
-    return clamp(score, -2, 3)
+def compute_puberty_score(p: TeenProfile):
+    sex = (p.sex or "").lower()
+    if sex == "male":
+        return (
+            int(clamp(p.voice_depth_score, 0, 2))
+            + int(clamp(p.facial_hair_score, 0, 2))
+            + int(clamp(p.axillary_hair_score, 0, 2))
+            + int(clamp(p.adams_apple_score, 0, 1))
+        )
+    return (
+        int(clamp(p.axillary_hair_score, 0, 2))
+        + int(clamp(p.adams_apple_score, 0, 1))
+    )
 
 
-# =====================================================
-# REMAINING GROWTH
-# =====================================================
-def compute_remaining_growth(age, sex):
+def compute_bio_modifier(p: TeenProfile):
+    puberty_score = compute_puberty_score(p)
+    age = safe_float(p.age_years)
+    sex = (p.sex or "").lower()
 
     if sex == "male":
-        max_age = 21
-        max_growth = 22
-    else:
-        max_age = 18
-        max_growth = 18
+        if age >= 16.0 and puberty_score <= 2:
+            return 3.0
+        if age <= 14.0 and puberty_score >= 5:
+            return -2.0
+        return 0.0
 
-    remaining_years = max(max_age - age, 0)
-
-    growth = (remaining_years / (max_age - 13)) * max_growth
-
-    return max(growth, 0)
-
-
-# =====================================================
-# GROWTH SCORE
-# =====================================================
-def compute_growth_score(p):
-
-    score = 0
-
-    if p.height_change_12m == "5+":
-        score += 2
-    elif p.height_change_12m == "2-4":
-        score += 1
-
-    if p.shoe_pant_growth == "fast":
-        score += 1
-
-    if p.voice_stage == "child":
-        score += 1
-
-    if p.hair_stage == "none":
-        score += 1
-
-    if p.looks_vs_peers == "younger":
-        score += 1
-
-    return clamp(score / 6.0, 0.0, 1.0)
+    if age >= 15.0 and puberty_score <= 0:
+        return 1.5
+    if age <= 13.0 and puberty_score >= 3:
+        return -1.0
+    return 0.0
 
 
-# =====================================================
-# EXPECTED HEIGHT FROM MPH
-# =====================================================
-def expected_height_from_mph(mph, age, sex):
-
-    if sex == "male":
-        adult_age = 21
-    else:
-        adult_age = 18
-
-    ratio = clamp(age / adult_age, 0, 1)
-
-    return mph * ratio
+def compute_frame_modifier(scan_density_result):
+    return 1.5 if int(scan_density_result) == 2 else 0.0
 
 
-# =====================================================
-# MPH TRUST SCORE
-# =====================================================
-def compute_mph_weight(current_height, expected_height):
+def compute_wingspan_modifier(wingspan_cm, current_height_cm):
+    ape_index = safe_float(wingspan_cm) - safe_float(current_height_cm)
+    return 2.0 if ape_index > 5.0 else 0.0
 
-    diff = abs(current_height - expected_height)
 
-    if diff < 10:
-        return 0.7
+def compute_posture_boost(p: TeenProfile):
+    scores = [
+        safe_float(p.collapse_score, -1),
+        safe_float(p.pelvic_score, -1),
+        safe_float(p.leg_ham_score, -1),
+        safe_float(p.spinal_score, -1),
+    ]
+    valid_scores = [score for score in scores if 0.0 <= score <= 100.0]
 
-    if diff < 25:
-        return 0.5
+    if len(valid_scores) == 4:
+        avg_posture = sum(valid_scores) / 4.0
+        missing_fraction = clamp((100.0 - avg_posture) / 100.0, 0.0, 1.0)
+        return round(POSTURE_BOOST_MAX_CM * missing_fraction, 4)
 
-    return 0.2
+    return clamp(safe_float(p.posture_potential_cm), 0.0, POSTURE_BOOST_MAX_CM)
 
 
 # =====================================================
 # FINAL HEIGHT PREDICTION
 # =====================================================
 def compute_optimized_height(p: TeenProfile):
-
-    age = compute_age_decimal(p)
-
     current_height = validate_height(p.current_height_cm)
-
     mph = compute_mph(
         p.sex,
         p.father_height_cm,
         p.mother_height_cm
     )
+    bio_modifier = compute_bio_modifier(p)
+    frame_modifier = compute_frame_modifier(p.scan_density_result)
+    wingspan_modifier = compute_wingspan_modifier(p.wingspan_cm, current_height)
+    posture_gain = compute_posture_boost(p)
 
-    bio_modifier = compute_bio_age_modifier(p)
-
-    remaining_growth = compute_remaining_growth(
-        age,
-        p.sex
-    )
-
-    growth_score = compute_growth_score(p)
-
-    growth_gain = remaining_growth * growth_score
-
-    posture_gain = clamp(
-        safe_float(p.posture_potential_cm),
-        0,
-        4
-    )
-
-    growth_prediction = (
-        current_height
-        + growth_gain
-        + posture_gain
-        + bio_modifier
-    )
-
-    expected_height = expected_height_from_mph(
-        mph,
-        age,
-        p.sex
-    )
-
-    mph_weight = compute_mph_weight(
-        current_height,
-        expected_height
-    )
-
-    predicted_height = (
-        mph * mph_weight
-        + growth_prediction * (1 - mph_weight)
-    )
-
-    genetic_min = mph - 8.5
-    genetic_max = mph + 8.5
-
-    predicted_height = clamp(
-        predicted_height,
-        genetic_min,
-        genetic_max
-    )
-
+    predicted_height = mph + bio_modifier + frame_modifier + wingspan_modifier + posture_gain
     if p.sex == "male":
         predicted_height = clamp(predicted_height, 120, 210)
     else:
         predicted_height = clamp(predicted_height, 120, 195)
 
     return {
-
         "current_height_cm": round(current_height, 1),
-
-        "growth_gain_cm": round(growth_gain, 1),
-
         "posture_gain_cm": round(posture_gain, 1),
-
         "bio_age_modifier_cm": round(bio_modifier, 1),
-
+        "frame_modifier_cm": round(frame_modifier, 1),
+        "wingspan_modifier_cm": round(wingspan_modifier, 1),
+        "puberty_score": compute_puberty_score(p),
         "mph_height_cm": round(mph, 1),
-
-        "mph_weight": round(mph_weight, 2),
-
         "optimized_height_cm": round(predicted_height, 1),
-
-        "genetic_range_cm": [
-            round(genetic_min, 1),
-            round(genetic_max, 1)
-        ]
     }

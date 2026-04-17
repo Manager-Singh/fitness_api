@@ -17,11 +17,12 @@ class NutraEntryWriteSerializer(serializers.ModelSerializer):
     activity_id = serializers.PrimaryKeyRelatedField(queryset=Activity.objects.all(),
                                                      source="activity",
                                                      required=False, allow_null=True)
+    client_timestamp = serializers.DateTimeField(required=False, write_only=True)
 
     class Meta:
         model  = NutraEntry
         fields = ("module_id", "food_id", "activity_id",
-                  "servings", "score")
+                  "servings", "score", "client_timestamp")
 
     def validate(self, attrs):
         has_food     = bool(attrs.get("food"))

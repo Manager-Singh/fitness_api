@@ -221,6 +221,23 @@ class MyPlanView(APIView):
             )
         )
 
+        # Spec-correct module visibility:
+        # - Teens: show teen nutrition modules (not adult Disc/Muscle split modules).
+        # - Adults: show Disc/Muscle nutrition modules (not teen-only boosting lists).
+        if age < 21:
+            # Exclude adult-only nutrition buckets for teens.
+            adult_cats = ["disc", "muscle"]
+            modules = modules.exclude(
+                type=Module.NUTRITION,
+                nutrition_category__in=adult_cats,
+            )
+        else:
+            # Adults: exclude teen-only nutrition modules.
+            modules = modules.exclude(
+                type=Module.NUTRITION,
+                nutrition_category="teen",
+            )
+
         if type_q == "nutrition":
             modules = modules.filter(type=Module.NUTRITION)
         elif type_q == "lifestyle":

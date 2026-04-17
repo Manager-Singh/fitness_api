@@ -14,7 +14,7 @@ def get_all_payment_packages(request):
     user = request.user
     print(UserSerializer(user).data)
     try:
-        packages = PaymentPackage.objects.filter(deleted_at__isnull=True).order_by('-created_at')
+        packages = PaymentPackage.objects.filter(deleted_at__isnull=True, is_free=False).order_by('-created_at')
         serialized = PaymentPackageSerializer(packages, many=True, context={'request': request})
         return Response({'message': 'Packages fetched successfully', 'data': serialized.data,'user':UserSerializer(user).data})
     except Exception as e:

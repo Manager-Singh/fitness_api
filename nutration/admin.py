@@ -235,6 +235,7 @@ class ModuleAdmin(admin.ModelAdmin):
         "name",
         "short_name",
         "type",
+        "nutrition_category",
         "age_group",
         "icon_preview",
         "background_preview",
@@ -251,6 +252,7 @@ class ModuleAdmin(admin.ModelAdmin):
                 "name",
                 "short_name",
                 "type",
+                "nutrition_category",
                 "age_group",
             )
         }),

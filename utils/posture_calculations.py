@@ -224,6 +224,12 @@
 
 import json
 
+from utils.posture.height_constants import (
+    POSTURE_SEGMENT_MAX_LOSS_CM,
+    TOTAL_STRUCTURAL_CEILING_CM,
+    posture_segment_opt_pct,
+)
+
 
 # =====================================================
 # HELPERS
@@ -369,8 +375,6 @@ def analyze_posture(front=None, side=None, back=None, t_pose=None):
     metrics["max_height_gain_inches"] = round(
         min(1.5, metrics["spinal_compression"] * 0.015), 2
     )
-    print("metrics")
-    print(metrics)
     return metrics
 
 
@@ -383,24 +387,9 @@ def build_optimization_breakdown(metrics):
     Converts normalized metrics (0–100) into
     per-segment loss in cm and optimization %.
     """
-
-    MAX = {
-        "spinal_compression": 4.0,
-        "posture_collapse": 3.0,
-        "pelvic_tilt_back": 2.5,
-        "leg_hamstring": 3.5,
-    }
-
-    SCALE = {
-        "spinal_compression": 100,
-        "posture_collapse": 50,
-        "pelvic_tilt_back": 60,
-        "leg_hamstring": 80,
-    }
-
     breakdown = {}
 
-    for k in MAX:
+    for k, max_cm in POSTURE_SEGMENT_MAX_LOSS_CM.items():
         raw = metrics.get(k, 0)
         try:
             score = float(raw)
@@ -409,14 +398,12 @@ def build_optimization_breakdown(metrics):
 
         score = clamp(score, 0.0, 100.0)
 
-        loss = round((score / SCALE[k]) * MAX[k], 2)
+        loss = round((score / 100.0) * max_cm, 2)
 
         breakdown[k] = {
             "current_loss_cm": loss,
-            "max_loss_cm": MAX[k],
-            "percent_optimized": clamp(
-                int(100 - (loss / MAX[k] * 100)), 0, 100
-            ),
+            "max_loss_cm": max_cm,
+            "percent_optimized": posture_segment_opt_pct(loss, max_cm),
         }
 
     return breakdown
@@ -424,19 +411,25 @@ def build_optimization_breakdown(metrics):
 
 def compute_posture_potential_cm(breakdown: dict) -> float:
     """
-    Single authoritative posture potential (cm)
-    used by teen/adult height engines.
+    Sum of per-segment current loss (cm), each clamped to that segment's Max_Loss.
+    Capped at Section 1.2 structural ceiling (8.0 cm total across segments).
     """
     if not breakdown:
         return 0.0
 
-    total = sum(
-        v.get("max_loss_cm", 0)
-        for v in breakdown.values()
-    )
+    total = 0.0
+    for v in breakdown.values():
+        try:
+            cur = float(v.get("current_loss_cm", 0) or 0)
+        except (TypeError, ValueError):
+            cur = 0.0
+        try:
+            mx = float(v.get("max_loss_cm", 0) or 0)
+        except (TypeError, ValueError):
+            mx = 0.0
+        total += clamp(cur, 0.0, mx if mx > 0 else 0.0)
 
-    # Global system cap
-    return clamp(round(total, 2), 0.0, 4.0)
+    return clamp(round(total, 2), 0.0, TOTAL_STRUCTURAL_CEILING_CM)
 
 
 # =====================================================

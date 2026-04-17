@@ -15,10 +15,11 @@ class WorkoutEntryWriteSerializer(serializers.ModelSerializer):
     exercise_id = serializers.PrimaryKeyRelatedField(
         queryset=Exercise.objects.all(), source="exercise"
     )
+    client_timestamp = serializers.DateTimeField(required=False, write_only=True)
 
     class Meta:
         model = WorkoutEntry
-        fields = ("exercise_id", "points", "sets_done", "reps_done", "duration_s")
+        fields = ("exercise_id", "points", "sets_done", "reps_done", "duration_s", "client_timestamp")
 
 
 class WorkoutEntryReadSerializer(serializers.ModelSerializer):

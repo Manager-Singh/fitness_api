@@ -3,6 +3,7 @@ from django.utils import timezone
 from .models import UserRoutine, UserRoutineExercise, WorkoutEntry
 from user_profile.models import UserProfile
 from django.forms.models import model_to_dict
+from utils.exercise_library import section6_display_copy_for_exercise
 
 
 # class UserRoutineExerciseSerializer(serializers.ModelSerializer):
@@ -50,6 +51,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     image = serializers.SerializerMethodField()
     description = serializers.CharField(source="exercise.description", allow_blank=True)
     completed = serializers.SerializerMethodField()
+    section6_display_copy = serializers.SerializerMethodField()
 
     class Meta:
         model = UserRoutineExercise
@@ -70,6 +72,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "qty_max",
             "notes",
             "completed",
+            "section6_display_copy",
         )
 
     def get_image(self, obj):
@@ -117,6 +120,9 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             session__date=today,
             exercise=obj.exercise
         ).exists()
+
+    def get_section6_display_copy(self, obj):
+        return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
 
 class UserRoutineSerializer(serializers.ModelSerializer):
     exercises = UserRoutineExerciseSerializer(many=True, read_only=True)

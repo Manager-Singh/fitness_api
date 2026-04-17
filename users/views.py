@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, OTP
+from .models import User, OTP, Friendship, FriendInvite
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer,
@@ -21,6 +21,10 @@ from user_profile.models import Payment,UserProfile
 from django.db.models import Q
 from utils.check_payment import check_subscription_or_response
 from utils.free_subscription import activate_free_subscription
+from workouts.models import WorkoutSession, WorkoutEntry
+from django.db.models import Sum, Count
+from workouts.serializers_leaderboard import LeaderboardResponseSerializer
+from nutration.models_log import NutraEntry
 
 # class RegisterView(APIView):
 #     permission_classes = [AllowAny]  # Allow registration without authentication
@@ -528,3 +532,276 @@ class ChangePasswordView(APIView):
         user.save()
 
         return Response({"success": True, "message": "Password changed successfully."}, status=200)
+
+
+class InviteFriendView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        def _frontend_base_url():
+            # Prefer explicit config; otherwise derive from request host.
+            configured = getattr(settings, "FRONTEND_BASE_URL", None)
+            if configured:
+                return str(configured).rstrip("/")
+            return f"{request.scheme}://{request.get_host()}".rstrip("/")
+
+        existing = FriendInvite.objects.filter(
+            inviter=request.user,
+            accepted_by__isnull=True,
+            expires_at__gte=timezone.now(),
+        ).order_by("-created_at").first()
+        if existing:
+            base_url = _frontend_base_url()
+            invite_link = f"{base_url}/invite?token={existing.invite_token}"
+            return Response(
+                {
+                    "invite_token": existing.invite_token,
+                    # Spec (Section 17.7): `invite_link`
+                    "invite_link": invite_link,
+                    # Backward-compat alias (keep for existing clients)
+                    "invite_url": invite_link,
+                    "expires_at": existing.expires_at,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        token = secrets.token_urlsafe(24)
+        expires_at = timezone.now() + datetime.timedelta(days=7)
+        invite = FriendInvite.objects.create(
+            inviter=request.user,
+            invite_token=token,
+            expires_at=expires_at,
+        )
+        base_url = _frontend_base_url()
+        invite_link = f"{base_url}/invite?token={invite.invite_token}"
+        return Response(
+            {
+                "invite_token": invite.invite_token,
+                # Spec (Section 17.7): `invite_link`
+                "invite_link": invite_link,
+                # Backward-compat alias (keep for existing clients)
+                "invite_url": invite_link,
+                "expires_at": invite.expires_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AcceptFriendInviteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = request.data.get("invite_token")
+        if not token:
+            return Response({"error": "invite_token is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        invite = FriendInvite.objects.filter(invite_token=token).first()
+        if not invite:
+            return Response({"error": "invalid_invite_token"}, status=status.HTTP_404_NOT_FOUND)
+        if invite.expires_at < timezone.now():
+            return Response({"error": "invite_expired"}, status=status.HTTP_410_GONE)
+        if invite.inviter_id == request.user.id:
+            return Response({"error": "cannot_accept_own_invite"}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = Friendship.objects.filter(
+            Q(user_id_a=invite.inviter, user_id_b=request.user)
+            | Q(user_id_a=request.user, user_id_b=invite.inviter)
+        ).first()
+
+        if existing:
+            if existing.status != Friendship.STATUS_ACCEPTED:
+                existing.status = Friendship.STATUS_ACCEPTED
+                existing.save(update_fields=["status"])
+            friendship = existing
+        else:
+            friendship = Friendship.objects.create(
+                user_id_a=invite.inviter,
+                user_id_b=request.user,
+                status=Friendship.STATUS_ACCEPTED,
+            )
+
+        invite.accepted_by = request.user
+        invite.save(update_fields=["accepted_by"])
+
+        return Response(
+            {
+                "friendship_id": friendship.id,
+                "status": friendship.status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FriendsLeaderboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        page = max(int(request.query_params.get("page", 1)), 1)
+        limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
+
+        try:
+            current_age = get_user_age(request.user)
+        except Exception:
+            current_age = 0
+        current_is_adult = current_age >= 21
+
+        accepted = Friendship.objects.filter(
+            status=Friendship.STATUS_ACCEPTED,
+        ).filter(
+            user_id_a=request.user
+        ) | Friendship.objects.filter(
+            status=Friendship.STATUS_ACCEPTED,
+            user_id_b=request.user
+        )
+        friend_ids = set()
+        for rel in accepted:
+            if rel.user_id_a_id == request.user.id:
+                friend_ids.add(rel.user_id_b_id)
+            else:
+                friend_ids.add(rel.user_id_a_id)
+        friend_ids.add(request.user.id)
+
+        qs = User.objects.filter(id__in=friend_ids, is_active=True).annotate(
+            score=Sum("workout_sessions__entries__points"),
+            sessions_completed=Count("workout_sessions", distinct=True),
+        )
+        nutra_rows = (
+            NutraEntry.objects.filter(session__user_id__in=friend_ids)
+            .values("session__user_id")
+            .annotate(total=Sum("score"))
+        )
+        nutrition_by_user = {int(r["session__user_id"]): int(r["total"] or 0) for r in nutra_rows}
+
+        from utils.leaderboard import _current_validated_streak
+        tier_entries = []
+        today_local = timezone.localdate()
+        for u in qs:
+            try:
+                user_age = get_user_age(u)
+            except Exception:
+                continue
+            if (user_age >= 21) != current_is_adult:
+                continue
+            tier_entries.append(
+                {
+                    "user_id": u.id,
+                    "display_name": (u.name or u.username or u.email or f"User {u.id}"),
+                    "avatar_url": u.profile_image_url or None,
+                    "points": int((u.score or 0) + nutrition_by_user.get(int(u.id), 0)),
+                    "streak": _current_validated_streak(u, today_local),
+                    "is_current_user": u.id == request.user.id,
+                }
+            )
+
+        tier_entries.sort(key=lambda x: (-x["points"], -x["streak"], x["user_id"]))
+        ranked = []
+        prev_points = None
+        rank = 0
+        for idx, row in enumerate(tier_entries, start=1):
+            if prev_points != row["points"]:
+                rank = idx
+                prev_points = row["points"]
+            row["rank"] = rank
+            ranked.append(row)
+
+        current_user_entry = next((r for r in ranked if r["user_id"] == request.user.id), None)
+        current_user_rank = current_user_entry["rank"] if current_user_entry else (len(ranked) + 1)
+
+        total = len(ranked)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        entries = ranked[start_idx:end_idx]
+
+        payload = {
+            "view": "friends",
+            "tier": "adult" if current_is_adult else "teen",
+            "current_user_rank": current_user_rank,
+            "entries": entries,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+            },
+        }
+        serializer = LeaderboardResponseSerializer(payload)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class RevokeFriendInviteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        invite_token = request.data.get("invite_token")
+        friendship_id = request.data.get("friendship_id")
+
+        if not invite_token and not friendship_id:
+            return Response(
+                {"error": "invite_token or friendship_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if invite_token:
+            invite = FriendInvite.objects.filter(
+                invite_token=invite_token,
+                inviter=request.user,
+            ).first()
+            if not invite:
+                return Response({"error": "invite_not_found"}, status=status.HTTP_404_NOT_FOUND)
+            invite.delete()
+            return Response({"message": "invite_revoked"}, status=status.HTTP_200_OK)
+
+        friendship = Friendship.objects.filter(id=friendship_id).filter(
+            Q(user_id_a=request.user) | Q(user_id_b=request.user)
+        ).first()
+        if not friendship:
+            return Response({"error": "friendship_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        friendship.delete()
+        return Response({"message": "friendship_removed"}, status=status.HTTP_200_OK)
+
+
+class PendingFriendInvitesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        incoming = FriendInvite.objects.filter(
+            expires_at__gte=timezone.now(),
+        ).exclude(
+            inviter=request.user,
+        ).exclude(
+            accepted_by__isnull=False,
+        )
+
+        outgoing = FriendInvite.objects.filter(
+            inviter=request.user,
+            expires_at__gte=timezone.now(),
+            accepted_by__isnull=True,
+        )
+
+        incoming_payload = []
+        for invite in incoming:
+            incoming_payload.append(
+                {
+                    "invite_token": invite.invite_token,
+                    "inviter_user_id": invite.inviter_id,
+                    "inviter_name": invite.inviter.name or invite.inviter.username or invite.inviter.email,
+                    "expires_at": invite.expires_at,
+                }
+            )
+
+        outgoing_payload = []
+        for invite in outgoing:
+            outgoing_payload.append(
+                {
+                    "invite_token": invite.invite_token,
+                    "expires_at": invite.expires_at,
+                }
+            )
+
+        return Response(
+            {
+                "incoming": incoming_payload,
+                "outgoing": outgoing_payload,
+            },
+            status=status.HTTP_200_OK,
+        )

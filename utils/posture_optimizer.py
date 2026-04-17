@@ -32,12 +32,7 @@
 #     return breakdown
 
 
-MAX_SEGMENT_LOSS_CM = {
-    "spinal_compression": 3.0,
-    "posture_collapse": 2.5,
-    "pelvic_tilt_back": 1.5,
-    "leg_hamstring": 1.0,
-}
+from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
 
 
 def clamp(v, lo, hi):
@@ -60,7 +55,7 @@ def calculate_optimization_breakdown(ai_analysis: dict):
 
     breakdown = {}
 
-    for segment, max_loss in MAX_SEGMENT_LOSS_CM.items():
+    for segment, max_loss in POSTURE_SEGMENT_MAX_LOSS_CM.items():
         raw_score = scores.get(segment, 0)
 
         # ✅ safety
@@ -73,16 +68,10 @@ def calculate_optimization_breakdown(ai_analysis: dict):
 
         current_loss = round((score / 100.0) * max_loss, 2)
 
-        percent_optimized = clamp(
-            round((1 - (current_loss / max_loss)) * 100),
-            0,
-            100,
-        )
-
         breakdown[segment] = {
             "current_loss_cm": current_loss,
             "max_loss_cm": max_loss,
-            "percent_optimized": percent_optimized,
+            "percent_optimized": posture_segment_opt_pct(current_loss, max_loss),
         }
 
     return breakdown

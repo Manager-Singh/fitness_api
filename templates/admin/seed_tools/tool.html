@@ -1,0 +1,25 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block content %}
+  <div class="content">
+    <h1>{{ title }}</h1>
+
+    <p>
+      Use this tool to seed or delete dummy data for a user, for a date range (date + previous days).
+      Each operation is saved as a run log under <strong>User Data Seed → User data seed runs</strong>.
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <fieldset class="module aligned">
+        {{ form.as_p }}
+      </fieldset>
+      <div class="submit-row">
+        <input type="submit" value="Run" class="default">
+        <a class="button cancel-link" href="../">Back</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+

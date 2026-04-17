@@ -44,6 +44,19 @@ class Module(models.Model):
         (LIFESTYLE, "Lifestyle"),
     ]
 
+    # Spec (Adults): nutrition must be split into Disc Lubrication vs Muscle Repair.
+    # We store this explicitly instead of relying on brittle module-name matching.
+    NUTRITION_CATEGORY_DISC = "disc"
+    NUTRITION_CATEGORY_MUSCLE = "muscle"
+    NUTRITION_CATEGORY_TEEN = "teen"
+    NUTRITION_CATEGORY_OTHER = "other"
+    NUTRITION_CATEGORIES = [
+        (NUTRITION_CATEGORY_DISC, "Disc Lubrication (adult)"),
+        (NUTRITION_CATEGORY_MUSCLE, "Muscle Repair (adult)"),
+        (NUTRITION_CATEGORY_TEEN, "Teen Nutrition (teen)"),
+        (NUTRITION_CATEGORY_OTHER, "Other / Uncategorized"),
+    ]
+
     name      = models.CharField(max_length=160)
     short_name = models.CharField(
         max_length=80,
@@ -76,6 +89,14 @@ class Module(models.Model):
         max_length=160,
         blank=True,
         help_text="Short motivational line"
+    )
+
+    nutrition_category = models.CharField(
+        max_length=12,
+        choices=NUTRITION_CATEGORIES,
+        null=True,
+        blank=True,
+        help_text="Spec routing bucket for nutrition modules (adult disc vs adult muscle).",
     )
 
     class Meta:

@@ -1028,15 +1028,23 @@ from openai import OpenAI
 from django.forms.models import model_to_dict
 import re
 from typing import Any, Dict
+import tempfile
 
 from utils.posture_calculations import (
     parse_payload,
     analyze_posture,
     build_optimization_breakdown,
 )
+from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
+from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.check_payment import check_subscription_or_response
 from utils.ai_analysis import save_ai_analysis_full_scan
 from datetime import timedelta
+import uuid
+from .utils import analyze_posture as analyze_image_posture
+from users.models import HeightLedger, PostureState
+from utils.age import get_user_age_exact
+from utils.age import get_user_age
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -1067,21 +1075,71 @@ def extract_json_request_data(request):
 
     return clean_data
 
+
+def _enforce_scan_access(user):
+    """
+    Section 7 monetization gates:
+    - Adult free: initial scan only, no re-scans.
+    - Adult paid: re-scan every 7 days.
+    - Teen unpaid: first scan only.
+    - Teen paid: re-scan every 7 days.
+    """
+    try:
+        age = int(get_user_age(user) or 0)
+    except Exception:
+        age = 0
+    sub = check_subscription_or_response(user).data
+    is_paid = bool(sub.get("is_paid", False))
+    profile = UserProfile.objects.filter(user=user).first()
+    last_scan = getattr(profile, "last_scan", None)
+    days_since_scan = (timezone.now().date() - last_scan.date()).days if last_scan else None
+
+    if age >= 21:
+        if not is_paid and last_scan is not None:
+            return {
+                "error": "scan_locked_paywall",
+                "message": "Re-scans are locked on free adult plan. Unlock paid plan to continue.",
+            }, 403
+        if is_paid and last_scan is not None and days_since_scan is not None and days_since_scan < 7:
+            return {
+                "error": "scan_not_ready",
+                "message": f"Re-scan in {max(0, 7 - days_since_scan)} days.",
+            }, 429
+        return None, None
+
+    # Teens
+    if not is_paid:
+        if last_scan is not None:
+            return {
+                "error": "scan_locked_paywall",
+                "message": "Unlock full Posture+, ultra-accurate True Optimized Height, and unlimited re-scans.",
+            }, 403
+        return None, None
+
+    if last_scan is not None and days_since_scan is not None and days_since_scan < 7:
+        return {
+            "error": "scan_not_ready",
+            "message": f"Re-scan in {max(0, 7 - days_since_scan)} days.",
+        }, 429
+    return None, None
+
 class FullPostureAnalysisAPIView(APIView):
     parser_classes = [MultiPartParser]
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        print("Top-level keys:", list(request.data.keys()))
+        gate_error, gate_status = _enforce_scan_access(request.user)
+        if gate_error:
+            return Response(gate_error, status=gate_status)
         front = request.FILES.get("front")
         side = request.FILES.get("side")
         back = request.FILES.get("back")
         t_pose = request.FILES.get("t_pose")
 
-        if not all([front, side, back]):
+        if not all([front, side, back, t_pose]):
             return Response(
-                {"error": "front, side and back images are required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "invalid_scan_input", "message": "front, side, back and t_pose images are required."},
+                status=422,
             )
 
         # ✅ PARSE JSON ONCE (FIX)
@@ -1097,12 +1155,28 @@ class FullPostureAnalysisAPIView(APIView):
         # print(back_data)
         # print("t_pose_data")
         # print(t_pose_data)
-        metrics = analyze_posture(
-            front={"landmarks": front_data},
-            side={"landmarks": side_data},
-            back={"landmarks": back_data},
-            t_pose={"landmarks": t_pose_data},
-        )
+        if all([front_data, side_data, back_data, t_pose_data]):
+            metrics = analyze_posture(
+                front={"landmarks": front_data},
+                side={"landmarks": side_data},
+                back={"landmarks": back_data},
+                t_pose={"landmarks": t_pose_data},
+            )
+        else:
+            try:
+                front_res = _analyze_uploaded_image(front)
+                side_res = _analyze_uploaded_image(side)
+                back_res = _analyze_uploaded_image(back)
+                tpose_res = _analyze_uploaded_image(t_pose)
+            except Exception:
+                return Response({"error": "scan_unavailable"}, status=503)
+            image_results = [front_res, side_res, back_res, tpose_res]
+            if any(r.get("error") for r in image_results):
+                return Response(
+                    {"error": "invalid_scan_input", "message": "Unable to detect posture in one or more images."},
+                    status=422,
+                )
+            metrics = _metrics_from_multiview_results(front_res, side_res, back_res, tpose_res)
 
         optimization = build_optimization_breakdown(metrics)
 
@@ -1111,8 +1185,7 @@ class FullPostureAnalysisAPIView(APIView):
             encode_image(side),
             encode_image(back),
         ]
-        if t_pose:
-            images.append(encode_image(t_pose))
+        images.append(encode_image(t_pose))
 
         system_prompt = f"""
 You are a professional posture analyst.
@@ -1169,14 +1242,14 @@ Return JSON ONLY:
             mprofile.last_scan = timezone.now()
             mprofile.save()
             tuser = request.user
-
-            if tuser.trial_start is None:
-                tuser.trial_start = timezone.now()
-
-            if tuser.trial_end is None:
-                tuser.trial_end = tuser.trial_start + timedelta(days=7)
-
-            tuser.save()
+            # Trial is strictly teen-only by exact age (13.0 <= age < 21.0).
+            age_exact_scan = get_user_age_exact(tuser) or 0.0
+            if 13.0 <= float(age_exact_scan) < 21.0:
+                if tuser.trial_start is None:
+                    tuser.trial_start = timezone.now()
+                if tuser.trial_end is None:
+                    tuser.trial_end = tuser.trial_start + timedelta(days=7)
+                tuser.save()
         final_response = {
             'user': {
                 'id': nuser.id,
@@ -1198,6 +1271,12 @@ Return JSON ONLY:
                 "recommendations": ai["summary"].get("recommendations", []),
             },
             "optimization_breakdown": optimization,
+            "posture_optimization_diagnostics": build_posture_optimization_diagnostics(
+                user=request.user,
+                optimization_breakdown=optimization,
+                source="ai_scan",
+                rescan_days=7,
+            ),
             
         }
         clean_request_data = extract_json_request_data(request)
@@ -1211,9 +1290,364 @@ Return JSON ONLY:
             back_data=back_data,
             max_height_gain_inches=metrics["max_height_gain_inches"],
         )
+        posture_bars = _scan_breakdown_from_scores(
+            metrics["posture_collapse"],
+            metrics["pelvic_tilt_back"],
+            metrics["leg_hamstring"],
+            metrics["spinal_compression"],
+        )
+        _apply_scan_to_posture_state(request.user, posture_bars)
         user_data = save_ai_analysis_full_scan(request.user,final_response)
         profile = UserProfile.objects.get(user=request.user)
         profile.last_scan = timezone.now()
         profile.save()
 
         return Response(final_response, status=status.HTTP_200_OK)
+
+
+def _scan_breakdown_from_scores(collapse, pelvic, leg_ham, spinal):
+    # Section 1.2 — segment Max_Loss from canonical constants.
+    max_loss = {
+        "spinal": POSTURE_SEGMENT_MAX_LOSS_CM["spinal_compression"],
+        "collapse": POSTURE_SEGMENT_MAX_LOSS_CM["posture_collapse"],
+        "pelvic": POSTURE_SEGMENT_MAX_LOSS_CM["pelvic_tilt_back"],
+        "legs": POSTURE_SEGMENT_MAX_LOSS_CM["leg_hamstring"],
+    }
+    current = {
+        "spinal": round(max_loss["spinal"] * (1 - spinal / 100.0), 2),
+        "collapse": round(max_loss["collapse"] * (1 - collapse / 100.0), 2),
+        "pelvic": round(max_loss["pelvic"] * (1 - pelvic / 100.0), 2),
+        "legs": round(max_loss["legs"] * (1 - leg_ham / 100.0), 2),
+    }
+    bars = {}
+    for key in ("spinal", "collapse", "pelvic", "legs"):
+        m = max_loss[key]
+        c = max(0.0, min(m, current[key]))
+        bars[key] = {
+            "current_loss_cm": round(c, 2),
+            "opt_pct": posture_segment_opt_pct(c, m),
+        }
+    return bars
+
+
+def _validate_mock_scan_inputs(collapse, pelvic, leg_ham, spinal, wingspan_cm, scan_density_result):
+    values = [collapse, pelvic, leg_ham, spinal]
+    if any(v < 0 or v > 100 for v in values):
+        return {"error": "invalid_scan_input", "message": "Scan scores must be between 0 and 100."}, 422
+    if wingspan_cm < 100 or wingspan_cm > 250:
+        return {"error": "invalid_scan_input", "message": "wingspan_cm must be between 100 and 250."}, 422
+    if scan_density_result not in [0, 1, 2]:
+        return {"error": "invalid_scan_input", "message": "scan_density_result must be 0, 1, or 2."}, 422
+    return None, None
+
+
+def _mark_scan_completed(user):
+    profile = UserProfile.objects.get(user=user)
+    profile.last_scan = timezone.now()
+    profile.save(update_fields=["last_scan"])
+    age_exact = get_user_age_exact(user) or 0.0
+    # Section 5.5: 7-day trial is teen-only (13–20) and starts on first scan.
+    if 13.0 <= float(age_exact) < 21.0:
+        if user.trial_start is None:
+            user.trial_start = timezone.now()
+        if user.trial_end is None:
+            user.trial_end = user.trial_start + timedelta(days=7)
+        user.save(update_fields=["trial_start", "trial_end"])
+
+
+def _apply_scan_to_posture_state(user, posture_bars):
+    """
+    Section 4.3 re-scan overwrite + regression guard.
+    - Always overwrite Current_Loss per segment.
+    - First scan can set Total_Recoverable_Loss from scan value.
+    - Repeat scans keep total unless regression requires expansion.
+    """
+    state, _ = PostureState.objects.get_or_create(user=user)
+    prev_scan_completed = bool(state.scan_completed)
+
+    spinal_um = int(round(float(posture_bars["spinal"]["current_loss_cm"]) * 10000))
+    collapse_um = int(round(float(posture_bars["collapse"]["current_loss_cm"]) * 10000))
+    pelvic_um = int(round(float(posture_bars["pelvic"]["current_loss_cm"]) * 10000))
+    legs_um = int(round(float(posture_bars["legs"]["current_loss_cm"]) * 10000))
+    new_deficit_um = spinal_um + collapse_um + pelvic_um + legs_um
+
+    historical_posture_um = 0
+    for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
+        try:
+            historical_posture_um += int((row.metadata or {}).get("engine1_delta_um", 0))
+        except Exception:
+            continue
+
+    if not prev_scan_completed or int(state.total_recoverable_loss_um or 0) <= 0:
+        # First scan establishes canonical recoverable ceiling from scan.
+        state.total_recoverable_loss_um = new_deficit_um
+    else:
+        remaining_ceiling_um = int(state.total_recoverable_loss_um or 0) - historical_posture_um
+        if new_deficit_um > max(0, remaining_ceiling_um):
+            # Regression guard: expand only upward; never decrease.
+            state.total_recoverable_loss_um = historical_posture_um + new_deficit_um
+
+    state.spinal_current_loss_um = spinal_um
+    state.collapse_current_loss_um = collapse_um
+    state.pelvic_current_loss_um = pelvic_um
+    state.legs_current_loss_um = legs_um
+    state.scan_completed = True
+    state.last_scan_at = timezone.now()
+    state.save(
+        update_fields=[
+            "total_recoverable_loss_um",
+            "spinal_current_loss_um",
+            "collapse_current_loss_um",
+            "pelvic_current_loss_um",
+            "legs_current_loss_um",
+            "scan_completed",
+            "last_scan_at",
+            "updated_at",
+        ]
+    )
+
+
+def _score_from_inches(loss_inches, max_inches=2.0):
+    try:
+        v = float(loss_inches)
+    except Exception:
+        v = 0.0
+    v = max(0.0, v)
+    score = int(round((v / max_inches) * 100))
+    return max(0, min(100, score))
+
+
+def _scan_scores_from_real_result(scan_result):
+    posture_score = int(scan_result.get("posture_score", 70))
+    posture_score = max(0, min(100, posture_score))
+    collapse_score = 100 - posture_score
+
+    height_loss = scan_result.get("height_loss_inches", {}) or {}
+    forward_head_inches = float(height_loss.get("forward_head_inches", 0.0) or 0.0)
+    pelvic_inches = float(height_loss.get("pelvic_tilt_inches", 0.0) or 0.0)
+    other_inches = float(height_loss.get("other_inches", 0.0) or 0.0)
+    total_inches = float(height_loss.get("total_inches", 0.0) or 0.0)
+
+    spinal_score = _score_from_inches(max(other_inches, total_inches * 0.6), max_inches=2.2)
+    pelvic_score = _score_from_inches(pelvic_inches, max_inches=1.2)
+    leg_ham_score = _score_from_inches(total_inches * 0.35, max_inches=0.8)
+
+    return collapse_score, pelvic_score, leg_ham_score, spinal_score
+
+
+def _analyze_uploaded_image(file_obj):
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=True) as tmp_file:
+        for chunk in file_obj.chunks():
+            tmp_file.write(chunk)
+        tmp_file.flush()
+        return analyze_image_posture(tmp_file.name)
+
+
+def _metrics_from_multiview_results(front_res, side_res, back_res, tpose_res):
+    front_c, _, _, _ = _scan_scores_from_real_result(front_res)
+    back_c, _, _, _ = _scan_scores_from_real_result(back_res)
+    _, side_pelvic, _, side_spinal = _scan_scores_from_real_result(side_res)
+    _, _, tpose_legs, _ = _scan_scores_from_real_result(tpose_res)
+    collapse = int(round((front_c + back_c) / 2.0))
+    return {
+        "max_height_gain_inches": round(min(1.5, side_spinal * 0.015), 2),
+        "spinal_compression": side_spinal,
+        "posture_collapse": collapse,
+        "pelvic_tilt_back": side_pelvic,
+        "leg_hamstring": tpose_legs,
+    }
+
+
+class MockScanAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        gate_error, gate_status = _enforce_scan_access(request.user)
+        if gate_error:
+            return Response(gate_error, status=gate_status)
+        try:
+            collapse = float(request.data.get("collapse_score", 0))
+            pelvic = float(request.data.get("pelvic_score", 0))
+            leg_ham = float(request.data.get("leg_ham_score", 0))
+            spinal = float(request.data.get("spinal_score", 0))
+            wingspan_cm = float(request.data.get("wingspan_cm", 0))
+            scan_density_result = int(request.data.get("scan_density_result", -1))
+        except Exception:
+            return Response(
+                {"error": "invalid_scan_input", "message": "Scan payload must contain numeric values."},
+                status=422,
+            )
+
+        error, status_code = _validate_mock_scan_inputs(
+            collapse, pelvic, leg_ham, spinal, wingspan_cm, scan_density_result
+        )
+        if error:
+            return Response(error, status=status_code)
+
+        posture_bars = _scan_breakdown_from_scores(collapse, pelvic, leg_ham, spinal)
+        total_recoverable_loss_cm = round(sum(v["current_loss_cm"] for v in posture_bars.values()), 2)
+        scan_id = str(uuid.uuid4())
+        profile = UserProfile.objects.filter(user=request.user).first()
+        try:
+            current_height_cm = float(getattr(profile, "base_height_cm", None) or getattr(profile, "current_height_cm", 0) or 0)
+        except Exception:
+            current_height_cm = 0.0
+
+        payload = {
+            "scan_id": scan_id,
+            "total_recoverable_loss_cm": total_recoverable_loss_cm,
+            "target_height_cm": round(current_height_cm + total_recoverable_loss_cm, 2),
+            "posture_bars": posture_bars,
+            "source": "mock",
+            "scan_completed": True,
+            # Spec-style aliases (kept alongside snake_case keys for compatibility).
+            "Scan_ID": scan_id,
+            "Total_Recoverable_Loss_cm": total_recoverable_loss_cm,
+            "Target_Height_cm": round(current_height_cm + total_recoverable_loss_cm, 2),
+            "Posture_Bars": posture_bars,
+            "Scan_Completed": True,
+            "posture_optimization_diagnostics": build_posture_optimization_diagnostics(
+                user=request.user,
+                optimization_breakdown={
+                    "spinal_compression": {
+                        "current_loss_cm": posture_bars["spinal"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["spinal_compression"],
+                    },
+                    "posture_collapse": {
+                        "current_loss_cm": posture_bars["collapse"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["posture_collapse"],
+                    },
+                    "pelvic_tilt_back": {
+                        "current_loss_cm": posture_bars["pelvic"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["pelvic_tilt_back"],
+                    },
+                    "leg_hamstring": {
+                        "current_loss_cm": posture_bars["legs"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["leg_hamstring"],
+                    },
+                },
+                source="mock_scan",
+                rescan_days=7,
+            ),
+        }
+
+        PostureReport.objects.create(
+            user=request.user,
+            data={"mock_scan": payload},
+            raw_request_data=extract_json_request_data(request),
+        )
+        _apply_scan_to_posture_state(request.user, posture_bars)
+        _mark_scan_completed(request.user)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ScanAPIView(APIView):
+    parser_classes = [MultiPartParser]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        gate_error, gate_status = _enforce_scan_access(request.user)
+        if gate_error:
+            return Response(gate_error, status=gate_status)
+        front = request.FILES.get("front")
+        side = request.FILES.get("side")
+        back = request.FILES.get("back")
+        t_pose = request.FILES.get("t_pose")
+        if not all([front, side, back, t_pose]):
+            return Response(
+                {"error": "invalid_scan_input", "message": "front, side, back and t_pose images are required."},
+                status=422,
+            )
+
+        # Spec contract includes confidence threshold handling.
+        confidence = request.data.get("confidence")
+        if confidence is not None:
+            try:
+                confidence = float(confidence)
+            except Exception:
+                return Response({"error": "invalid_scan_input", "message": "confidence must be float."}, status=422)
+            if confidence < 0.4:
+                return Response({"error": "scan_unavailable"}, status=503)
+
+        try:
+            front_res = _analyze_uploaded_image(front)
+            side_res = _analyze_uploaded_image(side)
+            back_res = _analyze_uploaded_image(back)
+            tpose_res = _analyze_uploaded_image(t_pose)
+        except Exception:
+            return Response({"error": "scan_unavailable"}, status=503)
+
+        scan_results = [front_res, side_res, back_res, tpose_res]
+        if any(r.get("error") for r in scan_results):
+            return Response(
+                {"error": "invalid_scan_input", "message": "Unable to detect posture in one or more images."},
+                status=422,
+            )
+
+        metrics = _metrics_from_multiview_results(front_res, side_res, back_res, tpose_res)
+        collapse = metrics["posture_collapse"]
+        pelvic = metrics["pelvic_tilt_back"]
+        leg_ham = metrics["leg_hamstring"]
+        spinal = metrics["spinal_compression"]
+        posture_bars = _scan_breakdown_from_scores(collapse, pelvic, leg_ham, spinal)
+        total_recoverable_loss_cm = round(sum(v["current_loss_cm"] for v in posture_bars.values()), 2)
+        profile = UserProfile.objects.filter(user=request.user).first()
+        try:
+            current_height_cm = float(getattr(profile, "base_height_cm", None) or getattr(profile, "current_height_cm", 0) or 0)
+        except Exception:
+            current_height_cm = 0.0
+        scan_id = str(uuid.uuid4())
+        payload = {
+            "scan_id": scan_id,
+            "total_recoverable_loss_cm": total_recoverable_loss_cm,
+            "target_height_cm": round(current_height_cm + total_recoverable_loss_cm, 2),
+            "posture_bars": posture_bars,
+            "source": "real_scan",
+            "scan_completed": True,
+            # Spec-style aliases (kept alongside snake_case keys for compatibility).
+            "Scan_ID": scan_id,
+            "Total_Recoverable_Loss_cm": total_recoverable_loss_cm,
+            "Target_Height_cm": round(current_height_cm + total_recoverable_loss_cm, 2),
+            "Posture_Bars": posture_bars,
+            "Scan_Completed": True,
+            "posture_optimization_diagnostics": build_posture_optimization_diagnostics(
+                user=request.user,
+                optimization_breakdown={
+                    "spinal_compression": {
+                        "current_loss_cm": posture_bars["spinal"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["spinal_compression"],
+                    },
+                    "posture_collapse": {
+                        "current_loss_cm": posture_bars["collapse"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["posture_collapse"],
+                    },
+                    "pelvic_tilt_back": {
+                        "current_loss_cm": posture_bars["pelvic"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["pelvic_tilt_back"],
+                    },
+                    "leg_hamstring": {
+                        "current_loss_cm": posture_bars["legs"]["current_loss_cm"],
+                        "max_loss_cm": POSTURE_SEGMENT_MAX_LOSS_CM["leg_hamstring"],
+                    },
+                },
+                source="real_scan",
+                rescan_days=7,
+            ),
+        }
+
+        PostureReport.objects.create(
+            user=request.user,
+            data={
+                "scan": payload,
+                "scan_engine_output": {
+                    "front": front_res,
+                    "side": side_res,
+                    "back": back_res,
+                    "t_pose": tpose_res,
+                },
+            },
+            raw_request_data=extract_json_request_data(request),
+        )
+        _apply_scan_to_posture_state(request.user, posture_bars)
+        _mark_scan_completed(request.user)
+        return Response(payload, status=status.HTTP_200_OK)
