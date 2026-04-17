@@ -29,7 +29,7 @@ staticfiles/
 static/
 local_settings.py
 apibackend/settings.py
-apibackend/
+apibackend/asgi.py
 fitnessbackend/
 requirements.txt
 

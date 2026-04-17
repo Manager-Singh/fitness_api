@@ -358,12 +358,15 @@ def generate_user_routines(user, optimization_breakdown):
 
     program_config = _get_program_config(age)
 
-    # Deactivate existing routines.
-    # We delete old routines instead of toggling is_active to False because older DBs
-    # may have a uniqueness constraint on (user, routine_type, is_active) that breaks
-    # when multiple inactive rows exist. Deleting avoids the integrity trap and keeps
-    # one canonical active routine per type.
-    UserRoutine.objects.filter(user=user).delete()
+    # Deactivate existing routines (do NOT delete).
+    #
+    # Rationale:
+    # - `WorkoutSession.user_routine` is `on_delete=PROTECT`, so deleting routines will
+    #   crash once any session exists (history must remain intact).
+    # - We removed the uniqueness constraint that previously forced delete-based regen.
+    #
+    # Invariant enforced in code: at most one active routine per user+type.
+    UserRoutine.objects.filter(user=user, is_active=True).update(is_active=False)
 
     created_routines = []
     ranked_segments = _questionnaire_ranked_segments(user)
