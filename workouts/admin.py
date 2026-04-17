@@ -1,12 +1,47 @@
 # workouts/admin.py
 from django.contrib import admin
 from django.utils.html import format_html
+from django.contrib import messages
 
 from .models import (
     Exercise, AgeBracket,
     RoutineTemplate, RoutineVariant, VariantExercise,
-    ExerciseCategory, Track, Tier,WorkoutSession,WorkoutEntry
+    ExerciseCategory, Track, Tier, WorkoutSession, WorkoutEntry,
+    UserRoutine, RoutineType, UserRoutineExercise
 )
+
+from posture.models import PostureReport
+from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
+from utils.routine_genrate import generate_user_routines
+
+
+def _default_breakdown():
+    out = {}
+    for seg, mx in POSTURE_SEGMENT_MAX_LOSS_CM.items():
+        cur = round(float(mx) * 0.5, 2)
+        out[seg] = {
+            "current_loss_cm": cur,
+            "max_loss_cm": mx,
+            "percent_optimized": posture_segment_opt_pct(cur, mx),
+        }
+    return out
+
+
+def _demo_scan_score_from_breakdown(breakdown: dict) -> dict:
+    """
+    Demo-friendly scan_score payload for admin tools.
+    The real scan pipeline stores richer data in PostureReport; this is only
+    to ensure routines have non-empty JSON fields for testing/UI rendering.
+    """
+    out = {}
+    for seg in ("spinal_compression", "posture_collapse", "pelvic_tilt_back", "leg_hamstring"):
+        seg_data = breakdown.get(seg) if isinstance(breakdown, dict) else None
+        try:
+            pct = int(float((seg_data or {}).get("percent_optimized", 0) or 0))
+        except Exception:
+            pct = 0
+        out[seg] = max(0, min(100, pct))
+    return out
 
 # ──────────────────────────  EXERCISE  ──────────────────────────
 @admin.register(Exercise)
@@ -187,3 +222,121 @@ class WorkoutSessionAdmin(admin.ModelAdmin):
     def get_routine_type(self, obj):
         return obj.user_routine.routine_type if obj.user_routine else None
     get_routine_type.short_description = "Routine Type"
+
+
+@admin.register(UserRoutine)
+class UserRoutineAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "routine_type", "is_active", "created_at")
+    list_filter = ("routine_type", "is_active", "created_at")
+    search_fields = ("user__email", "user__username", "id")
+    actions = ["regenerate_user_routines", "populate_scan_and_optimization", "regenerate_and_populate"]
+
+    @admin.action(description="Regenerate routines for selected routine's user(s)")
+    def regenerate_user_routines(self, request, queryset):
+        user_ids = list(queryset.values_list("user_id", flat=True).distinct())
+        ok = 0
+        failed = 0
+        for uid in user_ids:
+            try:
+                routine = queryset.filter(user_id=uid).order_by("-created_at").first()
+                user = routine.user if routine else None
+                if not user:
+                    continue
+                latest_report = PostureReport.objects.filter(user=user).order_by("-created_at").first()
+                breakdown = None
+                if latest_report and isinstance(latest_report.data, dict):
+                    breakdown = latest_report.data.get("optimization_breakdown")
+                if not breakdown:
+                    breakdown = _default_breakdown()
+                generate_user_routines(user, breakdown)
+                ok += 1
+            except Exception as e:
+                failed += 1
+                self.message_user(request, f"Failed to regenerate routines for user_id={uid}: {e}", level=messages.ERROR)
+
+        if ok:
+            self.message_user(request, f"Regenerated routines for {ok} user(s).", level=messages.SUCCESS)
+        if failed and not ok:
+            self.message_user(request, f"Failed for {failed} user(s).", level=messages.ERROR)
+
+    @admin.action(description="Populate scan_score + optimization_breakdown (latest scan or demo defaults)")
+    def populate_scan_and_optimization(self, request, queryset):
+        ok = 0
+        failed = 0
+        for routine in queryset.select_related("user"):
+            try:
+                latest_report = PostureReport.objects.filter(user=routine.user).order_by("-created_at").first()
+                data = latest_report.data if (latest_report and isinstance(latest_report.data, dict)) else {}
+                breakdown = data.get("optimization_breakdown") if isinstance(data, dict) else None
+                if not breakdown:
+                    breakdown = _default_breakdown()
+                scan_score = data.get("scan_score") if isinstance(data, dict) else None
+                if not isinstance(scan_score, dict) or not scan_score:
+                    scan_score = _demo_scan_score_from_breakdown(breakdown)
+
+                routine.optimization_breakdown = breakdown
+                routine.scan_score = scan_score
+                routine.save(update_fields=["optimization_breakdown", "scan_score", "updated_at"])
+                ok += 1
+            except Exception as e:
+                failed += 1
+                self.message_user(
+                    request,
+                    f"Failed to populate scores for routine_id={routine.id}: {e}",
+                    level=messages.ERROR,
+                )
+
+        if ok:
+            self.message_user(request, f"Populated scores for {ok} routine(s).", level=messages.SUCCESS)
+        if failed and not ok:
+            self.message_user(request, f"Failed for {failed} routine(s).", level=messages.ERROR)
+
+    @admin.action(description="Regenerate routines + populate scan/optimization (one click)")
+    def regenerate_and_populate(self, request, queryset):
+        """
+        One-click admin tool:
+        - Regenerate routines for the selected routines' users (deactivate old, create new)
+        - Populate scan_score + optimization_breakdown on the new active routines
+        """
+        user_ids = list(queryset.values_list("user_id", flat=True).distinct())
+        ok = 0
+        failed = 0
+        for uid in user_ids:
+            try:
+                routine = queryset.filter(user_id=uid).order_by("-created_at").first()
+                user = routine.user if routine else None
+                if not user:
+                    continue
+
+                latest_report = PostureReport.objects.filter(user=user).order_by("-created_at").first()
+                data = latest_report.data if (latest_report and isinstance(latest_report.data, dict)) else {}
+                breakdown = data.get("optimization_breakdown") if isinstance(data, dict) else None
+                if not breakdown:
+                    breakdown = _default_breakdown()
+
+                # Step 1: regenerate (creates new active routines)
+                generate_user_routines(user, breakdown)
+
+                # Step 2: populate on the new active routines
+                active_routines = UserRoutine.objects.filter(user=user, is_active=True)
+                for r in active_routines:
+                    scan_score = data.get("scan_score") if isinstance(data, dict) else None
+                    if not isinstance(scan_score, dict) or not scan_score:
+                        scan_score = _demo_scan_score_from_breakdown(breakdown)
+                    r.optimization_breakdown = breakdown
+                    r.scan_score = scan_score
+                    r.save(update_fields=["optimization_breakdown", "scan_score", "updated_at"])
+
+                ok += 1
+            except Exception as e:
+                failed += 1
+                self.message_user(
+                    request,
+                    f"Failed regenerate+populate for user_id={uid}: {e}",
+                    level=messages.ERROR,
+                )
+
+        if ok:
+            self.message_user(request, f"Regenerated+populated for {ok} user(s).", level=messages.SUCCESS)
+        if failed and not ok:
+            self.message_user(request, f"Failed for {failed} user(s).", level=messages.ERROR)

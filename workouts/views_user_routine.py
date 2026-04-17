@@ -143,6 +143,9 @@ class UserRoutineListView(APIView):
                     ex["user_routine_id"] = mixed_routine_id
                     # Keep the true underlying routine id so the server can route logs.
                     ex["source_user_routine_id"] = r_data.get("id")
+                    # Alias keys (some clients prefer explicit routine_id naming).
+                    ex["routine_id"] = mixed_routine_id
+                    ex["source_routine_id"] = r_data.get("id")
                     merged_exercises.append(ex)
 
             # Deterministic ordering: preserve per-routine order, posture first then HGH,
