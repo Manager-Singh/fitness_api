@@ -120,6 +120,7 @@ class UserRoutineListView(APIView):
             routines = list(routines_qs)
             posture = next((r for r in routines if str(r.routine_type).lower() == "posture"), None)
             hgh = next((r for r in routines if str(r.routine_type).lower() == "hgh"), None)
+            mixed_routine_id = posture.id if posture else (hgh.id if hgh else None)
 
             merged_exercises = []
             merged_created_at = None
@@ -137,7 +138,11 @@ class UserRoutineListView(APIView):
                 for ex in r_data.get("exercises", []) or []:
                     # Add minimal source context so clients can log correctly.
                     ex["source_routine_type"] = r_data.get("routine_type")
-                    ex["user_routine_id"] = r_data.get("id")
+                    # Expose a single routine id for the whole MIXED routine so clients
+                    # can POST workout logs with one `user_routine` value.
+                    ex["user_routine_id"] = mixed_routine_id
+                    # Keep the true underlying routine id so the server can route logs.
+                    ex["source_user_routine_id"] = r_data.get("id")
                     merged_exercises.append(ex)
 
             # Deterministic ordering: preserve per-routine order, posture first then HGH,

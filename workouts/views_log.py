@@ -83,8 +83,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         try:
             user_routine = UserRoutine.objects.get(pk=user_routine_id, user=request.user)
         except UserRoutine.DoesNotExist:
-            return Response({"detail": "UserRoutine not found"},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "UserRoutine not found"}, status=status.HTTP_404_NOT_FOUND)
 
         # Get user age
         try:
@@ -115,11 +114,36 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         ser = WorkoutEntryWriteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         exercise = ser.validated_data.get("exercise")
+
+        # Teen UX: `/api/my-routine` returns a single MIXED routine id, but exercises may
+        # physically belong to POSTURE or HGH routines. Auto-route the log accordingly.
         if exercise and not UserRoutineExercise.objects.filter(routine=user_routine, exercise=exercise).exists():
-            return Response(
-                {"detail": "Exercise is not assigned in this routine."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            if age < 21:
+                fallback_routine = (
+                    UserRoutine.objects.filter(user=request.user, is_active=True)
+                    .exclude(id=user_routine.id)
+                    .filter(exercises__exercise=exercise)
+                    .distinct()
+                    .first()
+                )
+                if fallback_routine:
+                    user_routine = fallback_routine
+                    # Ensure session exists for the routed routine (unique per user+routine+date).
+                    session, _ = WorkoutSession.objects.get_or_create(
+                        user=request.user,
+                        user_routine=user_routine,
+                        date=log_date,
+                    )
+                else:
+                    return Response(
+                        {"detail": "Exercise is not assigned in this routine."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                return Response(
+                    {"detail": "Exercise is not assigned in this routine."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         routine_type = str(getattr(user_routine, "routine_type", "") or "").lower()
         last_entry = (
             session.entries.filter(exercise=exercise).order_by("-created_at").first()
