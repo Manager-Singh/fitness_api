@@ -895,6 +895,17 @@ def get_posture_questions(request):
 
     # Spec lock: if teen initial scan is required, force fully locked posture state.
     if teen_scan_required:
+        # In scan-required locked state, routine progress should not reflect any
+        # previously assigned routines. Treat today's assigned/completed as zero.
+        assigned_core_count = 0
+        assigned_rec_count = 0
+        assigned_beast_count = 0
+        assigned_posture_total = 0
+        completed_posture_total = 0
+        completed_core_count = 0
+        assigned_hgh_total = 0
+        completed_hgh_total = 0
+
         posture_source = "pending_scan"
         ai_analysis = {
             "summary": "Initial scan required before posture analysis is available.",
