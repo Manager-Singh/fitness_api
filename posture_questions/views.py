@@ -69,7 +69,7 @@ from utils.posture.diagnostics_contract import build_posture_optimization_diagno
 from utils.monetization_gate import compute_monetization_flags
 from nutration.models_log import NutraEntry
 from posture_questions.serializers_dashboard import DashboardNewResponseSerializer
-from utils.user_time import user_today
+from utils.user_time import user_today, user_localize_dt
 from utils.teen_dashboard_dots import (
     teen_lifestyle_dots_for_day,
     teen_lifestyle_nutrition_combined_percent,
@@ -741,6 +741,21 @@ def get_posture_questions(request):
     teen_engine1_today_cm = 0.0
     teen_engine2_today_cm = 0.0
     teen_bio_today_cm = 0.0
+    # Trial-end snapshot cumulatives (used for post-day-7 unpaid flatline behavior).
+    teen_engine1_cumulative_trial_cm = 0.0
+    teen_engine2_cumulative_trial_cm = 0.0
+    teen_bio_cumulative_trial_cm = 0.0
+    trial_cutoff_date = None
+    try:
+        _ts = getattr(user, "trial_start", None)
+        if _ts:
+            # Spec (Sections 5.5 / 13.3): trial day boundaries are based on the user's local day.
+            # Use the user's local date of trial_start as day 1.
+            trial_start_local_date = user_localize_dt(user, _ts).date()
+            # Last full trial day (day 1..7 inclusive) is local start date + 6 days.
+            trial_cutoff_date = trial_start_local_date + timedelta(days=6)
+    except Exception:
+        trial_cutoff_date = None
     user_local_today = user_today(user)
     if is_teen_track:
         for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
@@ -764,6 +779,10 @@ def get_posture_questions(request):
                 teen_engine1_cumulative_cm += (e1_um / 10000.0)
                 teen_engine2_cumulative_cm += (float(e2_dm) / 100000.0)
                 teen_bio_cumulative_cm += (bio_um / 10000.0)
+                if trial_cutoff_date is not None and row.log_date <= trial_cutoff_date:
+                    teen_engine1_cumulative_trial_cm += (e1_um / 10000.0)
+                    teen_engine2_cumulative_trial_cm += (float(e2_dm) / 100000.0)
+                    teen_bio_cumulative_trial_cm += (bio_um / 10000.0)
                 if row.log_date == user_local_today:
                     teen_engine1_today_cm += (e1_um / 10000.0)
                     teen_engine2_today_cm += (float(e2_dm) / 100000.0)
@@ -773,6 +792,9 @@ def get_posture_questions(request):
         teen_engine1_cumulative_cm = round(teen_engine1_cumulative_cm, 4)
         teen_engine2_cumulative_cm = round(teen_engine2_cumulative_cm, 4)
         teen_bio_cumulative_cm = round(teen_bio_cumulative_cm, 4)
+        teen_engine1_cumulative_trial_cm = round(teen_engine1_cumulative_trial_cm, 4)
+        teen_engine2_cumulative_trial_cm = round(teen_engine2_cumulative_trial_cm, 4)
+        teen_bio_cumulative_trial_cm = round(teen_bio_cumulative_trial_cm, 4)
         teen_engine1_today_cm = round(teen_engine1_today_cm, 4)
         teen_engine2_today_cm = round(teen_engine2_today_cm, 4)
         teen_bio_today_cm = round(teen_bio_today_cm, 4)
@@ -1174,7 +1196,18 @@ def get_posture_questions(request):
                         if is_teen_track else None
                     ),
                     "red_us_optimized_line_cm": (
-                        round(current_cm_val + teen_engine2_cumulative_cm + teen_bio_cumulative_cm + teen_engine1_cumulative_cm, 4)
+                        # Spec (Sections 5.5 / 7.2 / 11.5): after day 7 (unpaid), the red line flatlines
+                        # while blue continues rising from biological growth.
+                        round(
+                            current_cm_val
+                            + (
+                                (teen_engine2_cumulative_trial_cm + teen_bio_cumulative_trial_cm)
+                                if full_access_trial_expired
+                                else (teen_engine2_cumulative_cm + teen_bio_cumulative_cm)
+                            )
+                            + (teen_engine1_cumulative_trial_cm if full_access_trial_expired else teen_engine1_cumulative_cm),
+                            4,
+                        )
                         if is_teen_track else None
                     ),
                     "green_true_optimized_cm": optimized_height_for_ui if is_teen_track else None,
@@ -1413,6 +1446,15 @@ def get_dashboard_new(request):
         and bool((payload.get("subscription") or {}).get("is_paid") is False)
         and bool(payload.get("full_access_trial_expired"))
     )
+    # Spec (Sections 5.5 / 7.2 / 11.5): post-day-7 unpaid teen red line (and height card)
+    # must flatline at the trial-end snapshot while blue continues to rise.
+    if teen_locked_post_day7 and display_lines.get("red_us_optimized_line_cm") is not None:
+        try:
+            teen_live_red_cm = float(display_lines.get("red_us_optimized_line_cm") or teen_live_red_cm)
+            teen_height_live_cm = float(teen_live_red_cm)
+            teen_growthmax_cm = float(teen_live_red_cm)
+        except Exception:
+            pass
     # Spec (Section 5.6 / 7.2): True Optimized Height is revealed ONLY when paid (not during trial).
     can_view_true_optimized = bool(is_teen and bool((payload.get("subscription") or {}).get("is_paid", False)))
     teen_scan_required = bool(scan_access.get("teen_scan_required", False))
