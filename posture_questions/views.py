@@ -747,14 +747,26 @@ def get_posture_questions(request):
             try:
                 md = row.metadata or {}
                 e1_um = int(md.get("engine1_delta_um", 0) or 0)
-                e2_um = int(md.get("engine2_delta_um", 0) or 0)
+                # Engine2 uses 0.1 μm storage (dμm) to preserve 0.5 μm/pt.
+                # Prefer the dedicated column when present; fall back to metadata for older rows.
+                e2_dm = None
+                try:
+                    e2_dm = int(getattr(row, "engine2_delta_dm", 0) or 0)
+                except Exception:
+                    e2_dm = None
+                if e2_dm is None or e2_dm == 0:
+                    try:
+                        e2_dm = int(md.get("engine2_delta_dm", 0) or 0)
+                    except Exception:
+                        e2_dm = 0
+                e2_um = int(round(float(e2_dm) / 10.0))
                 bio_um = int(md.get("bio_delta_um", 0) or 0)
                 teen_engine1_cumulative_cm += (e1_um / 10000.0)
-                teen_engine2_cumulative_cm += (e2_um / 10000.0)
+                teen_engine2_cumulative_cm += (float(e2_dm) / 100000.0)
                 teen_bio_cumulative_cm += (bio_um / 10000.0)
                 if row.log_date == user_local_today:
                     teen_engine1_today_cm += (e1_um / 10000.0)
-                    teen_engine2_today_cm += (e2_um / 10000.0)
+                    teen_engine2_today_cm += (float(e2_dm) / 100000.0)
                     teen_bio_today_cm += (bio_um / 10000.0)
             except Exception:
                 continue

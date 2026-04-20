@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Count
+from django.db import transaction
 
 from .models import WorkoutSession, UserRoutine
 from .serializers_log import (
@@ -18,6 +19,8 @@ from utils.check_payment import check_subscription_or_response
 from users.models import DailyLog
 from utils.user_time import user_localize_dt, user_today
 from workouts.models import UserRoutineExercise
+from users.spec_runtime import rebuild_ledger_from_date
+from workouts.models import WorkoutEntry
 
 
 class WorkoutLogViewSet(viewsets.ViewSet):
@@ -210,3 +213,86 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             "entry": WorkoutEntryReadSerializer(entry).data,
             "total_workouts_today": total_workouts_today
         }, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, pk=None):
+        """
+        PATCH /api/workout-logs/{id}/
+        Spec 14.2: editing a past log must rebuild HeightLedger from that date forward.
+        """
+        if not pk:
+            return Response({"detail": "id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        entry = (
+            WorkoutEntry.objects.filter(pk=pk, session__user=request.user)
+            .select_related("session", "exercise")
+            .first()
+        )
+        if not entry:
+            return Response({"detail": "Workout entry not found"}, status=status.HTTP_404_NOT_FOUND)
+        log_date = entry.session.date
+
+        # Only allow updating the mutable fields; exercise identity is immutable here.
+        if "points" in request.data:
+            try:
+                entry.points = max(0, int(request.data.get("points") or 0))
+            except Exception:
+                return Response({"detail": "Invalid points"}, status=status.HTTP_400_BAD_REQUEST)
+        for k in ("sets_done", "reps_done", "duration_s"):
+            if k in request.data:
+                v = request.data.get(k)
+                if v is None or v == "":
+                    setattr(entry, k, None)
+                else:
+                    try:
+                        setattr(entry, k, max(0, int(v)))
+                    except Exception:
+                        return Response({"detail": f"Invalid {k}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            entry.save()
+            out = rebuild_ledger_from_date(request.user, log_date)
+
+        return Response(
+            {
+                "ok": True,
+                "log_date": str(log_date),
+                "rebuilt_from": out.get("from_date"),
+                "days_rebuilt": out.get("days_rebuilt"),
+                "entry": WorkoutEntryReadSerializer(entry).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def update(self, request, pk=None):
+        # Treat PUT as PATCH for this endpoint.
+        return self.partial_update(request, pk=pk)
+
+    def destroy(self, request, pk=None):
+        """
+        DELETE /api/workout-logs/{id}/
+        Spec 14.2: deleting a past log must rebuild HeightLedger from that date forward.
+        """
+        if not pk:
+            return Response({"detail": "id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        entry = (
+            WorkoutEntry.objects.filter(pk=pk, session__user=request.user)
+            .select_related("session")
+            .first()
+        )
+        if not entry:
+            return Response({"detail": "Workout entry not found"}, status=status.HTTP_404_NOT_FOUND)
+        log_date = entry.session.date
+
+        with transaction.atomic():
+            entry.delete()
+            out = rebuild_ledger_from_date(request.user, log_date)
+
+        return Response(
+            {
+                "ok": True,
+                "deleted": True,
+                "log_date": str(log_date),
+                "rebuilt_from": out.get("from_date"),
+                "days_rebuilt": out.get("days_rebuilt"),
+            },
+            status=status.HTTP_200_OK,
+        )

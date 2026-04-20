@@ -19,13 +19,13 @@ class RebuildLedgerTests(TestCase):
             password="secret123",
         )
         dob = date.today() - timedelta(days=int(365.2425 * 15))
-        UserProfile.objects.create(
-            user=u,
-            birth_date=dob,
-            gender="male",
-            base_height_cm="160",
-            current_height_cm="160",
-        )
+        # UserProfile is auto-created by a post_save signal; update it instead of creating.
+        prof, _ = UserProfile.objects.get_or_create(user=u)
+        prof.birth_date = dob
+        prof.gender = "male"
+        prof.base_height_cm = "160"
+        prof.current_height_cm = "160"
+        prof.save()
         ps, _ = PostureState.objects.get_or_create(user=u)
         ps.scan_completed = True
         ps.questionnaire_completed = True

@@ -237,6 +237,18 @@ class MyPlanView(APIView):
                 type=Module.NUTRITION,
                 nutrition_category="teen",
             )
+            # Adult nutrition plan UX (spec-friendly):
+            # Only show the two detailed adult food modules in the plan list.
+            # Hide the "bucket" modules (Disc/Muscle) if they exist.
+            adult_plan_module_names = [
+                "Spine Support & Disc Lubrication Foods",
+                "Posture Muscle Repair & Fuel Foods",
+            ]
+            if type_q in ("", "nutrition"):
+                modules = modules.filter(
+                    Q(type=Module.LIFESTYLE)
+                    | Q(type=Module.NUTRITION, name__in=adult_plan_module_names)
+                )
 
         if type_q == "nutrition":
             modules = modules.filter(type=Module.NUTRITION)

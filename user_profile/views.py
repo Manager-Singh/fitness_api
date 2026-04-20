@@ -841,10 +841,13 @@ def save_payment_intent(request):
         except Exception:
             age = None
 
+        profile = UserProfile.objects.filter(user=request.user).first()
+
         return Response({
             'message': 'Payment verified and saved successfully',
             'payment_status': intent.status,
-            'age': age
+            'age': age,
+            'g_p_facial_armpit_hair': getattr(profile, "g_p_facial_armpit_hair", None)
         }, status=status.HTTP_200_OK)
 
     except Payment.DoesNotExist:

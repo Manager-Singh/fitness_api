@@ -169,6 +169,9 @@ class HeightLedger(models.Model):
     entry_type = models.CharField(max_length=24)
     delta_um = models.BigIntegerField(default=0)
     cumulative_um = models.BigIntegerField(default=0)
+    # Spec v3.2 (Section 13.4 / 14.1): Engine 2 uses 0.5 μm/pt. Store as integer
+    # deci-micrometers (0.1 μm) to preserve precision (1 pt = 5 dμm).
+    engine2_delta_dm = models.BigIntegerField(default=0)
     algorithm_version = models.CharField(max_length=30, default="v1")
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

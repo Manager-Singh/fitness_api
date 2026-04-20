@@ -1,5 +1,6 @@
 from datetime import date as dt, datetime, timedelta
 from django.db.models import Q, Sum
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
@@ -16,6 +17,7 @@ from utils.check_payment import check_subscription_or_response
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
 from utils.user_time import user_localize_dt, user_today
+from users.spec_runtime import rebuild_ledger_from_date
 
 class NutraLogViewSet(viewsets.ViewSet):
     @staticmethod
@@ -225,3 +227,78 @@ class NutraLogViewSet(viewsets.ViewSet):
         }
 
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, pk=None):
+        """
+        PATCH /api/nutra-logs/{id}/
+        Spec 14.2: editing a past log must rebuild HeightLedger from that date forward.
+        """
+        if not pk:
+            return Response({"detail": "id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        entry = (
+            NutraEntry.objects.filter(pk=pk, session__user=request.user)
+            .select_related("session", "module", "food", "activity")
+            .first()
+        )
+        if not entry:
+            return Response({"detail": "Nutrition entry not found"}, status=status.HTTP_404_NOT_FOUND)
+        log_date = entry.session.date
+
+        # Allow updating servings/score only. (Changing food/activity would change routing semantics.)
+        if "servings" in request.data:
+            entry.servings = str(request.data.get("servings") or "")
+        if "score" in request.data:
+            try:
+                v = request.data.get("score")
+                entry.score = None if (v is None or v == "") else max(0, int(v))
+            except Exception:
+                return Response({"detail": "Invalid score"}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            entry.save()
+            out = rebuild_ledger_from_date(request.user, log_date)
+
+        return Response(
+            {
+                "ok": True,
+                "log_date": str(log_date),
+                "rebuilt_from": out.get("from_date"),
+                "days_rebuilt": out.get("days_rebuilt"),
+                "entry": NutraEntryReadSerializer(entry).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def update(self, request, pk=None):
+        return self.partial_update(request, pk=pk)
+
+    def destroy(self, request, pk=None):
+        """
+        DELETE /api/nutra-logs/{id}/
+        Spec 14.2: deleting a past log must rebuild HeightLedger from that date forward.
+        """
+        if not pk:
+            return Response({"detail": "id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        entry = (
+            NutraEntry.objects.filter(pk=pk, session__user=request.user)
+            .select_related("session")
+            .first()
+        )
+        if not entry:
+            return Response({"detail": "Nutrition entry not found"}, status=status.HTTP_404_NOT_FOUND)
+        log_date = entry.session.date
+
+        with transaction.atomic():
+            entry.delete()
+            out = rebuild_ledger_from_date(request.user, log_date)
+
+        return Response(
+            {
+                "ok": True,
+                "deleted": True,
+                "log_date": str(log_date),
+                "rebuilt_from": out.get("from_date"),
+                "days_rebuilt": out.get("days_rebuilt"),
+            },
+            status=status.HTTP_200_OK,
+        )

@@ -136,26 +136,6 @@ def check_subscription_or_response(user):
     is_teen = bool(age_exact is not None and 13.0 <= float(age_exact) < 21.0)
     trial_day = None
 
-    # ✅ Trial check
-    if is_teen and trial_start and trial_end and trial_start <= now <= trial_end:
-
-        days_left = (trial_end - now).days
-        trial_day = int((now - trial_start).total_seconds() // 86400) + 1
-
-        return Response({
-            "expired": False,
-            "days_left": days_left,
-            "plan": "Trial",
-            "plan_type": "Free",
-            "is_paid": False,
-            "is_trial": True,
-            "trial_start": trial_start,
-            "trial_end": trial_end,
-            "trial_day": trial_day,
-            "age_exact": age_exact,
-            "message": f"Trial active ({days_left} days left)."
-        }, status=status.HTTP_200_OK)
-
     # 🔎 Check subscription
     latest_payment = (
         Payment.objects.filter(
@@ -166,6 +146,57 @@ def check_subscription_or_response(user):
         .order_by("-created_at")
         .first()
     )
+
+    # PAID must override trial (product expectation): if user purchased a paid plan,
+    # the response must reflect paid access even if trial window is still active.
+    if latest_payment:
+        package = latest_payment.package
+        try:
+            duration_months = int(package.duration)
+        except (ValueError, TypeError):
+            duration_months = 3
+        expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
+        if expiry_date >= now:
+            days_left = (expiry_date - now).days
+            if not bool(package.is_free):
+                return Response(
+                    {
+                        "expired": False,
+                        "days_left": days_left,
+                        "plan": package.name,
+                        "plan_type": "Paid",
+                        "is_paid": True,
+                        "is_trial": False,
+                        "trial_start": trial_start,
+                        "trial_end": trial_end,
+                        "trial_day": int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None,
+                        "age_exact": age_exact,
+                        "duration": package.get_duration_display(),
+                        "message": f"Paid subscription active ({days_left} days left).",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+    # ✅ Trial check (only when not currently paid)
+    if is_teen and trial_start and trial_end and trial_start <= now <= trial_end:
+        days_left = (trial_end - now).days
+        trial_day = int((now - trial_start).total_seconds() // 86400) + 1
+        return Response(
+            {
+                "expired": False,
+                "days_left": days_left,
+                "plan": "Trial",
+                "plan_type": "Free",
+                "is_paid": False,
+                "is_trial": True,
+                "trial_start": trial_start,
+                "trial_end": trial_end,
+                "trial_day": trial_day,
+                "age_exact": age_exact,
+                "message": f"Trial active ({days_left} days left).",
+            },
+            status=status.HTTP_200_OK,
+        )
 
     if not latest_payment:
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None

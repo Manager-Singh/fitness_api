@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.utils import timezone
+from django.db.models import Q, Sum, Count
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -17,6 +18,8 @@ from utils.monetization_gate import compute_monetization_flags
 from utils.engine_routing import apply_engine_routing
 from utils.user_time import user_localize_dt, user_today
 from workouts.models import Exercise, UserRoutine, WorkoutEntry, WorkoutSession
+from workouts.serializers_log import WorkoutEntryReadSerializer
+from nutration.serializers_log import NutraEntryReadSerializer
 
 
 def _adult_free_logging_locked(user) -> bool:
@@ -58,6 +61,93 @@ def _to_local_date(request, fallback):
     return local_date
 
 
+def _adult_food_points_for_engine(user, log_date):
+    """
+    Spec Section 11.3/11.6 (adults):
+    - only 4 qualifying foods count: top 2 from Disc + top 2 from Muscle
+    - cap at 12 points/day
+    """
+    entries = NutraEntry.objects.filter(
+        session__user=user,
+        session__date=log_date,
+        food__isnull=False,
+    ).select_related("module")
+    disc = []
+    muscle = []
+    for e in entries:
+        module = getattr(e, "module", None)
+        module_name = str(getattr(module, "name", "") or "").lower()
+        module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
+        score = float(e.score or 0)
+        if module_cat == "disc" or any(t in module_name for t in ("disc", "lubric", "spine")):
+            disc.append(score)
+        elif module_cat == "muscle" or any(t in module_name for t in ("muscle", "repair", "fuel")):
+            muscle.append(score)
+    selected = sorted(disc, reverse=True)[:2] + sorted(muscle, reverse=True)[:2]
+    return float(sum(selected))
+
+
+def _daily_totals_payload(user, log_date, *, age_exact):
+    """
+    Produce Section-17-style daily totals and gate/cap flags.
+    """
+    age = 0
+    try:
+        age = int(get_user_age(user) or 0)
+    except Exception:
+        age = 0
+    exercise_logged_today = WorkoutEntry.objects.filter(
+        session__user=user,
+        session__date=log_date,
+    ).exists()
+    daily = DailyLog.objects.filter(user=user, log_date=log_date).first()
+
+    daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
+    daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
+    daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
+
+    # Nutrition: spec math has an exercise-validation gate.
+    raw_food_points = (
+        NutraEntry.objects.filter(
+            session__user=user,
+            session__date=log_date,
+            food__isnull=False,
+        ).aggregate(total=Sum("score"))["total"]
+        or 0
+    )
+    raw_food_points = float(raw_food_points or 0)
+    if age >= 21:
+        effective_food_points = min(_adult_food_points_for_engine(user, log_date), 12.0) if exercise_logged_today else 0.0
+        cap_limit = 12.0
+        # "Cap reached" in adult mode means logged beyond what the engine can count.
+        food_entry_count = NutraEntry.objects.filter(
+            session__user=user,
+            session__date=log_date,
+            food__isnull=False,
+        ).count()
+        cap_reached = bool(food_entry_count > 4 or raw_food_points > effective_food_points or effective_food_points >= cap_limit)
+    else:
+        effective_food_points = min(raw_food_points, 35.0) if exercise_logged_today else 0.0
+        cap_limit = 35.0
+        cap_reached = bool(raw_food_points >= cap_limit)
+
+    counts_toward_engine_nutrition = bool(exercise_logged_today and effective_food_points > 0)
+    diary_note = "Daily nutrition cap reached. Recorded in diary only." if cap_reached else None
+
+    daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else ((daily.food_points if daily else 0) or 0)))
+
+    return {
+        "daily_posture_pts_today": daily_posture_pts_today,
+        "daily_hgh_pts_today": daily_hgh_pts_today,
+        "daily_nutrition_pts_today": daily_nutrition_pts_today,
+        "daily_lifestyle_pts_today": daily_lifestyle_pts_today,
+        "exercises_done": bool(exercise_logged_today),
+        "nutrition_counts_toward_engine": counts_toward_engine_nutrition,
+        "cap_reached": bool(cap_reached),
+        "diary_note": diary_note,
+    }
+
+
 class LogExerciseAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -89,6 +179,9 @@ class LogExerciseAPIView(APIView):
                 return Response({"error": "invalid_user_routine"}, status=422)
 
         local_date = _to_local_date(request, user_today(request.user))
+        before = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        before_engine1 = int((before.engine1_points if before else 0) or 0)
+        before_engine2 = int((before.engine2_points if before else 0) or 0)
         last_entry = (
             WorkoutEntry.objects.filter(
                 session__user=request.user,
@@ -99,7 +192,14 @@ class LogExerciseAPIView(APIView):
             .first()
         )
         if last_entry and (timezone.now() - last_entry.created_at).total_seconds() < 60:
-            return Response({"error": "duplicate_log_blocked", "cooldown_s": 60}, status=429)
+            return Response(
+                {
+                    "error": "duplicate_log",
+                    "message": "This exercise was already logged within 60 seconds.",
+                    "cooldown_s": 60,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         session, _ = WorkoutSession.objects.get_or_create(
             user=request.user,
@@ -123,7 +223,26 @@ class LogExerciseAPIView(APIView):
             routine_type=(user_routine.routine_type if user_routine else None),
             entry_kind="exercise",
         )
-        return Response({"ok": True, "entry_id": entry.id, "log_date": str(local_date)}, status=200)
+        daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        after_engine1 = int((daily.engine1_points if daily else 0) or 0)
+        after_engine2 = int((daily.engine2_points if daily else 0) or 0)
+        totals = _daily_totals_payload(request.user, local_date, age_exact=age_exact)
+        return Response(
+            {
+                "logged": True,
+                "log_date": str(local_date),
+                "counts_toward_engine": True,
+                "daily_posture_pts_today": totals["daily_posture_pts_today"],
+                "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
+                "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
+                "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
+                "exercises_done": totals["exercises_done"],
+                "engine1_points_delta": max(0, after_engine1 - before_engine1),
+                "engine2_points_delta": max(0, after_engine2 - before_engine2),
+                "entry": WorkoutEntryReadSerializer(entry).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogFoodAPIView(APIView):
@@ -144,6 +263,9 @@ class LogFoodAPIView(APIView):
         if not module_id or not food_id:
             return Response({"error": "module_id and food_id are required."}, status=422)
         local_date = _to_local_date(request, user_today(request.user))
+        before = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        before_engine1 = int((before.engine1_points if before else 0) or 0)
+        before_engine2 = int((before.engine2_points if before else 0) or 0)
         session, _ = NutraSession.objects.get_or_create(user=request.user, date=local_date)
         entry = NutraEntry.objects.create(
             session=session,
@@ -160,7 +282,29 @@ class LogFoodAPIView(APIView):
             points=(entry.score or 0),
             entry_kind="food",
         )
-        return Response({"ok": True, "entry_id": entry.id, "log_date": str(local_date)}, status=200)
+        daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        after_engine1 = int((daily.engine1_points if daily else 0) or 0)
+        after_engine2 = int((daily.engine2_points if daily else 0) or 0)
+        totals = _daily_totals_payload(request.user, local_date, age_exact=age_exact)
+        counts_toward_engine = bool(totals["nutrition_counts_toward_engine"])
+        return Response(
+            {
+                "logged": True,
+                "log_date": str(local_date),
+                "counts_toward_engine": counts_toward_engine,
+                "daily_posture_pts_today": totals["daily_posture_pts_today"],
+                "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
+                "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
+                "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
+                "exercises_done": totals["exercises_done"],
+                "cap_reached": totals["cap_reached"],
+                "diary_note": totals["diary_note"],
+                "engine1_points_delta": max(0, after_engine1 - before_engine1),
+                "engine2_points_delta": max(0, after_engine2 - before_engine2),
+                "entry": NutraEntryReadSerializer(entry).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogLifestyleAPIView(APIView):
@@ -181,6 +325,10 @@ class LogLifestyleAPIView(APIView):
         if not module_id or not activity_id:
             return Response({"error": "module_id and activity_id are required."}, status=422)
         local_date = _to_local_date(request, user_today(request.user))
+        before = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        before_engine1 = int((before.engine1_points if before else 0) or 0)
+        before_engine2 = int((before.engine2_points if before else 0) or 0)
+        before_lifestyle = int((before.lifestyle_points if before else 0) or 0)
         session, _ = NutraSession.objects.get_or_create(user=request.user, date=local_date)
         entry = NutraEntry.objects.create(
             session=session,
@@ -196,7 +344,33 @@ class LogLifestyleAPIView(APIView):
             points=(entry.score or 0),
             entry_kind="lifestyle",
         )
-        return Response({"ok": True, "entry_id": entry.id, "log_date": str(local_date)}, status=200)
+        daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
+        after_engine1 = int((daily.engine1_points if daily else 0) or 0)
+        after_engine2 = int((daily.engine2_points if daily else 0) or 0)
+        after_lifestyle = int((daily.lifestyle_points if daily else 0) or 0)
+        totals = _daily_totals_payload(request.user, local_date, age_exact=age_exact)
+
+        # Spec-style: lifestyle is teens-only for engine credit.
+        pts_awarded = max(0, after_engine2 - before_engine2) if (age_exact is not None and float(age_exact) < 21.0) else 0
+        counts_toward_engine = bool(pts_awarded > 0)
+        return Response(
+            {
+                "logged": True,
+                "log_date": str(local_date),
+                "pts_awarded": int(pts_awarded),
+                "counts_toward_engine": counts_toward_engine,
+                "daily_posture_pts_today": totals["daily_posture_pts_today"],
+                "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
+                "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
+                "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
+                "exercises_done": totals["exercises_done"],
+                "engine1_points_delta": max(0, after_engine1 - before_engine1),
+                "engine2_points_delta": max(0, after_engine2 - before_engine2),
+                "lifestyle_points_delta": max(0, after_lifestyle - before_lifestyle),
+                "entry": NutraEntryReadSerializer(entry).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserStateAPIView(APIView):
@@ -204,7 +378,14 @@ class UserStateAPIView(APIView):
 
     def get(self, request):
         user = request.user
-        compute_daily_height_for_user(user)
+        # Spec Section 14.1: reads should not mutate HeightLedger.
+        # Runtime compute is handled by the daily pipeline/cron.
+        #
+        # Optional debug escape hatch: staff can force recompute explicitly.
+        if str(request.query_params.get("recompute") or "").strip() in {"1", "true", "yes"} and bool(
+            getattr(user, "is_staff", False)
+        ):
+            compute_daily_height_for_user(user, force_recompute=True)
         profile = UserProfile.objects.filter(user=user).first()
         posture_state, _ = PostureState.objects.get_or_create(user=user)
         has_scan = PostureReport.objects.filter(user=user).exists()

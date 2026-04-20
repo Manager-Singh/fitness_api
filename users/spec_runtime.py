@@ -25,6 +25,26 @@ def _to_um(cm_value):
         return 0
 
 
+def _to_dm_from_engine2_points(engine2_points):
+    """
+    Spec v3.2 (Section 13.4 / 14.1):
+    - Engine 2: 1 point = 0.00005 cm = 0.5 μm = 5 dμm (0.1 μm units)
+    Store as integer dμm to preserve half-micron precision.
+    """
+    try:
+        return int(round(float(engine2_points or 0) * 5.0))
+    except Exception:
+        return 0
+
+
+def _um_from_dm(dm_value):
+    """Convert deci-micrometers (0.1 μm) → rounded integer μm."""
+    try:
+        return int(round(float(dm_value or 0) / 10.0))
+    except Exception:
+        return 0
+
+
 def _get_or_create_state(user):
     state, _ = PostureState.objects.get_or_create(user=user)
     latest_report = PostureReport.objects.filter(user=user).order_by("-created_at").first()
@@ -293,29 +313,27 @@ def rebuild_ledger_from_date(user, from_date):
         state = _reset_adult_posture_segments_from_latest_scan(user)
         _replay_adult_engine1_ledger_before(user, from_date, state)
 
-    days = list(
+    # Primary source is DailyLog, but seeded/test data may create Workout/Nutra rows
+    # without creating DailyLog rows for every date. Always union all candidate days.
+    dailylog_days = list(
         DailyLog.objects.filter(user=user, log_date__gte=from_date)
-        .order_by("log_date")
         .values_list("log_date", flat=True)
         .distinct()
     )
-    # If DailyLog isn't present yet (e.g. seeded workout/nutrition rows),
-    # derive candidate days from raw sessions/entries so the ledger can be built.
-    if not days:
-        from nutration.models_log import NutraEntry
-        from workouts.models import WorkoutEntry
+    from nutration.models_log import NutraEntry
+    from workouts.models import WorkoutEntry
 
-        workout_days = list(
-            WorkoutEntry.objects.filter(session__user=user, session__date__gte=from_date)
-            .values_list("session__date", flat=True)
-            .distinct()
-        )
-        nutra_days = list(
-            NutraEntry.objects.filter(session__user=user, session__date__gte=from_date)
-            .values_list("session__date", flat=True)
-            .distinct()
-        )
-        days = sorted({*workout_days, *nutra_days})
+    workout_days = list(
+        WorkoutEntry.objects.filter(session__user=user, session__date__gte=from_date)
+        .values_list("session__date", flat=True)
+        .distinct()
+    )
+    nutra_days = list(
+        NutraEntry.objects.filter(session__user=user, session__date__gte=from_date)
+        .values_list("session__date", flat=True)
+        .distinct()
+    )
+    days = sorted({*dailylog_days, *workout_days, *nutra_days})
     results = []
     for d in days:
         results.append(compute_daily_height_for_user(user, log_date=d, force_recompute=True))
@@ -495,7 +513,9 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
 
     # Section 11 formulas and routing.
     engine1_delta_um = _to_um(e1 * POINTS_TO_CM_ENGINE1)
-    engine2_delta_um = _to_um(e2 * POINTS_TO_CM_ENGINE2)
+    # Engine2 must preserve 0.5 μm increments: store as dμm, derive μm only for legacy totals.
+    engine2_delta_dm = _to_dm_from_engine2_points(e2)
+    engine2_delta_um = _um_from_dm(engine2_delta_dm)
     bio_delta_um = 0
 
     if 13 <= age <= 20:
@@ -529,6 +549,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         # Preserve engine1 priority for adult posture recovery.
         engine1_delta_um = min(engine1_delta_um, total_today_um)
         engine2_delta_um = max(0, total_today_um - engine1_delta_um)
+        engine2_delta_dm = int(engine2_delta_um) * 10
 
     # Final daily delta (teens include biological auto gain).
     delta_um = max(0, int(engine1_delta_um + engine2_delta_um + bio_delta_um))
@@ -540,21 +561,48 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             delta_um = 0
             engine1_delta_um = 0
             engine2_delta_um = 0
+            engine2_delta_dm = 0
             bio_delta_um = 0
         # Teens require scan before posture/hgh gains, but biological growth still applies.
         if 13 <= age <= 20 and (not state.scan_completed):
             engine1_delta_um = 0
             engine2_delta_um = 0
+            engine2_delta_dm = 0
             delta_um = max(0, int(bio_delta_um))
             delta_cm = round(delta_um / 10000.0, 4)
 
-    prev = (
-        HeightLedger.objects.filter(user=user, entry_type="daily_compute")
-        .order_by("-log_date", "-created_at")
-        .first()
+    # Cumulative gain must not lose Engine2 half-micron increments.
+    # Re-derive cumulative from atomic per-day columns:
+    # total_um = SUM(engine1_delta_um) + SUM(bio_delta_um) + ROUND(SUM(engine2_delta_dm) / 10)
+    prior_engine1_um = 0
+    prior_bio_um = 0
+    prior_engine2_dm = 0
+    for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
+        md = row.metadata or {}
+        try:
+            prior_engine1_um += int(md.get("engine1_delta_um", 0) or 0)
+        except Exception:
+            pass
+        try:
+            prior_bio_um += int(md.get("bio_delta_um", 0) or 0)
+        except Exception:
+            pass
+        try:
+            if getattr(row, "engine2_delta_dm", None) is not None:
+                prior_engine2_dm += int(row.engine2_delta_dm or 0)
+            else:
+                # Backward-compatible fallback (older rows).
+                prior_engine2_dm += int(md.get("engine2_delta_dm", 0) or 0)
+        except Exception:
+            pass
+    new_cum = (
+        max(0, prior_engine1_um)
+        + max(0, prior_bio_um)
+        + int(round(max(0, prior_engine2_dm) / 10.0))
+        + max(0, int(engine1_delta_um))
+        + max(0, int(bio_delta_um))
+        + int(round(max(0, int(engine2_delta_dm)) / 10.0))
     )
-    prev_cum = prev.cumulative_um if prev else 0
-    new_cum = prev_cum + max(0, delta_um)
 
     HeightLedger.objects.create(
         user=user,
@@ -562,11 +610,14 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         entry_type="daily_compute",
         delta_um=max(0, delta_um),
         cumulative_um=new_cum,
+        engine2_delta_dm=max(0, int(engine2_delta_dm)),
         algorithm_version="v1",
         metadata={
             "engine1_points": e1,
             "engine2_points": e2,
             "engine1_delta_um": int(engine1_delta_um),
+            # Store both for backward compatibility; dm is authoritative for Engine2 precision.
+            "engine2_delta_dm": int(engine2_delta_dm),
             "engine2_delta_um": int(engine2_delta_um),
             "bio_delta_um": int(bio_delta_um),
             "scan_completed": bool(state and state.scan_completed),
