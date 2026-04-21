@@ -143,15 +143,24 @@ class UserAdmin(admin.ModelAdmin):
                 PostureState.objects.filter(user_id__in=user_ids).delete()
 
                 # Workouts: delete entries then sessions (sessions reference routines via PROTECT).
+                # NOTE: some legacy rows have WorkoutSession.user = NULL but still reference a routine.
+                # Delete by BOTH dimensions to ensure PROTECT does not block routine deletes.
+                routines = UserRoutine.objects.filter(user_id__in=user_ids)
+                routine_ids = list(routines.values_list("id", flat=True))
+
                 WorkoutEntry.objects.filter(session__user_id__in=user_ids).delete()
+                if routine_ids:
+                    WorkoutEntry.objects.filter(session__user_routine_id__in=routine_ids).delete()
+
                 WorkoutSession.objects.filter(user_id__in=user_ids).delete()
+                if routine_ids:
+                    WorkoutSession.objects.filter(user_routine_id__in=routine_ids).delete()
 
                 # Nutrition/lifestyle logs.
                 NutraEntry.objects.filter(session__user_id__in=user_ids).delete()
                 NutraSession.objects.filter(user_id__in=user_ids).delete()
 
                 # Routines: exercises first, then routines.
-                routines = UserRoutine.objects.filter(user_id__in=user_ids)
                 UserRoutineExercise.objects.filter(routine__in=routines).delete()
                 routines.delete()
 
