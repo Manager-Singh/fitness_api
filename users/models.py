@@ -169,6 +169,10 @@ class HeightLedger(models.Model):
     entry_type = models.CharField(max_length=24)
     delta_um = models.BigIntegerField(default=0)
     cumulative_um = models.BigIntegerField(default=0)
+    # Spec v3.2 (Section 14.1): keep atomic per-engine deltas queryable.
+    # Stored as integer micrometers (μm). These mirror values stored in metadata.
+    engine1_delta_um = models.BigIntegerField(default=0)
+    bio_delta_um = models.BigIntegerField(default=0)
     # Spec v3.2 (Section 13.4 / 14.1): Engine 2 uses 0.5 μm/pt. Store as integer
     # deci-micrometers (0.1 μm) to preserve precision (1 pt = 5 dμm).
     engine2_delta_dm = models.BigIntegerField(default=0)

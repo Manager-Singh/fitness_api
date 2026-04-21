@@ -26,6 +26,7 @@ from utils.posture_optimizer import calculate_optimization_breakdown
 from utils.graph_age_projection import calculate_height_projection
 
 from django.utils import timezone
+from django.db.models import Sum
 from utils.fcm import send_push_fcm
 from utils.routine_genrate import generate_user_routines
 
@@ -128,20 +129,9 @@ def upsert_posture_questions(request):
         user=user,
         request_data=request.data
     )
-    nrescan = request.data.get("lastscan")
-    if nrescan == "yes":
-        mprofile = UserProfile.objects.get(user=user)
-        mprofile.last_scan = timezone.now()
-        mprofile.save()
-        tuser = request.user
-        # Trial is strictly teen-only by exact age (13.0 <= age < 21.0).
-        age_exact_scan = get_user_age_exact(tuser) or 0.0
-        if 13.0 <= float(age_exact_scan) < 21.0:
-            if tuser.trial_start is None:
-                tuser.trial_start = timezone.now()
-            if tuser.trial_end is None:
-                tuser.trial_end = tuser.trial_start + timedelta(days=7)
-            tuser.save()
+    # IMPORTANT:
+    # Do not touch `UserProfile.last_scan` from questionnaire/profile update flows.
+    # `last_scan` is reserved for successful camera scans (posture/views.py).
 
 
     # Section 3 (adults only): compute and persist manual questionnaire state.
@@ -721,15 +711,19 @@ def get_posture_questions(request):
         )
         validated_engine1_um = 0
         if validated_dates:
-            for row in HeightLedger.objects.filter(
+            q = HeightLedger.objects.filter(
                 user=user,
                 entry_type="daily_compute",
                 log_date__in=validated_dates,
-            ):
-                try:
-                    validated_engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0))
-                except Exception:
-                    continue
+            )
+            validated_engine1_um = int(q.aggregate(v=Sum("engine1_delta_um")).get("v") or 0)
+            # Backward compatibility: fall back to metadata if older rows weren't backfilled yet.
+            if validated_engine1_um == 0 and q.exists():
+                for row in q.only("metadata").iterator(chunk_size=500):
+                    try:
+                        validated_engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
+                    except Exception:
+                        continue
         posture_plus_cumulative_cm = round(validated_engine1_um / 10000.0, 4)
     genetic_plus_cumulative_cm = round(
         float(score_summary.get("teen_engine2_boost_cm", 0)),
@@ -758,37 +752,71 @@ def get_posture_questions(request):
         trial_cutoff_date = None
     user_local_today = user_today(user)
     if is_teen_track:
-        for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
-            try:
-                md = row.metadata or {}
-                e1_um = int(md.get("engine1_delta_um", 0) or 0)
-                # Engine2 uses 0.1 μm storage (dμm) to preserve 0.5 μm/pt.
-                # Prefer the dedicated column when present; fall back to metadata for older rows.
-                e2_dm = None
+        qs = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
+
+        agg_all = qs.aggregate(
+            e1_um=Sum("engine1_delta_um"),
+            bio_um=Sum("bio_delta_um"),
+            e2_dm=Sum("engine2_delta_dm"),
+        )
+        teen_engine1_cumulative_cm = float(int(agg_all.get("e1_um") or 0) / 10000.0)
+        teen_engine2_cumulative_cm = float(int(agg_all.get("e2_dm") or 0) / 100000.0)
+        teen_bio_cumulative_cm = float(int(agg_all.get("bio_um") or 0) / 10000.0)
+
+        if trial_cutoff_date is not None:
+            agg_trial = qs.filter(log_date__lte=trial_cutoff_date).aggregate(
+                e1_um=Sum("engine1_delta_um"),
+                bio_um=Sum("bio_delta_um"),
+                e2_dm=Sum("engine2_delta_dm"),
+            )
+            teen_engine1_cumulative_trial_cm = float(int(agg_trial.get("e1_um") or 0) / 10000.0)
+            teen_engine2_cumulative_trial_cm = float(int(agg_trial.get("e2_dm") or 0) / 100000.0)
+            teen_bio_cumulative_trial_cm = float(int(agg_trial.get("bio_um") or 0) / 10000.0)
+
+        agg_today = qs.filter(log_date=user_local_today).aggregate(
+            e1_um=Sum("engine1_delta_um"),
+            bio_um=Sum("bio_delta_um"),
+            e2_dm=Sum("engine2_delta_dm"),
+        )
+        teen_engine1_today_cm = float(int(agg_today.get("e1_um") or 0) / 10000.0)
+        teen_engine2_today_cm = float(int(agg_today.get("e2_dm") or 0) / 100000.0)
+        teen_bio_today_cm = float(int(agg_today.get("bio_um") or 0) / 10000.0)
+
+        # Backward compatibility: if we have rows but totals are zeros, recompute from metadata.
+        if (
+            teen_engine1_cumulative_cm == 0.0
+            and teen_engine2_cumulative_cm == 0.0
+            and teen_bio_cumulative_cm == 0.0
+            and qs.exists()
+        ):
+            teen_engine1_cumulative_cm = 0.0
+            teen_engine2_cumulative_cm = 0.0
+            teen_bio_cumulative_cm = 0.0
+            teen_engine1_cumulative_trial_cm = 0.0
+            teen_engine2_cumulative_trial_cm = 0.0
+            teen_bio_cumulative_trial_cm = 0.0
+            teen_engine1_today_cm = 0.0
+            teen_engine2_today_cm = 0.0
+            teen_bio_today_cm = 0.0
+            for row in qs.only("metadata", "log_date", "engine2_delta_dm").iterator(chunk_size=500):
                 try:
-                    e2_dm = int(getattr(row, "engine2_delta_dm", 0) or 0)
+                    md = row.metadata or {}
+                    e1_um = int(md.get("engine1_delta_um", 0) or 0)
+                    bio_um = int(md.get("bio_delta_um", 0) or 0)
+                    e2_dm = int(getattr(row, "engine2_delta_dm", 0) or 0) or int(md.get("engine2_delta_dm", 0) or 0)
+                    teen_engine1_cumulative_cm += (e1_um / 10000.0)
+                    teen_engine2_cumulative_cm += (float(e2_dm) / 100000.0)
+                    teen_bio_cumulative_cm += (bio_um / 10000.0)
+                    if trial_cutoff_date is not None and row.log_date <= trial_cutoff_date:
+                        teen_engine1_cumulative_trial_cm += (e1_um / 10000.0)
+                        teen_engine2_cumulative_trial_cm += (float(e2_dm) / 100000.0)
+                        teen_bio_cumulative_trial_cm += (bio_um / 10000.0)
+                    if row.log_date == user_local_today:
+                        teen_engine1_today_cm += (e1_um / 10000.0)
+                        teen_engine2_today_cm += (float(e2_dm) / 100000.0)
+                        teen_bio_today_cm += (bio_um / 10000.0)
                 except Exception:
-                    e2_dm = None
-                if e2_dm is None or e2_dm == 0:
-                    try:
-                        e2_dm = int(md.get("engine2_delta_dm", 0) or 0)
-                    except Exception:
-                        e2_dm = 0
-                e2_um = int(round(float(e2_dm) / 10.0))
-                bio_um = int(md.get("bio_delta_um", 0) or 0)
-                teen_engine1_cumulative_cm += (e1_um / 10000.0)
-                teen_engine2_cumulative_cm += (float(e2_dm) / 100000.0)
-                teen_bio_cumulative_cm += (bio_um / 10000.0)
-                if trial_cutoff_date is not None and row.log_date <= trial_cutoff_date:
-                    teen_engine1_cumulative_trial_cm += (e1_um / 10000.0)
-                    teen_engine2_cumulative_trial_cm += (float(e2_dm) / 100000.0)
-                    teen_bio_cumulative_trial_cm += (bio_um / 10000.0)
-                if row.log_date == user_local_today:
-                    teen_engine1_today_cm += (e1_um / 10000.0)
-                    teen_engine2_today_cm += (float(e2_dm) / 100000.0)
-                    teen_bio_today_cm += (bio_um / 10000.0)
-            except Exception:
-                continue
+                    continue
         teen_engine1_cumulative_cm = round(teen_engine1_cumulative_cm, 4)
         teen_engine2_cumulative_cm = round(teen_engine2_cumulative_cm, 4)
         teen_bio_cumulative_cm = round(teen_bio_cumulative_cm, 4)

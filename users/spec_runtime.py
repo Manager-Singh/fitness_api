@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.utils import timezone
+from django.db.models import Sum
 
 from posture.models import PostureReport
 from nutration.models_log import NutraEntry
@@ -43,6 +44,48 @@ def _um_from_dm(dm_value):
         return int(round(float(dm_value or 0) / 10.0))
     except Exception:
         return 0
+
+
+def _sum_prior_engine_deltas(user):
+    """
+    Fast path for Section 14.1 cumulative re-derivation.
+
+    Prefer atomic columns when present; fall back to metadata for older rows.
+    """
+    qs = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
+    agg = qs.aggregate(
+        e1_um=Sum("engine1_delta_um"),
+        bio_um=Sum("bio_delta_um"),
+        e2_dm=Sum("engine2_delta_dm"),
+    )
+    prior_engine1_um = int(agg.get("e1_um") or 0)
+    prior_bio_um = int(agg.get("bio_um") or 0)
+    prior_engine2_dm = int(agg.get("e2_dm") or 0)
+
+    # Backward compatibility: if we have history but totals are zero, older rows may
+    # still only have JSON metadata populated. Recompute from JSON in that case.
+    if (prior_engine1_um == 0 and prior_bio_um == 0 and prior_engine2_dm == 0) and qs.exists():
+        prior_engine1_um = 0
+        prior_bio_um = 0
+        prior_engine2_dm = 0
+        for row in qs.only("metadata", "engine2_delta_dm").iterator(chunk_size=500):
+            md = row.metadata or {}
+            try:
+                prior_engine1_um += int(md.get("engine1_delta_um", 0) or 0)
+            except Exception:
+                pass
+            try:
+                prior_bio_um += int(md.get("bio_delta_um", 0) or 0)
+            except Exception:
+                pass
+            try:
+                prior_engine2_dm += int(getattr(row, "engine2_delta_dm", 0) or 0) or int(
+                    md.get("engine2_delta_dm", 0) or 0
+                )
+            except Exception:
+                pass
+
+    return prior_engine1_um, prior_bio_um, prior_engine2_dm
 
 
 def _get_or_create_state(user):
@@ -574,27 +617,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     # Cumulative gain must not lose Engine2 half-micron increments.
     # Re-derive cumulative from atomic per-day columns:
     # total_um = SUM(engine1_delta_um) + SUM(bio_delta_um) + ROUND(SUM(engine2_delta_dm) / 10)
-    prior_engine1_um = 0
-    prior_bio_um = 0
-    prior_engine2_dm = 0
-    for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
-        md = row.metadata or {}
-        try:
-            prior_engine1_um += int(md.get("engine1_delta_um", 0) or 0)
-        except Exception:
-            pass
-        try:
-            prior_bio_um += int(md.get("bio_delta_um", 0) or 0)
-        except Exception:
-            pass
-        try:
-            if getattr(row, "engine2_delta_dm", None) is not None:
-                prior_engine2_dm += int(row.engine2_delta_dm or 0)
-            else:
-                # Backward-compatible fallback (older rows).
-                prior_engine2_dm += int(md.get("engine2_delta_dm", 0) or 0)
-        except Exception:
-            pass
+    prior_engine1_um, prior_bio_um, prior_engine2_dm = _sum_prior_engine_deltas(user)
     new_cum = (
         max(0, prior_engine1_um)
         + max(0, prior_bio_um)
@@ -610,6 +633,8 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         entry_type="daily_compute",
         delta_um=max(0, delta_um),
         cumulative_um=new_cum,
+        engine1_delta_um=max(0, int(engine1_delta_um)),
+        bio_delta_um=max(0, int(bio_delta_um)),
         engine2_delta_dm=max(0, int(engine2_delta_dm)),
         algorithm_version="v1",
         metadata={

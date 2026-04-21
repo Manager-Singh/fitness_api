@@ -1039,7 +1039,7 @@ from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.check_payment import check_subscription_or_response
 from utils.ai_analysis import save_ai_analysis_full_scan
-from datetime import timedelta
+from datetime import timedelta, datetime, date
 import uuid
 from .utils import analyze_posture as analyze_image_posture
 from users.models import HeightLedger, PostureState
@@ -1047,6 +1047,34 @@ from utils.age import get_user_age_exact
 from utils.age import get_user_age
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+
+def _make_json_safe(value):
+    """
+    Ensure values are JSON-serializable for JSONField storage.
+    Converts datetimes/dates to ISO-8601 strings and normalizes common types.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _make_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_safe(v) for v in value]
+    # Fall back to string to avoid JSON serialization errors (e.g., Decimal, model instances).
+    try:
+        json.dumps(value)
+        return value
+    except Exception:
+        return str(value)
 
 
 def encode_image(file):
@@ -1073,7 +1101,7 @@ def extract_json_request_data(request):
         except Exception:
             clean_data[key] = value
 
-    return clean_data
+    return _make_json_safe(clean_data)
 
 
 def _enforce_scan_access(user):
@@ -1096,10 +1124,17 @@ def _enforce_scan_access(user):
 
     if age >= 21:
         if not is_paid and last_scan is not None:
-            return {
+            payload = {
                 "error": "scan_locked_paywall",
                 "message": "Re-scans are locked on free adult plan. Unlock paid plan to continue.",
-            }, 403
+                "debug": {
+                    "tier": "adult",
+                    "age": age,
+                    "is_paid": is_paid,
+                    "last_scan": last_scan.isoformat() if last_scan else None,
+                },
+            }
+            return payload, 403
         if is_paid and last_scan is not None and days_since_scan is not None and days_since_scan < 7:
             return {
                 "error": "scan_not_ready",
@@ -1110,10 +1145,17 @@ def _enforce_scan_access(user):
     # Teens
     if not is_paid:
         if last_scan is not None:
-            return {
+            payload = {
                 "error": "scan_locked_paywall",
                 "message": "Unlock full Posture+, ultra-accurate True Optimized Height, and unlimited re-scans.",
-            }, 403
+                "debug": {
+                    "tier": "teen",
+                    "age": age,
+                    "is_paid": is_paid,
+                    "last_scan": last_scan.isoformat() if last_scan else None,
+                },
+            }
+            return payload, 403
         return None, None
 
     if last_scan is not None and days_since_scan is not None and days_since_scan < 7:
@@ -1236,20 +1278,11 @@ Return JSON ONLY:
 
         subscription_data = subscription_status.data
         is_paid = subscription_data.get("is_paid", False)
-        nrescan = request.data.get("lastscan")
-        if nrescan == "yes":
-            mprofile = UserProfile.objects.get(user=nuser)
-            mprofile.last_scan = timezone.now()
-            mprofile.save()
-            tuser = request.user
-            # Trial is strictly teen-only by exact age (13.0 <= age < 21.0).
-            age_exact_scan = get_user_age_exact(tuser) or 0.0
-            if 13.0 <= float(age_exact_scan) < 21.0:
-                if tuser.trial_start is None:
-                    tuser.trial_start = timezone.now()
-                if tuser.trial_end is None:
-                    tuser.trial_end = tuser.trial_start + timedelta(days=7)
-                tuser.save()
+        # NOTE:
+        # Do NOT set `last_scan` early based on request flags.
+        # We only mark scans completed after successfully persisting the PostureReport
+        # and updating posture state (prevents locking users out after a failed scan).
+        subscription_data_safe = _make_json_safe(subscription_data)
         final_response = {
             'user': {
                 'id': nuser.id,
@@ -1258,7 +1291,7 @@ Return JSON ONLY:
                 'gender':gender,
                 'age':current_age,
                 'is_paid':is_paid,
-                'subscription_data':subscription_data
+                'subscription_data': subscription_data_safe
             },
             "summary": {
                 "summary": ai["summary"].get("summary", ""),
@@ -1279,15 +1312,16 @@ Return JSON ONLY:
             ),
             
         }
+        final_response_safe = _make_json_safe(final_response)
         clean_request_data = extract_json_request_data(request)
         PostureReport.objects.create(
             user=request.user,
-            data=final_response,
-            t_pose_data=t_pose_data,
+            data=final_response_safe,
+            t_pose_data=_make_json_safe(t_pose_data),
             raw_request_data=clean_request_data,
-            front_data=front_data,
-            side_data=side_data,
-            back_data=back_data,
+            front_data=_make_json_safe(front_data),
+            side_data=_make_json_safe(side_data),
+            back_data=_make_json_safe(back_data),
             max_height_gain_inches=metrics["max_height_gain_inches"],
         )
         posture_bars = _scan_breakdown_from_scores(
@@ -1297,12 +1331,10 @@ Return JSON ONLY:
             metrics["spinal_compression"],
         )
         _apply_scan_to_posture_state(request.user, posture_bars)
-        user_data = save_ai_analysis_full_scan(request.user,final_response)
-        profile = UserProfile.objects.get(user=request.user)
-        profile.last_scan = timezone.now()
-        profile.save()
+        user_data = save_ai_analysis_full_scan(request.user, final_response_safe)
+        _mark_scan_completed(request.user)
 
-        return Response(final_response, status=status.HTTP_200_OK)
+        return Response(final_response_safe, status=status.HTTP_200_OK)
 
 
 def _scan_breakdown_from_scores(collapse, pelvic, leg_ham, spinal):

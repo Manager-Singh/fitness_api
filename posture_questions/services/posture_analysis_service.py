@@ -107,12 +107,8 @@ class PostureAnalysisService:
                         break
 
             
-            # Update last scan time
-            from user_profile.models import UserProfile
-            if rescan == "yes":
-                profile = UserProfile.objects.get(user=user)
-                profile.last_scan = timezone.now()
-                profile.save()
+            # Do not update `last_scan` here. `last_scan` is reserved for successful scan
+            # persistence in the scan endpoint flow.
 
             if gpt_response:
                 user_data = save_ai_text_analysis(user, gpt_response)
