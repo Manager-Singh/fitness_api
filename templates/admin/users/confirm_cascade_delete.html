@@ -1,0 +1,66 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block content %}
+  <div id="content-main">
+    <h1>{{ title }}</h1>
+    {% if subtitle %}<p><strong>{{ subtitle }}</strong></p>{% endif %}
+
+    {% if perms_needed %}
+      <p class="errornote">
+        {% blocktrans %}Deleting the selected objects requires the following permissions:{% endblocktrans %}
+      </p>
+      <ul>
+        {% for perm in perms_needed %}
+          <li>{{ perm }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if protected %}
+      <p class="errornote">
+        {% blocktrans %}Some objects cannot be deleted because they are protected:{% endblocktrans %}
+      </p>
+      <ul>
+        {% for obj in protected %}
+          <li>{{ obj }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <h2>{% trans "Objects to be deleted" %}</h2>
+    <div>
+      {{ deletable_objects|unordered_list }}
+    </div>
+
+    <h2>{% trans "Summary" %}</h2>
+    <ul>
+      {% for model_name, count in model_count %}
+        <li>{{ model_name }}: {{ count }}</li>
+      {% endfor %}
+    </ul>
+
+    <form method="post" style="margin-top: 16px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_selected_users_with_confirm" />
+      <input type="hidden" name="post" value="yes" />
+
+      {% for obj in queryset %}
+        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}" />
+      {% endfor %}
+
+      <div style="padding: 12px; border: 1px solid #d0d0d0; border-radius: 6px; background: #fff8f8;">
+        <label style="display:block; font-weight:600;">
+          <input type="checkbox" name="confirm_cascade_delete" value="yes" required />
+          {% trans "I understand this will permanently delete the selected user(s) and all related data." %}
+        </label>
+      </div>
+
+      <div class="submit-row">
+        <input type="submit" value="{% trans 'Yes, delete permanently' %}" class="deletelink" />
+        <a href=".." class="button cancel-link">{% trans "Cancel" %}</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+

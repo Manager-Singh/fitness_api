@@ -1,21 +1,17 @@
+"""
+Admin for user_profile app.
+
+IMPORTANT: Do not register/unregister the User model here. The canonical User admin
+is defined in `users/admin.py` to avoid multiple apps fighting over User registration.
+"""
+
 from django.contrib import admin
-from user_profile.models import UserProfile
-from users.models import User
+
+from .models import UserProfile
 
 
-class UserProfileInline(admin.StackedInline):
-    model = UserProfile
-    can_delete = False
-    verbose_name_plural = "User Profile"
-
-
-class CustomUserAdmin(admin.ModelAdmin):
-    inlines = (UserProfileInline,)
-
-
-# Unregister the default User admin
-try:
-    admin.site.unregister(User)
-except admin.sites.NotRegistered:
-    pass
-admin.site.register(User, CustomUserAdmin)
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "gender", "age", "birth_date", "last_scan")
+    search_fields = ("user__email", "user__username")
+    list_filter = ("gender",)

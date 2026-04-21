@@ -1,21 +1,16 @@
+"""
+Admin for posture_questions app.
+
+IMPORTANT: Do not register/unregister the User model here. The canonical User admin
+is defined in `users/admin.py` to avoid multiple apps fighting over User registration.
+"""
+
 from django.contrib import admin
-from posture_questions.models import PostureQuestion
-from users.models import User
+
+from .models import PostureQuestion
 
 
-class PostureQuestionInline(admin.StackedInline):
-    model = PostureQuestion
-    can_delete = False
-    verbose_name_plural = "User Profile"
-
-
-class CustomUserAdmin(admin.ModelAdmin):
-    inlines = (PostureQuestionInline,)
-
-
-# Unregister the default User admin
-try:
-    admin.site.unregister(User)
-except admin.sites.NotRegistered:
-    pass
-admin.site.register(User, CustomUserAdmin)
+@admin.register(PostureQuestion)
+class PostureQuestionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user")
+    search_fields = ("user__email", "user__username")

@@ -104,12 +104,18 @@
 
 from django.contrib import admin
 from django.utils.safestring import mark_safe
+from django.contrib import messages
+from django.contrib.admin import helpers
+from django.contrib.admin.utils import get_deleted_objects
+from django.template.response import TemplateResponse
+from django.utils.translation import gettext_lazy as _
 
 from .models import (
     AgeGroup, Module,
     Food, ModuleFood,
     Activity, ModuleActivity
 )
+from .models_log import NutraSession, NutraEntry
 
 
 # ──────────────────────────
@@ -151,6 +157,41 @@ def _media_preview(file_field):
         )
 
     return "Preview not supported"
+
+
+def _confirm_cascade_delete_action(*, title: str, subtitle: str, template: str, action_name: str):
+    def _action(modeladmin, request, queryset):
+        opts = modeladmin.model._meta
+
+        if request.POST.get("post") == "yes" and request.POST.get("confirm_cascade_delete") == "yes":
+            n = queryset.count()
+            queryset.delete()
+            modeladmin.message_user(
+                request, _(f"Deleted {n} {opts.verbose_name_plural} and related data."), level=messages.SUCCESS
+            )
+            return None
+
+        deletable_objects, model_count, perms_needed, protected = get_deleted_objects(
+            queryset, request, modeladmin.admin_site
+        )
+        context = {
+            **modeladmin.admin_site.each_context(request),
+            "title": title,
+            "subtitle": subtitle,
+            "objects_name": str(opts.verbose_name_plural),
+            "deletable_objects": deletable_objects,
+            "model_count": dict(model_count).items(),
+            "queryset": queryset,
+            "perms_needed": perms_needed,
+            "protected": protected,
+            "opts": opts,
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            "action_name": action_name,
+            "media": modeladmin.media,
+        }
+        return TemplateResponse(request, template, context)
+
+    return _action
 
 
 # ─── inline helpers ───
@@ -283,7 +324,6 @@ class ModuleAdmin(admin.ModelAdmin):
 
     # ───────── dynamic inline handling ─────────
     def get_inline_instances(self, request, obj=None):
-
         # ADD view
         if obj is None:
             initial_type = request.GET.get("type")
@@ -296,9 +336,49 @@ class ModuleAdmin(admin.ModelAdmin):
             return [inline_cls(self.model, self.admin_site)]
 
         # CHANGE view
-        inline_cls = (
-            ModuleFoodInline
-            if obj.type == Module.NUTRITION
-            else ModuleActivityInline
-        )
+        inline_cls = ModuleFoodInline if obj.type == Module.NUTRITION else ModuleActivityInline
         return [inline_cls(self.model, self.admin_site)]
+
+
+@admin.register(NutraSession)
+class NutraSessionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "date")
+    list_filter = ("date",)
+    search_fields = ("user__email", "user__username")
+    actions = ["safe_delete_nutra_sessions"]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Delete selected nutrition sessions (extra confirmation)")
+    def safe_delete_nutra_sessions(self, request, queryset):
+        return _confirm_cascade_delete_action(
+            title=_("Confirm nutrition session deletion (cascade)"),
+            subtitle=_("This will permanently delete the selected session(s) and related nutrition/lifestyle entries."),
+            template="admin/nutration/confirm_cascade_delete.html",
+            action_name="safe_delete_nutra_sessions",
+        )(self, request, queryset)
+
+
+@admin.register(NutraEntry)
+class NutraEntryAdmin(admin.ModelAdmin):
+    list_display = ("id", "session", "module", "food", "activity", "score", "completed_at")
+    list_filter = ("module", "completed_at")
+    search_fields = ("session__user__email", "session__user__username", "food__name", "activity__name", "module__name")
+    actions = ["safe_delete_nutra_entries"]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Delete selected nutrition/lifestyle entries (extra confirmation)")
+    def safe_delete_nutra_entries(self, request, queryset):
+        return _confirm_cascade_delete_action(
+            title=_("Confirm entry deletion"),
+            subtitle=_("This will permanently delete the selected entry/entries."),
+            template="admin/nutration/confirm_cascade_delete.html",
+            action_name="safe_delete_nutra_entries",
+        )(self, request, queryset)

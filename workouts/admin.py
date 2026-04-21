@@ -2,6 +2,10 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.contrib import messages
+from django.contrib.admin import helpers
+from django.contrib.admin.utils import get_deleted_objects
+from django.template.response import TemplateResponse
+from django.utils.translation import gettext_lazy as _
 
 from .models import (
     Exercise, AgeBracket,
@@ -213,11 +217,66 @@ class WorkoutEntryInline(admin.TabularInline):
     extra  = 0
     readonly_fields = ("created_at",)
 
+
+def _confirm_cascade_delete_action(*, title: str, subtitle: str, template: str, action_name: str):
+    """
+    Small helper to implement an "extra confirmation" delete action for admin.
+    """
+
+    def _action(modeladmin, request, queryset):
+        opts = modeladmin.model._meta
+
+        if request.POST.get("post") == "yes" and request.POST.get("confirm_cascade_delete") == "yes":
+            n = queryset.count()
+            queryset.delete()
+            modeladmin.message_user(
+                request, _(f"Deleted {n} {opts.verbose_name_plural} and related data."), level=messages.SUCCESS
+            )
+            return None
+
+        deletable_objects, model_count, perms_needed, protected = get_deleted_objects(
+            queryset, request, modeladmin.admin_site
+        )
+        context = {
+            **modeladmin.admin_site.each_context(request),
+            "title": title,
+            "subtitle": subtitle,
+            "objects_name": str(opts.verbose_name_plural),
+            "deletable_objects": deletable_objects,
+            "model_count": dict(model_count).items(),
+            "queryset": queryset,
+            "perms_needed": perms_needed,
+            "protected": protected,
+            "opts": opts,
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            "action_name": action_name,
+            "media": modeladmin.media,
+        }
+        return TemplateResponse(request, template, context)
+
+    return _action
+
+
 @admin.register(WorkoutSession)
 class WorkoutSessionAdmin(admin.ModelAdmin):
     list_display  = ("user", "date")
     list_filter   = ("user", "date")  #  correct way
     inlines       = [WorkoutEntryInline]
+    actions = ["safe_delete_workout_sessions"]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Delete selected workout sessions (extra confirmation)")
+    def safe_delete_workout_sessions(self, request, queryset):
+        return _confirm_cascade_delete_action(
+            title=_("Confirm workout session deletion (cascade)"),
+            subtitle=_("This will permanently delete the selected session(s) and related workout entries."),
+            template="admin/workouts/confirm_cascade_delete.html",
+            action_name="safe_delete_workout_sessions",
+        )(self, request, queryset)
 
     def get_routine_type(self, obj):
         return obj.user_routine.routine_type if obj.user_routine else None
@@ -229,7 +288,26 @@ class UserRoutineAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "routine_type", "is_active", "created_at")
     list_filter = ("routine_type", "is_active", "created_at")
     search_fields = ("user__email", "user__username", "id")
-    actions = ["regenerate_user_routines", "populate_scan_and_optimization", "regenerate_and_populate"]
+    actions = [
+        "regenerate_user_routines",
+        "populate_scan_and_optimization",
+        "regenerate_and_populate",
+        "safe_delete_user_routines",
+    ]
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Delete selected user routines (extra confirmation)")
+    def safe_delete_user_routines(self, request, queryset):
+        return _confirm_cascade_delete_action(
+            title=_("Confirm routine deletion (cascade)"),
+            subtitle=_("This will permanently delete the selected routine(s) and related sessions/entries."),
+            template="admin/workouts/confirm_cascade_delete.html",
+            action_name="safe_delete_user_routines",
+        )(self, request, queryset)
 
     @admin.action(description="Regenerate routines for selected routine's user(s)")
     def regenerate_user_routines(self, request, queryset):
