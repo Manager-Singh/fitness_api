@@ -159,7 +159,13 @@ class WorkoutSession(models.Model):
         ordering        = ("-date",)
 
     def __str__(self):
-        return f"{self.user} · {self.user_routine} · {self.date}"
+        # Admin/delete confirmation may stringify sessions; guard against dangling FK rows
+        # where `user_routine_id` points at a missing UserRoutine (legacy data).
+        try:
+            routine = self.user_routine
+        except Exception:
+            routine = f"(missing routine #{getattr(self, 'user_routine_id', None)})"
+        return f"{self.user} · {routine} · {self.date}"
 
 
 class WorkoutEntry(models.Model):
