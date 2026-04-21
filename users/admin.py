@@ -3,16 +3,37 @@ from __future__ import annotations
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import get_deleted_objects
+from django.db import transaction
 from django.template.response import TemplateResponse
 from django.utils.translation import gettext_lazy as _
 
 from posture.models import PostureReport
 from posture_questions.models import PostureQuestion
-from user_profile.models import UserProfile
+from nutration.models_log import NutraEntry, NutraSession
+from user_profile.models import Payment, UserProfile
 from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
 from utils.routine_genrate import generate_user_routines
+from workouts.models import WorkoutEntry, WorkoutSession, UserRoutine, UserRoutineExercise
 
-from .models import User
+from chatbot.models import ChatMessage
+from height_analysis.models import GeneticHeightEstimate, HeightGrowthProjection
+from posture_analysis.models import UserPosturalOptimizationData, PosturalRecommendation
+
+from .models import DailyLog, FriendInvite, Friendship, HeightLedger, NotificationEventLog, OTP, PostureState, User
+from django.apps import apps as django_apps
+
+
+def _maybe_delete_model(app_label: str, model_name: str, **filters):
+    """
+    Delete rows for a model only if its app is installed.
+    This keeps admin safe across deployments where optional apps are not enabled.
+    """
+    if not django_apps.is_installed(app_label):
+        return
+    Model = django_apps.get_model(app_label, model_name)
+    if Model is None:
+        return
+    Model.objects.filter(**filters).delete()
 
 
 def _default_breakdown():
@@ -95,9 +116,73 @@ class UserAdmin(admin.ModelAdmin):
 
         # Step 2: perform delete only after explicit acknowledgement.
         if request.POST.get("post") == "yes" and request.POST.get("confirm_cascade_delete") == "yes":
-            n = queryset.count()
-            queryset.delete()
-            self.message_user(request, _(f"Deleted {n} user(s) and related data."), level=messages.SUCCESS)
+            # IMPORTANT:
+            # We cannot rely on `queryset.delete()` because some relations are PROTECT
+            # (e.g. WorkoutSession.user_routine). Delete in the correct order:
+            # sessions/entries -> routines -> user, plus other user-linked rows.
+            users = list(queryset)
+            user_ids = [u.id for u in users]
+
+            with transaction.atomic():
+                # Auth/runtime related rows first.
+                OTP.objects.filter(user_id__in=user_ids).delete()
+                NotificationEventLog.objects.filter(user_id__in=user_ids).delete()
+
+                # Social graph.
+                Friendship.objects.filter(user_id_a_id__in=user_ids).delete()
+                Friendship.objects.filter(user_id_b_id__in=user_ids).delete()
+                FriendInvite.objects.filter(inviter_id__in=user_ids).delete()
+                FriendInvite.objects.filter(accepted_by_id__in=user_ids).delete()
+
+                # Chat history.
+                ChatMessage.objects.filter(user_id__in=user_ids).delete()
+
+                # Leaderboard / history ledgers (points + height).
+                DailyLog.objects.filter(user_id__in=user_ids).delete()
+                HeightLedger.objects.filter(user_id__in=user_ids).delete()
+                PostureState.objects.filter(user_id__in=user_ids).delete()
+
+                # Workouts: delete entries then sessions (sessions reference routines via PROTECT).
+                WorkoutEntry.objects.filter(session__user_id__in=user_ids).delete()
+                WorkoutSession.objects.filter(user_id__in=user_ids).delete()
+
+                # Nutrition/lifestyle logs.
+                NutraEntry.objects.filter(session__user_id__in=user_ids).delete()
+                NutraSession.objects.filter(user_id__in=user_ids).delete()
+
+                # Routines: exercises first, then routines.
+                routines = UserRoutine.objects.filter(user_id__in=user_ids)
+                UserRoutineExercise.objects.filter(routine__in=routines).delete()
+                routines.delete()
+
+                # Posture reports (scan history).
+                PostureReport.objects.filter(user_id__in=user_ids).delete()
+
+                # Height analysis / projections.
+                HeightGrowthProjection.objects.filter(genetic_estimate__user_id__in=user_ids).delete()
+                GeneticHeightEstimate.objects.filter(user_id__in=user_ids).delete()
+
+                # AI posture analysis.
+                PosturalRecommendation.objects.filter(user_data__user_id__in=user_ids).delete()
+                UserPosturalOptimizationData.objects.filter(user_id__in=user_ids).delete()
+
+                # Legacy submissions.
+                # Some deployments don't include these optional apps.
+                _maybe_delete_model("wellness_tracker", "WellnessSubmission", user_id__in=user_ids)
+                _maybe_delete_model("exercise", "ExerciseSubmission", user_id__in=user_ids)
+
+                # Payments stored under user_profile app.
+                Payment.objects.filter(user_id__in=user_ids).delete()
+
+                # Finally delete the users (cascades to one-to-ones like profile/posture_questions).
+                n = len(users)
+                queryset.delete()
+
+            self.message_user(
+                request,
+                _(f"Deleted {n} user(s) and related data (workouts, nutrition, routines, posture reports)."),
+                level=messages.SUCCESS,
+            )
             return None
 
         # Step 1: show confirmation page
