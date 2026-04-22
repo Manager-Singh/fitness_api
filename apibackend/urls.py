@@ -25,10 +25,15 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from frontend.views import home
+from apibackend.well_known_views import apple_app_site_association, assetlinks, invite_landing
 
 urlpatterns = [
     path('admin', admin.site.urls),
     path('', home, name='home'),
+    path('.well-known/apple-app-site-association', apple_app_site_association, name='apple_app_site_association'),
+    path('.well-known/assetlinks.json', assetlinks, name='assetlinks'),
+    path('invite', invite_landing, name='invite_landing'),
+    path('invite/', invite_landing, name='invite_landing_slash'),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/', include('users.urls')),
