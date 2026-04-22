@@ -20,6 +20,11 @@ from django.utils import timezone
 from datetime import timedelta, date, datetime
 import uuid
 from utils.check_payment import check_subscription_or_response
+from utils.streaks import get_user_streaks
+from users.models import DailyLog, HeightLedger
+from users.spec_runtime import get_user_runtime_state_snapshot
+from workouts.models import UserRoutine
+from django.db.models import Sum
 from utils.posture.height_constants import (
     ADULT_AGE_MAX,
     ADULT_MIN_AGE,
@@ -995,6 +1000,245 @@ def get_profile(request):
             **onboarding_read,
         }
     }, status=status.HTTP_200_OK)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def my_profile(request):
+    """
+    Spec-aligned lightweight profile endpoint.
+
+    - GET: return core profile fields used by onboarding + ProfileTab (Section 2 / 12.4 / 13.2 / 16).
+    - POST: allow updating *profile settings* (display_name/avatar_url/timezone) and onboarding inputs,
+      while keeping Base Height (base_height_cm) read-only once set.
+
+    IMPORTANT: Unlike `get_profile`, this endpoint does NOT block when subscription is expired.
+    """
+    user = request.user
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    def _as_float(v):
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    # POST updates (minimal + safe)
+    if request.method == "POST":
+        # Base height must be immutable once set (Spec Section 2).
+        if "base_height_cm" in request.data and str(profile.base_height_cm or "").strip() != "":
+            return Response({"error": MSG_BASE_HEIGHT_LOCKED}, status=422)
+
+        def _age_exact_years(dob: date) -> float:
+            return (date.today() - dob).days / 365.2425
+
+        def _bound(value, lo, hi, message):
+            if value is None:
+                return
+            if value < lo or value > hi:
+                raise ValueError(message)
+
+        # Determine teen/adult rules (same approach as update_profile_users).
+        age_num = _as_float(request.data.get("age", profile.age))
+        birth_date_candidate = profile.birth_date
+        raw_bd = request.data.get("birth_date")
+        if raw_bd not in (None, ""):
+            try:
+                birth_date_candidate = datetime.strptime(str(raw_bd).strip()[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": "birth_date must be YYYY-MM-DD."}, status=422)
+
+        tier = (getattr(user, "account_tier", None) or "").strip().lower()
+        if tier == "teen":
+            is_teen = True
+        elif tier == "adult":
+            is_teen = False
+        else:
+            if age_num is not None:
+                is_teen = TEEN_MIN_AGE <= age_num <= TEEN_MAX_AGE
+            elif birth_date_candidate:
+                ae0 = _age_exact_years(birth_date_candidate)
+                is_teen = TEEN_MIN_AGE <= ae0 < ADULT_MIN_AGE
+            else:
+                is_teen = False
+
+        # User-level fields (Spec 13.2: display_name, avatar_url, timezone).
+        if "display_name" in request.data:
+            user.display_name = str(request.data.get("display_name") or "").strip() or None
+        if "avatar_url" in request.data:
+            user.avatar_url = str(request.data.get("avatar_url") or "").strip() or None
+        if "timezone" in request.data:
+            tz = str(request.data.get("timezone") or "").strip()
+            if tz:
+                user.timezone = tz
+
+        # Profile-level onboarding fields (reuse same validation constants as update_profile_users).
+        if "gender" in request.data:
+            profile.gender = str(request.data.get("gender") or "").strip() or profile.gender
+        if "age" in request.data:
+            profile.age = str(request.data.get("age") or "").strip() or profile.age
+        if "birth_date" in request.data:
+            raw_bd = request.data.get("birth_date")
+            if raw_bd in (None, ""):
+                profile.birth_date = None
+            else:
+                try:
+                    profile.birth_date = datetime.strptime(str(raw_bd).strip()[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    return Response({"error": "birth_date must be YYYY-MM-DD."}, status=422)
+
+        for k in ("current_height_cm", "father_height_cm", "mother_height_cm"):
+            if k in request.data:
+                setattr(profile, k, str(request.data.get(k) or "").strip() or None)
+
+        # Section 12.4 bounds (enforced on write)
+        try:
+            ch = _as_float(profile.current_height_cm)
+            fh = _as_float(profile.father_height_cm)
+            mh = _as_float(profile.mother_height_cm)
+            _bound(ch, USER_HEIGHT_CM_MIN, USER_HEIGHT_CM_MAX, MSG_USER_HEIGHT_RANGE)
+            _bound(fh, PARENT_HEIGHT_CM_MIN, PARENT_HEIGHT_CM_MAX, MSG_FATHER_HEIGHT_RANGE)
+            _bound(mh, PARENT_HEIGHT_CM_MIN, PARENT_HEIGHT_CM_MAX, MSG_MOTHER_HEIGHT_RANGE)
+
+            if not is_teen and age_num is not None:
+                _bound(age_num, float(ADULT_MIN_AGE), float(ADULT_AGE_MAX), MSG_ADULT_AGE_RANGE)
+            if is_teen and age_num is not None:
+                _bound(age_num, float(TEEN_MIN_AGE), float(TEEN_MAX_AGE), MSG_TEEN_UI_AGE_RANGE)
+
+            # Teen onboarding constraints: DOB and parent heights are required once onboarding inputs are provided.
+            effective_dob = profile.birth_date
+            if is_teen:
+                if effective_dob is None and any(
+                    request.data.get(k) not in (None, "") for k in ("current_height_cm", "age", "father_height_cm", "mother_height_cm")
+                ):
+                    return Response({"error": MSG_TEEN_REQUIRES_DOB}, status=422)
+                if (fh is None or mh is None) and any(
+                    request.data.get(k) not in (None, "") for k in ("current_height_cm", "age", "birth_date")
+                ):
+                    return Response({"error": MSG_TEEN_REQUIRES_PARENTS}, status=422)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=422)
+
+        # Allow first-time base height set from current height (onboarding convenience)
+        if str(profile.base_height_cm or "").strip() == "" and str(profile.current_height_cm or "").strip() != "":
+            try:
+                ch0 = float(profile.current_height_cm)
+                if USER_HEIGHT_CM_MIN <= ch0 <= USER_HEIGHT_CM_MAX:
+                    profile.base_height_cm = str(round(ch0, 4))
+            except Exception:
+                pass
+
+        user.save()
+        profile.save()
+
+    # --- subscription / plan (never blocks this endpoint) ---
+    sex = normalize_sex(profile.gender)
+    fh = _as_float(profile.father_height_cm)
+    mh = _as_float(profile.mother_height_cm)
+    mph_simple_cm = None
+    if sex in ("male", "female") and fh is not None and mh is not None:
+        try:
+            mph_simple_cm = round(compute_mph_simple_cm(sex, fh, mh), 2)
+        except Exception:
+            mph_simple_cm = None
+
+    base_height_cm = _as_float(profile.base_height_cm)
+    current_height_cm = _as_float(profile.current_height_cm)
+
+    subscription_data = {}
+    try:
+        subscription_data = check_subscription_or_response(user).data
+    except Exception:
+        subscription_data = {}
+
+    # --- live runtime state (spec-style) ---
+    runtime_state = {}
+    try:
+        runtime_state = get_user_runtime_state_snapshot(user) or {}
+    except Exception:
+        runtime_state = {}
+
+    # --- today log + points ---
+    from utils.user_time import user_today
+
+    today = user_today(user)
+    daily = DailyLog.objects.filter(user=user, log_date=today).first()
+    today_log = {
+        "log_date": str(today),
+        "posture_pts": int((daily.engine1_points if daily else 0) or 0),
+        "hgh_pts": int((daily.engine2_points if daily else 0) or 0),
+        "nutrition_pts": int((daily.food_points if daily else 0) or 0),
+        "lifestyle_pts": int((daily.lifestyle_points if daily else 0) or 0),
+        "validated": bool(daily.validated) if daily else False,
+    }
+
+    totals = DailyLog.objects.filter(user=user).aggregate(
+        exercise=Sum("exercise_points"),
+        food=Sum("food_points"),
+        lifestyle=Sum("lifestyle_points"),
+    )
+    all_time_points = int((totals.get("exercise") or 0) + (totals.get("food") or 0) + (totals.get("lifestyle") or 0))
+
+    # --- streaks + leaderboard snapshot ---
+    streaks = {}
+    try:
+        streaks = get_user_streaks(user, subscription_data) or {}
+    except Exception:
+        streaks = {}
+
+    # --- streak history (simple calendar list of last N days) ---
+    days_window = 60
+    history_rows = (
+        DailyLog.objects.filter(user=user)
+        .order_by("-log_date")
+        .values("log_date", "validated")[:days_window]
+    )
+    streak_history = [{"date": str(r["log_date"]), "validated": bool(r["validated"])} for r in history_rows]
+
+    # --- my plan (active routines summary) ---
+    active_routines = list(
+        UserRoutine.objects.filter(user=user, is_active=True).values("id", "routine_type", "created_at")[:10]
+    )
+
+    return Response(
+        {
+            "message": "My profile retrieved successfully" if request.method == "GET" else "My profile updated successfully",
+            "data": {
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "username": user.username,
+                    "account_tier": getattr(user, "account_tier", None),
+                    "timezone": getattr(user, "timezone", None),
+                    "display_name": getattr(user, "display_name", None),
+                    "avatar_url": getattr(user, "avatar_url", None),
+                },
+                "profile": {
+                    "gender": profile.gender,
+                    "sex_normalized": sex,
+                    "age": profile.age,
+                    "birth_date": str(profile.birth_date) if profile.birth_date else None,
+                    "current_height_cm": current_height_cm,
+                    "base_height_cm": base_height_cm,
+                    "father_height_cm": fh,
+                    "mother_height_cm": mh,
+                },
+                "mph_simple_cm": mph_simple_cm,
+                "subscription": subscription_data,
+                "runtime_state": runtime_state,
+                "today_log": today_log,
+                "all_time_points": all_time_points,
+                "streaks": streaks,
+                "streak_history": streak_history,
+                "my_plan": {
+                    "active_routines": active_routines,
+                },
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

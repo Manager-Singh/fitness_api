@@ -9,5 +9,6 @@ urlpatterns = [
     path('save-payment-intent', views.save_payment_intent, name='save_payment_intent'),
     path('get-report', views.get_report, name='get_report'),
     path('get-profile', views.get_profile, name='get_profile'),
+    path("my-profile", views.my_profile, name="my_profile"),
     path('subscribe/free', views.subscribe_free_plan, name='subscribe_free_plan'),
 ]
