@@ -587,10 +587,114 @@ class InviteFriendView(APIView):
         )
 
 
+class FriendSearchByEmailView(APIView):
+    """
+    New system: search friend by email.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        email = str(request.data.get("email") or "").strip().lower()
+        if not email:
+            return Response({"error": "email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if email == str(getattr(request.user, "email", "") or "").strip().lower():
+            return Response({"error": "cannot_search_self"}, status=status.HTTP_400_BAD_REQUEST)
+
+        target = User.objects.filter(email__iexact=email, is_active=True).first()
+        if not target:
+            return Response({"found": False}, status=status.HTTP_200_OK)
+
+        rel = Friendship.objects.filter(
+            Q(user_id_a=request.user, user_id_b=target) | Q(user_id_a=target, user_id_b=request.user)
+        ).order_by("-created_at").first()
+
+        relationship = None
+        if rel:
+            direction = "outgoing" if rel.user_id_a_id == request.user.id else "incoming"
+            relationship = {"friendship_id": rel.id, "status": rel.status, "direction": direction}
+
+        return Response(
+            {
+                "found": True,
+                "user": {
+                    "id": target.id,
+                    "email": target.email,
+                    "display_name": target.display_name or target.name or target.username,
+                    "avatar_url": target.avatar_url or target.profile_image_url or None,
+                },
+                "relationship": relationship,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FriendRequestByEmailView(APIView):
+    """
+    New system: send friend request by email.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        email = str(request.data.get("email") or "").strip().lower()
+        if not email:
+            return Response({"error": "email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if email == str(getattr(request.user, "email", "") or "").strip().lower():
+            return Response({"error": "cannot_invite_self"}, status=status.HTTP_400_BAD_REQUEST)
+
+        target = User.objects.filter(email__iexact=email, is_active=True).first()
+        if not target:
+            return Response({"error": "user_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = Friendship.objects.filter(
+            Q(user_id_a=request.user, user_id_b=target) | Q(user_id_a=target, user_id_b=request.user)
+        ).first()
+        if existing:
+            # If they already sent us a request, accept it.
+            if existing.status == Friendship.STATUS_PENDING and existing.user_id_a_id == target.id:
+                existing.status = Friendship.STATUS_ACCEPTED
+                existing.save(update_fields=["status"])
+                return Response(
+                    {"friendship_id": existing.id, "status": existing.status, "action": "accepted_existing_incoming"},
+                    status=status.HTTP_200_OK,
+                )
+            return Response(
+                {"friendship_id": existing.id, "status": existing.status, "action": "already_exists"},
+                status=status.HTTP_200_OK,
+            )
+
+        friendship = Friendship.objects.create(
+            user_id_a=request.user,
+            user_id_b=target,
+            status=Friendship.STATUS_PENDING,
+        )
+        return Response(
+            {"friendship_id": friendship.id, "status": friendship.status, "action": "request_sent"},
+            status=status.HTTP_200_OK,
+        )
+
+
 class AcceptFriendInviteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        friendship_id = request.data.get("friendship_id")
+        if friendship_id:
+            friendship = Friendship.objects.filter(id=friendship_id, status=Friendship.STATUS_PENDING).first()
+            if not friendship:
+                return Response({"error": "friendship_not_found"}, status=status.HTTP_404_NOT_FOUND)
+            if friendship.user_id_b_id != request.user.id:
+                return Response({"error": "not_allowed"}, status=status.HTTP_403_FORBIDDEN)
+            friendship.status = Friendship.STATUS_ACCEPTED
+            friendship.save(update_fields=["status"])
+            return Response(
+                {"friendship_id": friendship.id, "status": friendship.status},
+                status=status.HTTP_200_OK,
+            )
+
         token = request.data.get("invite_token")
         if not token:
             return Response({"error": "invite_token is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -760,48 +864,98 @@ class RevokeFriendInviteView(APIView):
         return Response({"message": "friendship_removed"}, status=status.HTTP_200_OK)
 
 
+class RejectFriendRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        friendship_id = request.data.get("friendship_id")
+        if not friendship_id:
+            return Response({"error": "friendship_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        friendship = Friendship.objects.filter(id=friendship_id, status=Friendship.STATUS_PENDING).first()
+        if not friendship:
+            return Response({"error": "friendship_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if friendship.user_id_b_id != request.user.id:
+            return Response({"error": "not_allowed"}, status=status.HTTP_403_FORBIDDEN)
+
+        friendship.delete()
+        return Response({"message": "request_rejected"}, status=status.HTTP_200_OK)
+
+
 class PendingFriendInvitesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        incoming = FriendInvite.objects.filter(
-            expires_at__gte=timezone.now(),
-        ).exclude(
-            inviter=request.user,
-        ).exclude(
-            accepted_by__isnull=False,
-        )
+        # New system: pending friend requests
+        incoming_requests = Friendship.objects.filter(
+            user_id_b=request.user,
+            status=Friendship.STATUS_PENDING,
+        ).select_related("user_id_a")
+        outgoing_requests = Friendship.objects.filter(
+            user_id_a=request.user,
+            status=Friendship.STATUS_PENDING,
+        ).select_related("user_id_b")
 
-        outgoing = FriendInvite.objects.filter(
+        incoming_payload = [
+            {
+                "friendship_id": fr.id,
+                "from_user": {
+                    "id": fr.user_id_a_id,
+                    "email": fr.user_id_a.email,
+                    "display_name": fr.user_id_a.display_name or fr.user_id_a.name or fr.user_id_a.username,
+                    "avatar_url": fr.user_id_a.avatar_url or fr.user_id_a.profile_image_url or None,
+                },
+                "status": fr.status,
+                "created_at": fr.created_at,
+            }
+            for fr in incoming_requests
+        ]
+
+        outgoing_payload = [
+            {
+                "friendship_id": fr.id,
+                "to_user": {
+                    "id": fr.user_id_b_id,
+                    "email": fr.user_id_b.email,
+                    "display_name": fr.user_id_b.display_name or fr.user_id_b.name or fr.user_id_b.username,
+                    "avatar_url": fr.user_id_b.avatar_url or fr.user_id_b.profile_image_url or None,
+                },
+                "status": fr.status,
+                "created_at": fr.created_at,
+            }
+            for fr in outgoing_requests
+        ]
+
+        # Legacy token invites preserved for older clients
+        legacy_incoming = FriendInvite.objects.filter(expires_at__gte=timezone.now()).exclude(inviter=request.user).exclude(
+            accepted_by__isnull=False
+        )
+        legacy_outgoing = FriendInvite.objects.filter(
             inviter=request.user,
             expires_at__gte=timezone.now(),
             accepted_by__isnull=True,
         )
 
-        incoming_payload = []
-        for invite in incoming:
-            incoming_payload.append(
-                {
-                    "invite_token": invite.invite_token,
-                    "inviter_user_id": invite.inviter_id,
-                    "inviter_name": invite.inviter.name or invite.inviter.username or invite.inviter.email,
-                    "expires_at": invite.expires_at,
-                }
-            )
-
-        outgoing_payload = []
-        for invite in outgoing:
-            outgoing_payload.append(
-                {
-                    "invite_token": invite.invite_token,
-                    "expires_at": invite.expires_at,
-                }
-            )
+        legacy_incoming_payload = [
+            {
+                "invite_token": inv.invite_token,
+                "inviter_user_id": inv.inviter_id,
+                "inviter_name": inv.inviter.name or inv.inviter.username or inv.inviter.email,
+                "expires_at": inv.expires_at,
+            }
+            for inv in legacy_incoming
+        ]
+        legacy_outgoing_payload = [{"invite_token": inv.invite_token, "expires_at": inv.expires_at} for inv in legacy_outgoing]
 
         return Response(
             {
                 "incoming": incoming_payload,
                 "outgoing": outgoing_payload,
+                "legacy": {
+                    "incoming": legacy_incoming_payload,
+                    "outgoing": legacy_outgoing_payload,
+                },
             },
             status=status.HTTP_200_OK,
         )

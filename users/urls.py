@@ -11,10 +11,13 @@ from .views import (
     ResetPasswordView,
     ChangePasswordView,
     InviteFriendView,
+    FriendSearchByEmailView,
+    FriendRequestByEmailView,
     AcceptFriendInviteView,
     FriendsLeaderboardView,
     RevokeFriendInviteView,
     PendingFriendInvitesView,
+    RejectFriendRequestView,
 )
 
 urlpatterns = [
@@ -28,8 +31,11 @@ urlpatterns = [
     path('forgot-password', ForgotPasswordView.as_view()),
     path('reset-password', ResetPasswordView.as_view()),
     path('change-password', ChangePasswordView.as_view()),
+    path('friends/search', FriendSearchByEmailView.as_view()),
+    path('friends/request', FriendRequestByEmailView.as_view()),
     path('friends/invite', InviteFriendView.as_view()),
     path('friends/accept', AcceptFriendInviteView.as_view()),
+    path('friends/reject', RejectFriendRequestView.as_view()),
     path('friends/leaderboard', FriendsLeaderboardView.as_view()),
     path('friends/revoke', RevokeFriendInviteView.as_view()),
     path('friends/pending', PendingFriendInvitesView.as_view()),
