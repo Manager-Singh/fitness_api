@@ -129,9 +129,11 @@ def upsert_posture_questions(request):
         user=user,
         request_data=request.data
     )
-    # IMPORTANT:
-    # Do not touch `UserProfile.last_scan` from questionnaire/profile update flows.
-    # `last_scan` is reserved for successful camera scans (posture/views.py).
+    # NOTE (product):
+    # This backend supports two "scan" sources:
+    # - full posture scan (camera) via `posture/views.py` which always updates `last_scan`
+    # - manual posture questionnaire (adults) which, once completed, should also stamp `last_scan`
+    #   for UX parity (but only when the questionnaire becomes complete, not on every update).
 
 
     # Section 3 (adults only): compute and persist manual questionnaire state.
@@ -154,8 +156,23 @@ def upsert_posture_questions(request):
             state.questionnaire_completed = questionnaire_complete
 
             if questionnaire_complete:
+                now_ts = timezone.now()
+
+                # First-time completion stamp.
                 if state.questionnaire_completed_at is None:
-                    state.questionnaire_completed_at = timezone.now()
+                    state.questionnaire_completed_at = now_ts
+
+                # Backfill: if questionnaire is complete but scan timestamps were never stamped
+                # (e.g. completed before this logic was deployed), set them once.
+                # Do NOT overwrite existing timestamps.
+                needs_scan_stamp = (getattr(profile, "last_scan", None) is None) or (state.last_scan_at is None) or (not bool(state.scan_completed))
+                if needs_scan_stamp:
+                    if getattr(profile, "last_scan", None) is None:
+                        profile.last_scan = now_ts
+                        profile.save(update_fields=["last_scan"])
+                    if state.last_scan_at is None:
+                        state.last_scan_at = now_ts
+                    state.scan_completed = True
                 manual = build_section3_manual_breakdown(posture_q)
                 total_recoverable = float(manual["total_recoverable_loss_cm"])
                 target_height = round(base_height + total_recoverable, 2)
@@ -174,6 +191,7 @@ def upsert_posture_questions(request):
                 state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
                 state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
                 state.save(update_fields=[
+                    "scan_completed",
                     "questionnaire_completed",
                     "questionnaire_completed_at",
                     "total_recoverable_loss_um",
@@ -181,6 +199,7 @@ def upsert_posture_questions(request):
                     "collapse_current_loss_um",
                     "pelvic_current_loss_um",
                     "legs_current_loss_um",
+                    "last_scan_at",
                 ])
             else:
                 state.save(update_fields=["questionnaire_completed"])
@@ -651,7 +670,12 @@ def get_posture_questions(request):
     )
     remaining_scans = "unlimited" if is_paid else 0
     if days_since_scan is None:
-        scan_message = "Initial scan required."
+        # Adults can proceed with manual questionnaire without a camera scan (Section 3 / 4.1 gate).
+        questionnaire_done = bool(runtime_state.get("questionnaire_completed"))
+        if is_adult_track and questionnaire_done:
+            scan_message = "Manual posture assessment completed. Scan is optional."
+        else:
+            scan_message = "Initial scan required."
     else:
         days_left = max(0, rescan_days - days_since_scan)
         if is_adult_track and not is_paid:
