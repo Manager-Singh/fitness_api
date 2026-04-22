@@ -154,6 +154,8 @@ def upsert_posture_questions(request):
             state.questionnaire_completed = questionnaire_complete
 
             if questionnaire_complete:
+                if state.questionnaire_completed_at is None:
+                    state.questionnaire_completed_at = timezone.now()
                 manual = build_section3_manual_breakdown(posture_q)
                 total_recoverable = float(manual["total_recoverable_loss_cm"])
                 target_height = round(base_height + total_recoverable, 2)
@@ -173,6 +175,7 @@ def upsert_posture_questions(request):
                 state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
                 state.save(update_fields=[
                     "questionnaire_completed",
+                    "questionnaire_completed_at",
                     "total_recoverable_loss_um",
                     "spinal_current_loss_um",
                     "collapse_current_loss_um",
@@ -190,6 +193,7 @@ def upsert_posture_questions(request):
     message = 'Posture Questions created successfully' if created else 'Posture Questions updated successfully'
     status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
 
+    state = PostureState.objects.filter(user=user).first()
     return Response({
         'message': message,
         'user': {
@@ -202,7 +206,10 @@ def upsert_posture_questions(request):
             'subscription_data':subscription_data,
             'posture_questions': posture_question_data,
             'estimated_genetic_height_cm': genetic_estimate.estimated_height_cm,
-            'section3_contract': section3_contract
+            'section3_contract': section3_contract,
+            'last_scan': profile.last_scan.isoformat() if getattr(profile, "last_scan", None) else None,
+            'questionnaire_completed': bool(state.questionnaire_completed) if state else False,
+            'questionnaire_completed_at': state.questionnaire_completed_at.isoformat() if (state and state.questionnaire_completed_at) else None,
         }
     }, status=status_code) 
 

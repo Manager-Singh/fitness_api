@@ -132,6 +132,7 @@ class PostureState(models.Model):
     pelvic_current_loss_um = models.BigIntegerField(default=0)
     legs_current_loss_um = models.BigIntegerField(default=0)
     last_scan_at = models.DateTimeField(null=True, blank=True)
+    questionnaire_completed_at = models.DateTimeField(null=True, blank=True)
     algorithm_version = models.CharField(max_length=30, default="v1")
     updated_at = models.DateTimeField(auto_now=True)
 
