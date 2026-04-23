@@ -1,16 +1,13 @@
 from typing import Dict, Any, Optional
 import json
-from django.utils import timezone
 from django.forms.models import model_to_dict
 from posture_questions.models import PostureQuestion
 from posture.models import PostureReport
 from posture_analysis.models import UserPosturalOptimizationData
 from posture_analysis.serializers import UserPosturalOptimizationDataSerializer
-from user_profile.models import UserProfile
 from utils.chatgpt_service import generate_chatgpt_response
 from utils.ai_analysis import save_ai_text_analysis
 from utils.posture_optimizer import calculate_optimization_breakdown
-from users.models import PostureState
 from utils.posture.height_constants import (
     POINT_TO_CM,
     POSTURE_SEGMENT_DISTRIBUTION_RATIO,
@@ -109,27 +106,15 @@ class PostureAnalysisService:
                         break
 
             
-            # Do not update `last_scan` here. `last_scan` is reserved for successful scan
-            # persistence in the scan endpoint flow.
+            # Do not set `UserProfile.last_scan` / `PostureState.last_scan_at` here.
+            # Those timestamps are only written after: (1) a persisted full posture scan
+            # in `posture/views.py` (`_mark_scan_completed`), or (2) adult manual
+            # questionnaire completion in `upsert_posture_questions`.
 
             if gpt_response:
                 user_data = save_ai_text_analysis(user, gpt_response)
                 serializer = UserPosturalOptimizationDataSerializer(user_data)
                 ai_analysis = serializer.data
-
-                # Product requirement: once GPT analysis is successfully generated (manual path),
-                # stamp "last_scan" style timestamps for UI parity (without marking scan_completed).
-                try:
-                    profile = UserProfile.objects.filter(user=user).first()
-                    state, _ = PostureState.objects.get_or_create(user=user)
-                    if profile and getattr(profile, "last_scan", None) is None:
-                        profile.last_scan = timezone.now()
-                        profile.save(update_fields=["last_scan"])
-                    if state.last_scan_at is None:
-                        state.last_scan_at = timezone.now()
-                        state.save(update_fields=["last_scan_at", "updated_at"])
-                except Exception:
-                    pass
             else:
                 ai_analysis = None
 

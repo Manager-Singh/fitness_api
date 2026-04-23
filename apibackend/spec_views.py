@@ -21,6 +21,10 @@ from workouts.models import Exercise, UserRoutine, WorkoutEntry, WorkoutSession
 from workouts.serializers_log import WorkoutEntryReadSerializer
 from nutration.serializers_log import NutraEntryReadSerializer
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _adult_free_logging_locked(user) -> bool:
     """Section 7.1 — unpaid adults cannot log exercises or nutrition/lifestyle."""
@@ -57,7 +61,7 @@ def _to_local_date(request, fallback):
             if parsed_local.date() == (local_date - timedelta(days=1)):
                 return local_date - timedelta(days=1)
         except Exception:
-            pass
+            logger.exception("Failed parsing client_timestamp in grace window", extra={"stamp": repr(stamp), "user_id": getattr(request.user, "id", None)})
     return local_date
 
 

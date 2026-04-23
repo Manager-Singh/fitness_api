@@ -12,6 +12,10 @@ from users.models import Friendship
 from workouts.models import WorkoutEntry
 from nutration.models_log import NutraEntry
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from .serializers_leaderboard import LeaderboardResponseSerializer
 
 User = get_user_model()
@@ -170,6 +174,7 @@ class LeaderboardAPIView(APIView):
             try:
                 user_age = get_user_age(u)
             except Exception:
+                logger.exception("Failed computing user_age for leaderboard", extra={"user_id": getattr(u, "id", None)})
                 continue
             if (user_age >= 21) != current_is_adult:
                 continue

@@ -1023,6 +1023,8 @@ from django.utils import timezone
 from .models import PostureReport
 from user_profile.models import UserProfile
 
+import logging
+
 import base64, json, magic
 from openai import OpenAI
 from django.forms.models import model_to_dict
@@ -1046,6 +1048,8 @@ from users.models import HeightLedger, PostureState
 from utils.age import get_user_age_exact
 from utils.age import get_user_age
 
+logger = logging.getLogger(__name__)
+
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
@@ -1062,6 +1066,7 @@ def _make_json_safe(value):
         try:
             return value.isoformat()
         except Exception:
+            logger.exception("Failed serializing datetime/date to isoformat", extra={"value_type": type(value).__name__})
             return str(value)
     if isinstance(value, uuid.UUID):
         return str(value)
@@ -1074,6 +1079,7 @@ def _make_json_safe(value):
         json.dumps(value)
         return value
     except Exception:
+        logger.exception("Value not JSON serializable; stringifying", extra={"value_type": type(value).__name__})
         return str(value)
 
 
@@ -1408,6 +1414,10 @@ def _apply_scan_to_posture_state(user, posture_bars):
         try:
             historical_posture_um += int((row.metadata or {}).get("engine1_delta_um", 0))
         except Exception:
+            logger.exception(
+                "Failed reading engine1_delta_um from HeightLedger.metadata",
+                extra={"row_id": getattr(row, "id", None)},
+            )
             continue
 
     if not prev_scan_completed or int(state.total_recoverable_loss_um or 0) <= 0:

@@ -13,6 +13,7 @@ from django.conf import settings
 from django.forms.models import model_to_dict
 import re
 import json
+import logging
 from typing import Any, Dict
 from utils.chatgpt_service import generate_chatgpt_response
 from height_analysis.models import GeneticHeightEstimate, HeightGrowthProjection
@@ -37,6 +38,8 @@ from workouts.models import (
 )
 from utils.check_payment import check_subscription_or_response
 from utils.streaks import get_user_streaks
+
+logger = logging.getLogger(__name__)
 
 from utils.posture.height_access_utility import get_height_view
 from utils.teen_optimized_height import compute_optimized_height
@@ -754,6 +757,10 @@ def get_posture_questions(request):
                     try:
                         validated_engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
                     except Exception:
+                        logger.exception(
+                            "Failed reading engine1_delta_um from HeightLedger.metadata",
+                            extra={"row_id": getattr(row, "id", None)},
+                        )
                         continue
         posture_plus_cumulative_cm = round(validated_engine1_um / 10000.0, 4)
     genetic_plus_cumulative_cm = round(
@@ -1513,7 +1520,7 @@ def get_dashboard_new(request):
             teen_height_live_cm = float(teen_live_red_cm)
             teen_growthmax_cm = float(teen_live_red_cm)
         except Exception:
-            pass
+            logger.exception("Failed applying teen_locked_post_day7 red-line override")
     # Spec (Section 5.6 / 7.2): True Optimized Height is revealed ONLY when paid (not during trial).
     can_view_true_optimized = bool(is_teen and bool((payload.get("subscription") or {}).get("is_paid", False)))
     teen_scan_required = bool(scan_access.get("teen_scan_required", False))
@@ -1524,10 +1531,12 @@ def get_dashboard_new(request):
     try:
         teen_target_blue_cm = float(growth_projection.get("estimated_genetic_height_cm") or 0.0)
     except Exception:
+        logger.exception("Failed parsing estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("estimated_genetic_height_cm"))})
         teen_target_blue_cm = 0.0
     try:
         teen_target_red_cm = float(growth_projection.get("optimized_estimated_genetic_height_cm") or 0.0)
     except Exception:
+        logger.exception("Failed parsing optimized_estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("optimized_estimated_genetic_height_cm"))})
         teen_target_red_cm = 0.0
     if teen_target_blue_cm <= 0:
         teen_target_blue_cm = teen_live_blue_cm
@@ -1538,6 +1547,7 @@ def get_dashboard_new(request):
     try:
         teen_target_unoptimized_cm = float(growth_projection.get("unoptimized_estimated_genetic_height_cm") or 0.0)
     except Exception:
+        logger.exception("Failed parsing unoptimized_estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("unoptimized_estimated_genetic_height_cm"))})
         teen_target_unoptimized_cm = 0.0
     if teen_target_unoptimized_cm <= 0:
         teen_target_unoptimized_cm = max(0.0, teen_target_blue_cm - 2.0)

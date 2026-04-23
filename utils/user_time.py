@@ -3,12 +3,17 @@ from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def get_user_tz(user):
     tz_name = str(getattr(user, "timezone", "") or "UTC")
     try:
         return ZoneInfo(tz_name)
     except Exception:
+        logger.exception("Invalid user timezone; falling back to UTC", extra={"tz_name": tz_name, "user_id": getattr(user, "id", None)})
         return ZoneInfo("UTC")
 
 

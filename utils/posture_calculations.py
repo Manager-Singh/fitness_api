@@ -224,6 +224,10 @@
 
 import json
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from utils.posture.height_constants import (
     POSTURE_SEGMENT_MAX_LOSS_CM,
     TOTAL_STRUCTURAL_CEILING_CM,
@@ -258,6 +262,7 @@ def parse_payload(raw):
         if isinstance(parsed, dict):
             return parsed
     except Exception:
+        logger.exception("parse_payload failed", extra={"raw_type": type(raw).__name__})
         return None
 
     return None
@@ -270,6 +275,7 @@ def safe(lm, key, axis):
     try:
         return float(lm[key][axis])
     except Exception:
+        logger.exception("safe landmark extract failed", extra={"key": key, "axis": axis})
         return None
 
 
@@ -277,6 +283,7 @@ def inches_to_cm(inches):
     try:
         return round(float(inches) * 2.54, 2)
     except Exception:
+        logger.exception("inches_to_cm failed", extra={"inches": repr(inches)})
         return 0.0
 
 

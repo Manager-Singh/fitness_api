@@ -183,6 +183,10 @@ from datetime import datetime
 
 from utils.posture.height_constants import POSTURE_BOOST_MAX_CM
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # =====================================================
 # INPUT TYPES
@@ -241,7 +245,8 @@ def clamp(v, lo, hi):
 def safe_float(v, default=0.0):
     try:
         return float(v)
-    except:
+    except Exception:
+        logger.exception("safe_float failed", extra={"value": repr(v)})
         return default
 
 

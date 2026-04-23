@@ -18,11 +18,16 @@ from utils.posture.height_constants import (
 )
 from utils.user_time import user_today
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _to_um(cm_value):
     try:
         return int(round(float(cm_value) * 10000.0))
     except Exception:
+        logger.exception("_to_um failed", extra={"cm_value": repr(cm_value)})
         return 0
 
 
@@ -35,6 +40,7 @@ def _to_dm_from_engine2_points(engine2_points):
     try:
         return int(round(float(engine2_points or 0) * 5.0))
     except Exception:
+        logger.exception("_to_dm_from_engine2_points failed", extra={"engine2_points": repr(engine2_points)})
         return 0
 
 
@@ -43,6 +49,7 @@ def _um_from_dm(dm_value):
     try:
         return int(round(float(dm_value or 0) / 10.0))
     except Exception:
+        logger.exception("_um_from_dm failed", extra={"dm_value": repr(dm_value)})
         return 0
 
 
@@ -73,17 +80,26 @@ def _sum_prior_engine_deltas(user):
             try:
                 prior_engine1_um += int(md.get("engine1_delta_um", 0) or 0)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed reading engine1_delta_um from metadata",
+                    extra={"row_id": getattr(row, "id", None)},
+                )
             try:
                 prior_bio_um += int(md.get("bio_delta_um", 0) or 0)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed reading bio_delta_um from metadata",
+                    extra={"row_id": getattr(row, "id", None)},
+                )
             try:
                 prior_engine2_dm += int(getattr(row, "engine2_delta_dm", 0) or 0) or int(
                     md.get("engine2_delta_dm", 0) or 0
                 )
             except Exception:
-                pass
+                logger.exception(
+                    "Failed reading engine2_delta_dm from ledger row",
+                    extra={"row_id": getattr(row, "id", None)},
+                )
 
     return prior_engine1_um, prior_bio_um, prior_engine2_dm
 
@@ -119,7 +135,7 @@ def _get_or_create_state(user):
                 total = float(explicit or 0)
             state.total_recoverable_loss_um = _to_um(total)
         except Exception:
-            pass
+            logger.exception("_get_or_create_state: failed backfill from latest_report", extra={"user_id": getattr(user, "id", None)})
 
     state.save()
     return state
@@ -140,6 +156,10 @@ def set_daily_validated(user, log_date):
     try:
         age = int(get_user_age_on_date(user, log_date) or 0)
     except Exception:
+        logger.exception(
+            "set_daily_validated: age parse failed",
+            extra={"log_date": str(log_date), "user_id": getattr(user, "id", None)},
+        )
         age = 0
 
     def _core_done(routine_type):
@@ -281,7 +301,7 @@ def _reset_adult_posture_segments_from_latest_scan(user):
             total = float(explicit or 0)
         state.total_recoverable_loss_um = _to_um(total)
     except Exception:
-        pass
+        logger.exception("_reset_adult_posture_segments_from_latest_scan failed", extra={"user_id": getattr(user, "id", None)})
     state.save(
         update_fields=[
             "spinal_current_loss_um",
@@ -308,12 +328,20 @@ def _replay_adult_engine1_ledger_before(user, before_log_date, state):
         try:
             row_age = int(get_user_age_on_date(user, row.log_date) or 0)
         except Exception:
+            logger.exception(
+                "_replay_adult_engine1_ledger_before: age parse failed",
+                extra={"row_id": getattr(row, "id", None), "log_date": str(getattr(row, "log_date", ""))},
+            )
             row_age = 0
         if row_age < 21:
             continue
         try:
             e1 = int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
         except Exception:
+            logger.exception(
+                "_replay_adult_engine1_ledger_before: engine1_delta_um parse failed",
+                extra={"row_id": getattr(row, "id", None)},
+            )
             e1 = 0
         _redistribute_engine1_gain_across_segments(state, e1)
 
@@ -324,7 +352,10 @@ def _needs_adult_posture_replay_for_rebuild(user, from_date):
         if int(get_user_age_on_date(user, from_date) or 0) >= 21:
             return True
     except Exception:
-        pass
+        logger.exception(
+            "_needs_adult_posture_replay_for_rebuild: age parse failed",
+            extra={"from_date": str(from_date), "user_id": getattr(user, "id", None)},
+        )
     prior_dates = (
         HeightLedger.objects.filter(
             user=user,
@@ -339,6 +370,10 @@ def _needs_adult_posture_replay_for_rebuild(user, from_date):
             if int(get_user_age_on_date(user, d) or 0) >= 21:
                 return True
         except Exception:
+            logger.exception(
+                "_needs_adult_posture_replay_for_rebuild: age parse failed",
+                extra={"date": str(d), "user_id": getattr(user, "id", None)},
+            )
             continue
     return False
 
@@ -534,6 +569,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     try:
         age = int(get_user_age_on_date(user, log_date) or 0)
     except Exception:
+        logger.exception(
+            "compute_daily_height_for_user: age parse failed",
+            extra={"log_date": str(log_date), "user_id": getattr(user, "id", None)},
+        )
         age = 0
 
     subscription_data = check_subscription_or_response(user).data
@@ -571,7 +610,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             try:
                 prior_engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0))
             except Exception:
-                pass
+                logger.exception(
+                    "compute_daily_height_for_user: failed reading engine1_delta_um from metadata",
+                    extra={"row_id": getattr(row, "id", None)},
+                )
         teen_engine1_cap_um = _to_um(OPTIMIZATION_GAP_CM)
         remaining_um = max(0, teen_engine1_cap_um - prior_engine1_um)
         engine1_delta_um = min(max(0, engine1_delta_um), remaining_um)
@@ -585,7 +627,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             try:
                 prior_total_um += int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
             except Exception:
-                pass
+                logger.exception(
+                    "compute_daily_height_for_user: failed reading engine1_delta_um for adult carry-over",
+                    extra={"row_id": getattr(row, "id", None)},
+                )
         remaining_um = max(0, int(state.total_recoverable_loss_um) - prior_total_um)
         total_today_um = max(0, engine1_delta_um + engine2_delta_um)
         total_today_um = min(total_today_um, remaining_um)

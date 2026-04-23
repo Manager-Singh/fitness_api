@@ -12,12 +12,15 @@ from django.conf import settings
 from django.forms.models import model_to_dict
 import re
 import json
+import logging
 from posture.serializers import PostureImageSerializer
 from utils.chatgpt_service import generate_chatgpt_response
 from utils.age import get_user_age
 from decimal import Decimal, ROUND_HALF_UP
 from django.utils import timezone
 from datetime import timedelta, date, datetime
+
+logger = logging.getLogger(__name__)
 import uuid
 from utils.check_payment import check_subscription_or_response
 from utils.streaks import get_user_streaks
@@ -750,7 +753,7 @@ def parse_complete_response(raw_response):
         if hasattr(raw_response, "to_dict"):
             return raw_response.to_dict()
     except Exception:
-        pass
+        logger.exception("Stripe response to_dict() failed", extra={"raw_type": type(raw_response).__name__})
 
     # Case 3: JSON string
     if isinstance(raw_response, str):
@@ -1128,7 +1131,7 @@ def my_profile(request):
                 if USER_HEIGHT_CM_MIN <= ch0 <= USER_HEIGHT_CM_MAX:
                     profile.base_height_cm = str(round(ch0, 4))
             except Exception:
-                pass
+                logger.exception("Failed setting base_height_cm from current_height_cm", extra={"user_id": getattr(request.user, "id", None)})
 
         user.save()
         profile.save()

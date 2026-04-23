@@ -138,6 +138,10 @@ from nutration.models_log import NutraEntry
 from workouts.models import WorkoutEntry, WorkoutSession, Tier, RoutineType
 from utils.age import get_user_age
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 User = get_user_model()
 
 CACHE_TTL = 60 * 10  # 10 minutes
@@ -194,6 +198,7 @@ def _current_validated_streak(user, today):
     try:
         age = get_user_age(user)
     except Exception:
+        logger.exception("Failed computing user age for streak", extra={"user_id": getattr(user, "id", None)})
         age = 0
     streak = 0
     day = today
@@ -208,12 +213,14 @@ def _same_tier_users(base_user):
     try:
         base_age = get_user_age(base_user)
     except Exception:
+        logger.exception("Failed computing base user age for tier match", extra={"user_id": getattr(base_user, "id", None)})
         base_age = 0
     want_adult = base_age >= 21
     for candidate in User.objects.filter(is_active=True):
         try:
             age = get_user_age(candidate)
         except Exception:
+            logger.exception("Failed computing candidate age for tier match", extra={"user_id": getattr(candidate, "id", None)})
             continue
         if (age >= 21) == want_adult:
             user_ids.append(candidate.id)
