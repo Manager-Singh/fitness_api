@@ -108,6 +108,46 @@ class DailyLogGeneticAverageIntegrationTests(TestCase):
         self.assertIsNone(daily.genetic_average_cm)
         self.assertIsNone(daily.daily_genetic_average_gain_cm)
 
+    def test_teen_questionnaire_unlock_sets_dashboard_scan_completed(self, mock_sub):
+        """
+        v3.3+ teen unlock rule: scan OR questionnaire completion.
+        Dashboard should not show scan_completed=false after successful questionnaire submit.
+        """
+        mock_sub.side_effect = lambda user: self._mock_sub_teen_paid()
+        log_date = date(2024, 9, 1)
+        u = self._teen_with_parents(log_date, years_old=15)
+        # Explicitly simulate: questionnaire done, scan NOT done.
+        ps = PostureState.objects.get(user=u)
+        ps.scan_completed = False
+        ps.questionnaire_completed = True
+        ps.save()
+
+        # Avoid deep routine generation / ML dependencies in this contract test.
+        from unittest.mock import patch
+
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from posture_questions.views import get_dashboard_new
+        from utils.posture.height_constants import default_optimization_breakdown_pending_scan
+
+        factory = APIRequestFactory()
+        req = factory.get("/api/dashboard-new")
+        force_authenticate(req, user=u)
+        with patch(
+            "posture_questions.views.RoutineService.ensure_active_routine",
+            return_value=None,
+        ), patch(
+            "posture_questions.views.PostureAnalysisService.get_posture_analysis",
+            return_value=({}, default_optimization_breakdown_pending_scan()),
+        ), patch(
+            "posture_questions.views.compute_optimized_height",
+            return_value={"mph_height_cm": 170.0, "optimized_height_cm": 175.0},
+        ):
+            resp = get_dashboard_new(req)
+        self.assertEqual(getattr(resp, "status_code", None), 200)
+        dash = resp.data.get("dashboard") or {}
+        scan = dash.get("scan") or {}
+        self.assertTrue(bool(scan.get("scan_completed")))
+
 
 class DashboardNewV34SerializerTests(SimpleTestCase):
     """Serializer accepts v3.4 dashboard fields (no HTTP — avoids full dashboard graph stack)."""

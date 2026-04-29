@@ -761,7 +761,14 @@ def get_posture_questions(request):
         source=posture_source,
         rescan_days=rescan_days,
     )
-    canonical_scan_completed = bool(runtime_state.get("scan_completed") or bool(last_scan))
+    # For teens, the v3.3+ unlock rule is scan OR questionnaire completion.
+    # The dashboard scan widget uses `scan_completed` as a gating flag; treat questionnaire
+    # completion as "scan completed" for teen dashboard purposes.
+    canonical_scan_completed = bool(
+        runtime_state.get("scan_completed")
+        or bool(last_scan)
+        or (is_teen_track and bool(runtime_state.get("questionnaire_completed")))
+    )
     canonical_total_recoverable_cm = float(
         posture_optimization_diagnostics.get("total_recoverable_loss_cm", 0.0) or 0.0
     )
