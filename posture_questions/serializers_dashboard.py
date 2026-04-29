@@ -26,6 +26,11 @@ class DashboardNewRoutineSerializer(serializers.Serializer):
     posture_exercises_fraction = serializers.CharField(allow_blank=True, allow_null=True)
     posture_exercises_done = serializers.IntegerField()
     posture_exercises_total = serializers.IntegerField()
+    # v3.4 aliases for dynamic CTA buttons (same counts as posture_exercises_* for teens).
+    exercises_done = serializers.IntegerField(required=False, allow_null=True)
+    total_exercises = serializers.IntegerField(required=False, allow_null=True)
+    # Teen: sum of nutrition + lifestyle dots (0–8). Adult: rough food slots 0–4 from nutrition %.
+    habits_logged = serializers.IntegerField(required=False, allow_null=True)
     posture_exercises_percent = serializers.IntegerField(required=False, allow_null=True)
     nutrition_percent = serializers.IntegerField(required=False, allow_null=True)
     teen_nutrition_dots = serializers.IntegerField(required=False, allow_null=True)
@@ -49,6 +54,9 @@ class DashboardNewCoreSerializer(serializers.Serializer):
     anomalies = serializers.ListField(child=serializers.CharField(), required=False)
     live_metrics = serializers.DictField(required=False)
     target_metrics = serializers.DictField(required=False)
+    # Section 5.1b — teen Genetic_Average curve (yellow dot / legend); null for adults.
+    genetic_average_cm = serializers.FloatField(required=False, allow_null=True)
+    daily_genetic_average_gain_cm = serializers.FloatField(required=False, allow_null=True)
     scan = DashboardNewScanSerializer()
     top_graph = DashboardNewTopGraphSerializer()
     routine_progress = DashboardNewRoutineSerializer()

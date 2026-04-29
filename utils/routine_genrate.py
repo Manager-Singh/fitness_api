@@ -163,6 +163,51 @@ def _normalize_answer(value):
         return ""
     return str(value).strip().lower()
 
+def _parse_options(value):
+    """
+    PostureQuestion options are commonly stored as JSON list strings.
+    Return a list of option labels as strings (best-effort).
+    """
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    raw = str(value).strip()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+    except Exception:
+        pass
+    return [raw]
+
+
+def _coerce_letter(value, options=None):
+    """
+    Convert stored answer into A/B/C/D/E using its options list.
+    Supports:
+    - "A", "A) ..." etc (already coded)
+    - Full text label (e.g. "Often") matched against options (index -> letter)
+    """
+    txt = _normalize_answer(value)
+    if txt and txt[0] in {"a", "b", "c", "d", "e"}:
+        return txt[0]
+    opts = _parse_options(options)
+    if not opts:
+        return ""
+    norm_opts = [_normalize_answer(o) for o in opts]
+    if txt in norm_opts:
+        idx = norm_opts.index(txt)
+    else:
+        # substring fallback for punctuation/quotes differences
+        idx = -1
+        for i, o in enumerate(norm_opts):
+            if txt and (txt in o or o in txt):
+                idx = i
+                break
+    letters = ["a", "b", "c", "d", "e"]
+    return letters[idx] if 0 <= idx < len(letters) else ""
+
 
 def _choice_score(ans):
     ans = _normalize_answer(ans)
@@ -200,13 +245,46 @@ def _questionnaire_ranked_segments(user):
     if not pq:
         return []
 
-    q1 = _choice_score(pq.forward_head_posture_answer)
-    q2 = _choice_score(pq.gap_between_your_lower_back_answer)
-    q4 = _choice_score(pq.slouch_when_standing_or_sitting_answer)
-    q5 = _choice_score(pq.feel_noticeably_shorter_end_of_day_compare_to_morning_answer)
-    q7 = _choice_score(pq.flexible_in_your_hamstrings_and_hips_answer)
-    q8 = _choice_score(pq.active_your_core_during_daily_task_answer)
-    q3 = _parse_multiselect(pq.tightness_or_discomfort_answer)
+    # v3.3 / current storage: answers may be stored as full text labels.
+    # Coerce them back to A/B/C via their options arrays.
+    q1_l = _coerce_letter(pq.forward_head_posture_answer, pq.forward_head_posture_options)
+    q2_l = _coerce_letter(pq.gap_between_your_lower_back_answer, pq.gap_between_your_lower_back_options)
+    q4_l = _coerce_letter(pq.slouch_when_standing_or_sitting_answer, pq.slouch_when_standing_or_sitting_options)
+    q5_l = _coerce_letter(
+        pq.feel_noticeably_shorter_end_of_day_compare_to_morning_answer,
+        pq.feel_noticeably_shorter_end_of_day_compare_to_morning_options,
+    )
+    q7_l = _coerce_letter(
+        pq.flexible_in_your_hamstrings_and_hips_answer,
+        pq.flexible_in_your_hamstrings_and_hips_options,
+    )
+    q8_l = _coerce_letter(
+        pq.active_your_core_during_daily_task_answer,
+        pq.active_your_core_during_daily_task_options,
+    )
+
+    q1 = _choice_score(q1_l)
+    q2 = _choice_score(q2_l)
+    q4 = _choice_score(q4_l)
+    q5 = _choice_score(q5_l)
+    q7 = _choice_score(q7_l)
+    q8 = _choice_score(q8_l)
+
+    # Multi-select: coerce selected labels to letters using options list.
+    q3 = set()
+    raw_q3 = pq.tightness_or_discomfort_answer
+    try:
+        parsed = json.loads(raw_q3) if isinstance(raw_q3, str) else raw_q3
+    except Exception:
+        parsed = raw_q3
+    if isinstance(parsed, list):
+        for item in parsed:
+            l = _coerce_letter(item, pq.tightness_or_discomfort_options)
+            if l:
+                q3.add(l)
+    else:
+        # fallback to legacy parser (letters embedded in string)
+        q3 = _parse_multiselect(raw_q3)
 
     q3a = 1 if "a" in q3 else 0
     q3b = 1 if "b" in q3 else 0
@@ -222,6 +300,45 @@ def _questionnaire_ranked_segments(user):
     tie_order = {k: i for i, k in enumerate(SECTION10_NEED_PRIORITY)}
     ranked = sorted(scores.keys(), key=lambda s: (-scores[s], tie_order.get(s, 99)))
     return ranked
+
+
+def assign_teen_hgh_beast(variant, ranked_segments, age):
+    """
+    Spec v3.3 Section 10.6: choose teen HGH Beast Mode based on ranked segments.
+    This implementation uses VariantExercise.type (segment) + category guards.
+    """
+    if not (13 <= int(age) <= 20):
+        return []
+    if not ranked_segments:
+        ranked_segments = SECTION10_NEED_PRIORITY
+
+    # Core HGH exclusions are already done by selecting core first; exclude their IDs.
+    core = list(_variant_qs(variant, Tier.CORE, allowed_categories=HGH_ALLOWED_CATEGORIES).order_by("order")[:2])
+    core_ids = {ve.exercise_id for ve in core}
+
+    # Walk ranked segments and pick first matching beast.
+    for seg in ranked_segments:
+        mapped_need = SEGMENT_TO_EXERCISE_TYPE.get(seg, seg)
+        cand = list(
+            _variant_qs(
+                variant,
+                Tier.BEAST,
+                mapped_need=mapped_need,
+                allowed_categories=HGH_ALLOWED_CATEGORIES,
+            )
+            .exclude(exercise_id__in=list(core_ids))
+            .order_by("order")[:1]
+        )
+        if cand:
+            return cand
+
+    # Fallback: any beast in HGH variant.
+    cand = list(
+        _variant_qs(variant, Tier.BEAST, allowed_categories=HGH_ALLOWED_CATEGORIES)
+        .exclude(exercise_id__in=list(core_ids))
+        .order_by("order")[:1]
+    )
+    return cand
 
 
 def assign_adult_exercises(variant, optimization_breakdown, ranked_segments=None):
@@ -384,24 +501,30 @@ def generate_user_routines(user, optimization_breakdown):
                 ranked_segments=ranked_segments,
             )
         else:
-            # HGH/other tracks retain explicit variant ordering.
+            # v3.3: teen HGH beast selection should follow ranked segments.
             selected.extend(
                 list(
-                    _variant_qs(variant, Tier.CORE, allowed_categories=HGH_ALLOWED_CATEGORIES).order_by("order")[:counts["core"]]
+                    _variant_qs(variant, Tier.CORE, allowed_categories=HGH_ALLOWED_CATEGORIES)
+                    .order_by("order")[:counts["core"]]
                 )
             )
             if counts["rec"] > 0:
                 selected.extend(
                     list(
-                        _variant_qs(variant, Tier.RECOMMENDED, allowed_categories=HGH_ALLOWED_CATEGORIES).order_by("order")[:counts["rec"]]
+                        _variant_qs(variant, Tier.RECOMMENDED, allowed_categories=HGH_ALLOWED_CATEGORIES)
+                        .order_by("order")[:counts["rec"]]
                     )
                 )
-            if counts["beast"] > 0:
-                selected.extend(
-                    list(
-                        _variant_qs(variant, Tier.BEAST, allowed_categories=HGH_ALLOWED_CATEGORIES).order_by("order")[:counts["beast"]]
+            if counts.get("beast", 0) > 0:
+                if 13 <= age <= 20:
+                    selected.extend(assign_teen_hgh_beast(variant, ranked_segments, age))
+                else:
+                    selected.extend(
+                        list(
+                            _variant_qs(variant, Tier.BEAST, allowed_categories=HGH_ALLOWED_CATEGORIES)
+                            .order_by("order")[:counts["beast"]]
+                        )
                     )
-                )
 
         # Deduplicate exercises
         unique_exercises = []

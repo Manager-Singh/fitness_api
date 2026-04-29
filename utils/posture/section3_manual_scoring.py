@@ -151,12 +151,12 @@ def _pick_multi_with_options(value, options=None):
     return _coerce_to_letters(value, options=options)
 
 
-def build_section3_manual_breakdown(posture_q):
+def build_section3_manual_breakdown(posture_q, clamp_min_cm: float = 1.0):
     """
     Spec section 3 scoring:
     - Q6 reversed scoring.
     - Q3 multi-select with cap 0.80.
-    - Raw clamp to [1.0, 5.5].
+    - Raw clamp to [clamp_min_cm, 5.5] (v3.3: adults=1.0, teens=0.0).
     """
     q1 = _pick_single_with_options(
         getattr(posture_q, "forward_head_posture_answer", None),
@@ -207,7 +207,7 @@ def build_section3_manual_breakdown(posture_q):
     raw_total = (
         q1_score + q2_score + q3_score + q4_score + q5_score + q6_score + q7_score + q8_score
     )
-    total_recoverable_loss = clamp(raw_total, 1.0, 5.5)
+    total_recoverable_loss = clamp(raw_total, float(clamp_min_cm), 5.5)
 
     breakdown = {}
     for seg, ratio in POSTURE_SEGMENT_DISTRIBUTION_RATIO.items():

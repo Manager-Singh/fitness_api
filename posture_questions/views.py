@@ -67,7 +67,7 @@ from typing import Dict, Any, List
 from datetime import timedelta
 from utils.age import get_user_age_exact
 from utils.posture.section3_manual_scoring import build_section3_manual_breakdown
-from users.spec_runtime import get_user_runtime_state_snapshot
+from users.spec_runtime import get_user_runtime_state_snapshot, apply_pending_pre_scan_engine1
 from users.models import DailyLog, HeightLedger, PostureState
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.monetization_gate import compute_monetization_flags
@@ -78,6 +78,10 @@ from utils.teen_dashboard_dots import (
     teen_lifestyle_dots_for_day,
     teen_lifestyle_nutrition_combined_percent,
     teen_nutrition_dots_from_food_points,
+)
+from utils.posture.teen_genetic_average import (
+    compute_daily_genetic_average_gain_cm,
+    compute_genetic_average_cm,
 )
 
 
@@ -101,22 +105,8 @@ def upsert_posture_questions(request):
     except (TypeError, ValueError, KeyError) as e:
         return Response({'error': f'Invalid profile data: {e}'}, status=status.HTTP_400_BAD_REQUEST)
 
-    manual_keys = [
-        "forward_head_posture_answer",
-        "gap_between_your_lower_back_answer",
-        "tightness_or_discomfort_answer",
-        "slouch_when_standing_or_sitting_answer",
-        "feel_noticeably_shorter_end_of_day_compare_to_morning_answer",
-        "perfectly_aligned_and_decompressed_answer",
-        "flexible_in_your_hamstrings_and_hips_answer",
-        "active_your_core_during_daily_task_answer",
-    ]
     is_adult = bool(getattr(user, "account_tier", None) == "adult" or current_age >= 21)
-    if (not is_adult) and any(k in request.data for k in manual_keys):
-        return Response(
-            {"error": "manual_questionnaire_adult_only"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    is_teen = bool(current_age < 21)
 
     # ───── 1. Calculate Estimated Genetic Height using service ─────
     genetic_estimate = GeneticHeightService.upsert_genetic_estimate(
@@ -139,36 +129,37 @@ def upsert_posture_questions(request):
     #   for UX parity (but only when the questionnaire becomes complete, not on every update).
 
 
-    # Section 3 (adults only): compute and persist manual questionnaire state.
+    # Section 3 (v3.3): compute and persist manual questionnaire state (adults + teens).
     section3_contract = None
-    if is_adult:
-        posture_q = PostureQuestionService.get_posture_questions(user)
-        if posture_q:
-            required_answers = [
-                posture_q.forward_head_posture_answer,
-                posture_q.gap_between_your_lower_back_answer,
-                posture_q.tightness_or_discomfort_answer,
-                posture_q.slouch_when_standing_or_sitting_answer,
-                posture_q.feel_noticeably_shorter_end_of_day_compare_to_morning_answer,
-                posture_q.perfectly_aligned_and_decompressed_answer,
-                posture_q.flexible_in_your_hamstrings_and_hips_answer,
-                posture_q.active_your_core_during_daily_task_answer,
-            ]
-            questionnaire_complete = all((v is not None and str(v).strip() != "") for v in required_answers)
-            state, _ = PostureState.objects.get_or_create(user=user)
-            state.questionnaire_completed = questionnaire_complete
+    posture_q = PostureQuestionService.get_posture_questions(user)
+    if posture_q:
+        required_answers = [
+            posture_q.forward_head_posture_answer,
+            posture_q.gap_between_your_lower_back_answer,
+            posture_q.tightness_or_discomfort_answer,
+            posture_q.slouch_when_standing_or_sitting_answer,
+            posture_q.feel_noticeably_shorter_end_of_day_compare_to_morning_answer,
+            posture_q.perfectly_aligned_and_decompressed_answer,
+            posture_q.flexible_in_your_hamstrings_and_hips_answer,
+            posture_q.active_your_core_during_daily_task_answer,
+        ]
+        questionnaire_complete = all((v is not None and str(v).strip() != "") for v in required_answers)
+        state, _ = PostureState.objects.get_or_create(user=user)
+        state.questionnaire_completed = questionnaire_complete
 
-            if questionnaire_complete:
-                now_ts = timezone.now()
+        if questionnaire_complete:
+            now_ts = timezone.now()
+            if state.questionnaire_completed_at is None:
+                state.questionnaire_completed_at = now_ts
 
-                # First-time completion stamp.
-                if state.questionnaire_completed_at is None:
-                    state.questionnaire_completed_at = now_ts
-
-                # Backfill: if questionnaire is complete but scan timestamps were never stamped
-                # (e.g. completed before this logic was deployed), set them once.
-                # Do NOT overwrite existing timestamps.
-                needs_scan_stamp = (getattr(profile, "last_scan", None) is None) or (state.last_scan_at is None) or (not bool(state.scan_completed))
+            # Adults: questionnaire completion is treated as a scan-equivalent unlock and stamps last_scan.
+            # Teens (v3.3): questionnaire completion unlocks gains but does not necessarily mean a camera scan exists.
+            if is_adult:
+                needs_scan_stamp = (
+                    (getattr(profile, "last_scan", None) is None)
+                    or (state.last_scan_at is None)
+                    or (not bool(state.scan_completed))
+                )
                 if needs_scan_stamp:
                     if getattr(profile, "last_scan", None) is None:
                         profile.last_scan = now_ts
@@ -176,36 +167,70 @@ def upsert_posture_questions(request):
                     if state.last_scan_at is None:
                         state.last_scan_at = now_ts
                     state.scan_completed = True
-                manual = build_section3_manual_breakdown(posture_q)
-                total_recoverable = float(manual["total_recoverable_loss_cm"])
-                target_height = round(base_height + total_recoverable, 2)
-                section3_contract = {
-                    "raw_score_cm": manual["raw_score_cm"],
-                    "total_recoverable_loss_cm": total_recoverable,
-                    "distribution_ratio": "30/35/25/10",
-                    "optimization_breakdown": manual["optimization_breakdown"],
-                    "target_height_cm": target_height,
-                    "target_height_formula": "Base_Height + Total_Recoverable_Loss",
-                }
-                state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
-                seg = manual["optimization_breakdown"]
-                state.spinal_current_loss_um = int(round(float(seg["spinal_compression"]["current_loss_cm"]) * 10000))
-                state.collapse_current_loss_um = int(round(float(seg["posture_collapse"]["current_loss_cm"]) * 10000))
-                state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
-                state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
-                state.save(update_fields=[
-                    "scan_completed",
-                    "questionnaire_completed",
-                    "questionnaire_completed_at",
-                    "total_recoverable_loss_um",
-                    "spinal_current_loss_um",
-                    "collapse_current_loss_um",
-                    "pelvic_current_loss_um",
-                    "legs_current_loss_um",
-                    "last_scan_at",
-                ])
             else:
-                state.save(update_fields=["questionnaire_completed"])
+                # v3.3: Teen trial starts on first unlock (scan OR questionnaire).
+                try:
+                    age_exact_now = float(get_user_age_exact(user) or 0.0)
+                except Exception:
+                    age_exact_now = 0.0
+                if 13.0 <= age_exact_now < 21.0:
+                    if getattr(user, "trial_start", None) is None:
+                        user.trial_start = now_ts
+                    if getattr(user, "trial_end", None) is None and getattr(user, "trial_start", None) is not None:
+                        user.trial_end = user.trial_start + timedelta(days=7)
+                    try:
+                        user.save(update_fields=["trial_start", "trial_end"])
+                    except Exception:
+                        logger.exception("Failed saving teen trial_start/trial_end on questionnaire unlock")
+
+            clamp_min = 1.0 if is_adult else 0.0
+            manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
+            total_recoverable = float(manual["total_recoverable_loss_cm"])
+            target_height = round(base_height + total_recoverable, 2)
+            section3_contract = {
+                "raw_score_cm": manual["raw_score_cm"],
+                "total_recoverable_loss_cm": total_recoverable,
+                "distribution_ratio": "30/35/25/10",
+                "optimization_breakdown": manual["optimization_breakdown"],
+                "target_height_cm": target_height,
+                "target_height_formula": "Base_Height + Total_Recoverable_Loss",
+            }
+            state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
+            seg = manual["optimization_breakdown"]
+            state.spinal_current_loss_um = int(round(float(seg["spinal_compression"]["current_loss_cm"]) * 10000))
+            state.collapse_current_loss_um = int(round(float(seg["posture_collapse"]["current_loss_cm"]) * 10000))
+            state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
+            state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
+            state.save(update_fields=[
+                "scan_completed",
+                "questionnaire_completed",
+                "questionnaire_completed_at",
+                "total_recoverable_loss_um",
+                "spinal_current_loss_um",
+                "collapse_current_loss_um",
+                "pelvic_current_loss_um",
+                "legs_current_loss_um",
+                "last_scan_at",
+            ])
+            if (not is_adult):
+                # v3.3: Apply any pending pre-scan posture gains immediately on questionnaire unlock.
+                try:
+                    apply_pending_pre_scan_engine1(user, when=user_today(user))
+                except Exception:
+                    logger.exception(
+                        "Failed applying pending_pre_scan engine1 gains after teen questionnaire completion",
+                        extra={"user_id": getattr(user, "id", None)},
+                    )
+                # v3.3: Run exercise assignment pipeline immediately after teen questionnaire unlock.
+                try:
+                    RoutineService.ensure_active_routine(user, manual["optimization_breakdown"])
+                except Exception:
+                    logger.exception(
+                        "Failed generating teen routine after questionnaire unlock",
+                        extra={"user_id": getattr(user, "id", None)},
+                    )
+        else:
+            state.save(update_fields=["questionnaire_completed"])
 
     subscription_status = check_subscription_or_response(user)
 
@@ -553,10 +578,12 @@ def get_posture_questions(request):
     # If a scan timestamp exists but PostureReport row is absent, still treat as scan-backed.
     has_scan = bool(profile.last_scan) or bool(posture_report)
     posture_source = "ai_scan" if has_scan else "pending_scan"
-    if posture_report is None and is_adult_track:
+    if posture_report is None and (is_adult_track or is_teen_track):
         posture_q = PostureQuestionService.get_posture_questions(user)
-        if posture_q:
-            manual = build_section3_manual_breakdown(posture_q)
+        # v3.3: questionnaire fallback is allowed for teens too.
+        if posture_q and bool(get_user_runtime_state_snapshot(user).get("questionnaire_completed")):
+            clamp_min = 1.0 if is_adult_track else 0.0
+            manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
             optimization_breakdown = manual["optimization_breakdown"]
             posture_source = "manual_questionnaire"
             ai_analysis = {
@@ -567,7 +594,10 @@ def get_posture_questions(request):
             }
 
     # ── 9. Ensure routine exists ───────────────────────────
-    teen_scan_required = bool(is_teen_track and not profile.last_scan)
+    # v3.3: teen unlock can be scan OR questionnaire completion.
+    runtime_state = get_user_runtime_state_snapshot(user)
+    teen_unlocked = bool(runtime_state.get("scan_completed") or runtime_state.get("questionnaire_completed"))
+    teen_scan_required = bool(is_teen_track and (not teen_unlocked))
     if not teen_scan_required:
         RoutineService.ensure_active_routine(user, optimization_breakdown)
 
@@ -653,7 +683,7 @@ def get_posture_questions(request):
         segment["current_loss_cm"]
         for segment in optimization_breakdown.values()
     )
-    runtime_state = get_user_runtime_state_snapshot(user)
+    # runtime_state already computed above (includes questionnaire unlock state).
     runtime_total_recoverable_loss_cm = round(
         float(runtime_state.get("total_recoverable_loss_um", 0)) / 10000.0,
         4,
@@ -673,10 +703,12 @@ def get_posture_questions(request):
     )
     remaining_scans = "unlimited" if is_paid else 0
     if days_since_scan is None:
-        # Adults can proceed with manual questionnaire without a camera scan (Section 3 / 4.1 gate).
         questionnaire_done = bool(runtime_state.get("questionnaire_completed"))
         if is_adult_track and questionnaire_done:
             scan_message = "Manual posture assessment completed. Scan is optional."
+        elif is_teen_track and questionnaire_done:
+            # v3.3: teen questionnaire unlocks without scan.
+            scan_message = "Manual posture assessment completed."
         else:
             scan_message = "Initial scan required."
     else:
@@ -686,7 +718,8 @@ def get_posture_questions(request):
             scan_message = f"Re-scan in {days_left} days."
         else:
             scan_message = f"Re-scan in {days_left} days." if days_left > 0 else "Re-scan available."
-    teen_scan_required = bool(is_teen_track and not last_scan)
+    # v3.3: teen unlock can be scan OR questionnaire completion (do not rely on last_scan).
+    teen_scan_required = bool(is_teen_track and (not teen_unlocked))
     max_height_cm = None
 
     age = age_years
@@ -1206,6 +1239,17 @@ def get_posture_questions(request):
                     "completed_total_today": (
                         (completed_posture_total + completed_hgh_total) if is_teen_track else completed_posture_total
                     ),
+                    "exercises_done": (
+                        (completed_posture_total + completed_hgh_total) if is_teen_track else completed_posture_total
+                    ),
+                    "total_exercises": (
+                        (assigned_posture_total + assigned_hgh_total) if is_teen_track else assigned_posture_total
+                    ),
+                    "habits_logged": (
+                        int(min(8, teen_nutrition_dots + teen_lifestyle_dots))
+                        if is_teen_track
+                        else int(max(0, min(4, (adult_nutrition_pct or 0) // 25)))
+                    ),
                     "fraction_today": (
                         f"{(completed_posture_total + completed_hgh_total)}/{(assigned_posture_total + assigned_hgh_total) or 0}"
                         if is_teen_track
@@ -1247,6 +1291,16 @@ def get_posture_questions(request):
                 "conversion_enabled": monetization["conversion_enabled"],
             },
             "section5_contract": {
+                "genetic_average_cm": (
+                    round(float(compute_genetic_average_cm(user, user_local_today)), 4)
+                    if is_teen_track
+                    else None
+                ),
+                "daily_genetic_average_gain_cm": (
+                    round(float(compute_daily_genetic_average_gain_cm(user, user_local_today)), 6)
+                    if is_teen_track
+                    else None
+                ),
                 "genetic_plus_today_cm": round(teen_engine2_today_cm + teen_bio_today_cm, 4) if is_teen_track else 0.0,
                 "posture_plus_today_cm": teen_engine1_today_cm if is_teen_track else 0.0,
                 "daily_gains_today_cm": daily_gains_cm if is_teen_track else 0.0,
@@ -1586,6 +1640,21 @@ def get_dashboard_new(request):
         teen_card_genetic_cm = teen_live_blue_cm
         teen_card_growthmax_cm = teen_live_red_cm
         teen_card_height_cm = teen_live_red_cm
+    local_today = user_today(user)
+    teen_ga_cm = (
+        round(float(compute_genetic_average_cm(user, local_today)), 4) if is_teen else None
+    )
+    teen_daily_ga_gain = (
+        round(float(compute_daily_genetic_average_gain_cm(user, local_today)), 6)
+        if is_teen
+        else None
+    )
+    if is_teen:
+        habits_logged_count = int(min(8, teen_nutrition_dots + teen_lifestyle_dots))
+    else:
+        ap = int(section4.get("posture_nutrition_percent") or 0)
+        habits_logged_count = int(max(0, min(4, ap // 25)))
+
     if is_teen:
         top_cards = [
             {
@@ -1681,6 +1750,8 @@ def get_dashboard_new(request):
         "variant": "teen" if is_teen else "adult",
         "calculation_mode": teen_display_mode if is_teen else "adult_live",
         "anomalies": anomalies if is_teen else [],
+        "genetic_average_cm": teen_ga_cm,
+        "daily_genetic_average_gain_cm": teen_daily_ga_gain,
         "profile": {
             'user_id': user.id,
             'username': user.username,
@@ -1747,6 +1818,9 @@ def get_dashboard_new(request):
             "posture_exercises_fraction": section4_posture.get("fraction_today"),
             "posture_exercises_done": int(section4_posture.get("completed_total_today") or 0),
             "posture_exercises_total": int(section4_posture.get("assigned_total") or 0),
+            "exercises_done": int(section4_posture.get("completed_total_today") or 0),
+            "total_exercises": int(section4_posture.get("assigned_total") or 0),
+            "habits_logged": habits_logged_count,
             "posture_exercises_percent": (
                 int(
                     round(

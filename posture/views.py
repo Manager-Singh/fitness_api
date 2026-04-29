@@ -1045,6 +1045,7 @@ from datetime import timedelta, datetime, date
 import uuid
 from .utils import analyze_posture as analyze_image_posture
 from users.models import HeightLedger, PostureState
+from users.spec_runtime import apply_pending_pre_scan_engine1
 from utils.age import get_user_age_exact
 from utils.age import get_user_age
 
@@ -1391,6 +1392,12 @@ def _mark_scan_completed(user):
         if user.trial_end is None:
             user.trial_end = user.trial_start + timedelta(days=7)
         user.save(update_fields=["trial_start", "trial_end"])
+    # v3.3: Apply any pending pre-scan PosturePlus immediately on scan unlock.
+    # Safe to call even when no pending rows exist.
+    try:
+        apply_pending_pre_scan_engine1(user)
+    except Exception:
+        logger.exception("Failed applying pending_pre_scan engine1 gains after scan completion")
 
 
 def _apply_scan_to_posture_state(user, posture_bars):

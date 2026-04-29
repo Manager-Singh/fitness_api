@@ -154,6 +154,9 @@ class DailyLog(models.Model):
     streak_incremented = models.BooleanField(default=False)
     source_tz = models.CharField(max_length=80, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
+    # Section 5.1b — teen Genetic_Average snapshot (computed with daily job).
+    genetic_average_cm = models.FloatField(null=True, blank=True)
+    daily_genetic_average_gain_cm = models.FloatField(null=True, blank=True)
 
     class Meta:
         unique_together = ("user", "log_date")

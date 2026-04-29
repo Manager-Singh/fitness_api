@@ -17,10 +17,19 @@ from utils.posture.height_constants import (
     POSTURE_SEGMENT_DISTRIBUTION_RATIO,
 )
 from utils.user_time import user_today
+from utils.posture.teen_genetic_average import (
+    compute_daily_genetic_average_gain_cm,
+    compute_genetic_average_cm,
+)
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+# v3.3: teen pre-scan pending Engine1 posture gains.
+LEDGER_ENTRY_DAILY_COMPUTE = "daily_compute"
+LEDGER_ENTRY_PENDING_PRE_SCAN = "pending_pre_scan"
+LEDGER_ENTRY_APPLY_PENDING = "apply_pending"
 
 
 def _to_um(cm_value):
@@ -59,7 +68,10 @@ def _sum_prior_engine_deltas(user):
 
     Prefer atomic columns when present; fall back to metadata for older rows.
     """
-    qs = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
+    qs = HeightLedger.objects.filter(
+        user=user,
+        entry_type__in=[LEDGER_ENTRY_DAILY_COMPUTE, LEDGER_ENTRY_APPLY_PENDING],
+    )
     agg = qs.aggregate(
         e1_um=Sum("engine1_delta_um"),
         bio_um=Sum("bio_delta_um"),
@@ -550,7 +562,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     existing = HeightLedger.objects.filter(
         user=user,
         log_date=log_date,
-        entry_type="daily_compute",
+        entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
     ).order_by("-created_at").first()
     if existing and not force_recompute:
         return {
@@ -563,7 +575,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         HeightLedger.objects.filter(
             user=user,
             log_date=log_date,
-            entry_type="daily_compute",
+            entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
         ).delete()
 
     try:
@@ -589,6 +601,22 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     daily.lifestyle_points = lifestyle_points
     daily.engine1_points = int(round(float(e1)))
     daily.engine2_points = int(round(float(e2)))
+    if 13 <= age <= 20:
+        try:
+            daily.genetic_average_cm = float(compute_genetic_average_cm(user, log_date))
+            daily.daily_genetic_average_gain_cm = float(
+                compute_daily_genetic_average_gain_cm(user, log_date)
+            )
+        except Exception:
+            logger.exception(
+                "compute_daily_height_for_user: genetic average fields failed",
+                extra={"user_id": getattr(user, "id", None), "log_date": str(log_date)},
+            )
+            daily.genetic_average_cm = None
+            daily.daily_genetic_average_gain_cm = None
+    else:
+        daily.genetic_average_cm = None
+        daily.daily_genetic_average_gain_cm = None
     daily.save()
     # Strict spec validation for streak/leaderboard correctness.
     set_daily_validated(user, log_date)
@@ -605,7 +633,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         base_height_cm = float(getattr(profile, "base_height_cm", None) or getattr(profile, "current_height_cm", 0) or 0)
         bio_delta_um = _to_um(_interpolated_teen_bio_gain_cm(user, base_height_cm, on_date=log_date))
         prior_engine1_um = 0
-        prior_rows = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
+        prior_rows = HeightLedger.objects.filter(
+            user=user,
+            entry_type__in=[LEDGER_ENTRY_DAILY_COMPUTE, LEDGER_ENTRY_APPLY_PENDING],
+        )
         for row in prior_rows:
             try:
                 prior_engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0))
@@ -622,7 +653,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         # Section 12.1 carry-over rule:
         # adult remaining deficit must be based on historical posture gain only.
         prior_total_um = 0
-        prior_rows = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
+        prior_rows = HeightLedger.objects.filter(
+            user=user,
+            entry_type__in=[LEDGER_ENTRY_DAILY_COMPUTE, LEDGER_ENTRY_APPLY_PENDING],
+        )
         for row in prior_rows:
             try:
                 prior_total_um += int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
@@ -651,13 +685,19 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             engine2_delta_um = 0
             engine2_delta_dm = 0
             bio_delta_um = 0
-        # Teens require scan before posture/hgh gains, but biological growth still applies.
-        if 13 <= age <= 20 and (not state.scan_completed):
+        # v3.3 teen pre-scan rules:
+        # - If BOTH scan and questionnaire are incomplete: bio applies, engine2 blocked,
+        #   engine1 is stored as pending and does not affect displayed height until unlock.
+        # - If questionnaire is complete (even without scan): allow engine1/engine2 normally.
+        if 13 <= age <= 20 and (not state.scan_completed) and (not state.questionnaire_completed):
+            pending_engine1_um = max(0, int(engine1_delta_um))
             engine1_delta_um = 0
             engine2_delta_um = 0
             engine2_delta_dm = 0
             delta_um = max(0, int(bio_delta_um))
             delta_cm = round(delta_um / 10000.0, 4)
+        else:
+            pending_engine1_um = 0
 
     # Cumulative gain must not lose Engine2 half-micron increments.
     # Re-derive cumulative from atomic per-day columns:
@@ -675,7 +715,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     HeightLedger.objects.create(
         user=user,
         log_date=log_date,
-        entry_type="daily_compute",
+        entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
         delta_um=max(0, delta_um),
         cumulative_um=new_cum,
         engine1_delta_um=max(0, int(engine1_delta_um)),
@@ -693,6 +733,25 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             "scan_completed": bool(state and state.scan_completed),
         },
     )
+    if 13 <= age <= 20 and pending_engine1_um > 0:
+        # Store pending posture gain for v3.3 teen pre-scan state.
+        HeightLedger.objects.create(
+            user=user,
+            log_date=log_date,
+            entry_type=LEDGER_ENTRY_PENDING_PRE_SCAN,
+            delta_um=0,
+            cumulative_um=new_cum,
+            engine1_delta_um=int(pending_engine1_um),
+            bio_delta_um=0,
+            engine2_delta_dm=0,
+            algorithm_version="v1",
+            metadata={
+                "engine1_points": e1,
+                "engine1_delta_um": int(pending_engine1_um),
+                "pending": True,
+                "reason": "teen_pre_scan",
+            },
+        )
     if age >= 21 and state:
         _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
     return {
@@ -714,7 +773,10 @@ def users_for_notifications(now=None):
 
 def get_user_runtime_state_snapshot(user):
     state = _get_or_create_state(user)
-    latest_ledger = HeightLedger.objects.filter(user=user).order_by("-created_at").first()
+    latest_ledger = HeightLedger.objects.filter(
+        user=user,
+        entry_type__in=[LEDGER_ENTRY_DAILY_COMPUTE, LEDGER_ENTRY_APPLY_PENDING],
+    ).order_by("-created_at").first()
     return {
         "scan_completed": bool(state.scan_completed),
         "questionnaire_completed": bool(state.questionnaire_completed),
@@ -726,3 +788,59 @@ def get_user_runtime_state_snapshot(user):
         "current_height_um": int(latest_ledger.cumulative_um) if latest_ledger else None,
         "last_scan_at": state.last_scan_at,
     }
+
+
+def apply_pending_pre_scan_engine1(user, when=None):
+    """
+    v3.3: Apply all teen pre-scan pending Engine1 gains immediately after unlock
+    (scan_completed=true OR questionnaire_completed=true).
+    """
+    when = when or user_today(user)
+    pending_rows = list(
+        HeightLedger.objects.filter(user=user, entry_type=LEDGER_ENTRY_PENDING_PRE_SCAN)
+        .order_by("log_date", "created_at")
+        .only("id", "engine1_delta_um", "metadata")
+    )
+    if not pending_rows:
+        return {"applied_um": 0, "rows": 0}
+
+    total_pending_um = 0
+    pending_ids = []
+    for r in pending_rows:
+        try:
+            total_pending_um += int(getattr(r, "engine1_delta_um", 0) or 0)
+        except Exception:
+            continue
+        pending_ids.append(r.id)
+    total_pending_um = max(0, int(total_pending_um))
+    if total_pending_um <= 0 or not pending_ids:
+        return {"applied_um": 0, "rows": len(pending_rows)}
+
+    # Derive current cumulative from applied rows only, then add pending.
+    prior_engine1_um, prior_bio_um, prior_engine2_dm = _sum_prior_engine_deltas(user)
+    prior_total_um = (
+        max(0, int(prior_engine1_um))
+        + max(0, int(prior_bio_um))
+        + int(round(max(0, int(prior_engine2_dm)) / 10.0))
+    )
+    new_cum = prior_total_um + total_pending_um
+
+    HeightLedger.objects.create(
+        user=user,
+        log_date=when,
+        entry_type=LEDGER_ENTRY_APPLY_PENDING,
+        delta_um=int(total_pending_um),
+        cumulative_um=int(new_cum),
+        engine1_delta_um=int(total_pending_um),
+        bio_delta_um=0,
+        engine2_delta_dm=0,
+        algorithm_version="v1",
+        metadata={
+            "pending_applied": True,
+            "pending_source_entry_type": LEDGER_ENTRY_PENDING_PRE_SCAN,
+            "pending_row_ids": pending_ids[:2000],
+        },
+    )
+    # Mark pending rows as applied to avoid re-apply (keep rows for audit).
+    HeightLedger.objects.filter(id__in=pending_ids).update(entry_type="pending_pre_scan_applied")
+    return {"applied_um": total_pending_um, "rows": len(pending_ids)}
