@@ -125,8 +125,9 @@ class NutraLogViewSet(viewsets.ViewSet):
             if hasattr(activity, 'id'):
                 activity = activity.id
 
-            # Section 12.5: duplicate protection window is 60 seconds only.
-            window_start = now - timedelta(seconds=60)
+            # Duplicate protection is only to prevent accidental double-submits.
+            # Users must be allowed to intentionally log the same food repeatedly.
+            window_start = now - timedelta(seconds=2)
             if food:
                 return existing_entries.filter(
                     food_id=int(food),
@@ -201,7 +202,11 @@ class NutraLogViewSet(viewsets.ViewSet):
             cap_limit = 35.0
         counts_toward_engine = bool(exercise_logged_today and effective_food_points > 0)
         cap_reached = bool(raw_food_points >= cap_limit)
-        diary_note = "Daily nutrition cap reached. Recorded in diary only." if cap_reached else None
+        diary_note = (
+            f"You hit your {int(cap_limit)}-point cap for logging food points today."
+            if cap_reached
+            else None
+        )
         daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
         daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else ((daily.food_points if daily else 0) or 0)))
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
@@ -218,6 +223,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             "daily_lifestyle_pts_today": daily_lifestyle_pts_today,
             "exercises_done": bool(exercise_logged_today),
             "cap_reached": cap_reached,
+            "cap_limit": cap_limit,
             "diary_note": diary_note,
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,

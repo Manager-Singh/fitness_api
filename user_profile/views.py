@@ -59,6 +59,19 @@ from utils.posture.height_constants import (
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+
+def _round_cm_3(value):
+    """
+    Return a float rounded to 3 decimals (cm precision).
+    None/blank/invalid -> None.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        return round(float(value), 3)
+    except Exception:
+        return None
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def update_profile_users_old(request):
@@ -981,9 +994,15 @@ def get_profile(request):
                 pass
         if profile.base_height_cm not in (None, ""):
             try:
-                onboarding_read["base_height_cm"] = float(profile.base_height_cm)
+                onboarding_read["base_height_cm"] = _round_cm_3(profile.base_height_cm)
             except (TypeError, ValueError):
                 onboarding_read["base_height_cm"] = profile.base_height_cm
+
+        # Normalize returned cm fields so clients don't accidentally display feet/inches.
+        if isinstance(profile_data, dict):
+            for k in ("current_height_cm", "base_height_cm", "father_height_cm", "mother_height_cm", "wingspan_cm"):
+                if k in profile_data:
+                    profile_data[k] = _round_cm_3(profile_data.get(k))
 
     return Response({
         'message': 'Profile retrieved successfully',
@@ -1000,6 +1019,13 @@ def get_profile(request):
             'profile_type': profile_type_data,
             'current_package': current_package,
             'subscription': subscription_data,
+            # Convenience aliases so clients consistently render height in cm.
+            'height_cm': (_round_cm_3((profile_data or {}).get("current_height_cm")) if isinstance(profile_data, dict) else None),
+            'height_cm_display': (
+                (f"{_round_cm_3((profile_data or {}).get('current_height_cm')):.3f} cm")
+                if (isinstance(profile_data, dict) and _round_cm_3((profile_data or {}).get("current_height_cm")) is not None)
+                else None
+            ),
             **onboarding_read,
         }
     }, status=status.HTTP_200_OK)
@@ -1138,8 +1164,8 @@ def my_profile(request):
 
     # --- subscription / plan (never blocks this endpoint) ---
     sex = normalize_sex(profile.gender)
-    fh = _as_float(profile.father_height_cm)
-    mh = _as_float(profile.mother_height_cm)
+    fh = _round_cm_3(_as_float(profile.father_height_cm))
+    mh = _round_cm_3(_as_float(profile.mother_height_cm))
     mph_simple_cm = None
     if sex in ("male", "female") and fh is not None and mh is not None:
         try:
@@ -1147,8 +1173,8 @@ def my_profile(request):
         except Exception:
             mph_simple_cm = None
 
-    base_height_cm = _as_float(profile.base_height_cm)
-    current_height_cm = _as_float(profile.current_height_cm)
+    base_height_cm = _round_cm_3(_as_float(profile.base_height_cm))
+    current_height_cm = _round_cm_3(_as_float(profile.current_height_cm))
 
     subscription_data = {}
     try:

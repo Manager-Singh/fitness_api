@@ -860,6 +860,16 @@ def get_posture_questions(request):
         teen_engine2_today_cm = float(int(agg_today.get("e2_dm") or 0) / 100000.0)
         teen_bio_today_cm = float(int(agg_today.get("bio_um") or 0) / 10000.0)
 
+        # Make "today" gains dynamic immediately after logging:
+        # HeightLedger rows may not exist yet until the daily pipeline runs, but DailyLog updates on every log.
+        try:
+            daily_today = DailyLog.objects.filter(user=user, log_date=user_local_today).first()
+            if daily_today:
+                teen_engine1_today_cm = float(daily_today.engine1_points or 0) * POINTS_TO_CM_ENGINE1
+                teen_engine2_today_cm = float(daily_today.engine2_points or 0) * POINTS_TO_CM_ENGINE2
+        except Exception:
+            pass
+
         # Backward compatibility: if we have rows but totals are zeros, recompute from metadata.
         if (
             teen_engine1_cumulative_cm == 0.0

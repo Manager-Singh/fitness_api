@@ -7,6 +7,8 @@ class LeaderboardEntrySerializer(serializers.Serializer):
     display_name = serializers.CharField()
     avatar_url = serializers.CharField(allow_blank=True, allow_null=True)
     points = serializers.IntegerField()
+    # Backward-compatible alias for older clients that render `score`.
+    score = serializers.IntegerField(source="points", read_only=True)
     streak = serializers.IntegerField()
     is_current_user = serializers.BooleanField()
 

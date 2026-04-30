@@ -479,10 +479,13 @@ from nutration.models_log import NutraEntry
 from workouts.models import WorkoutEntry
 import calendar
 from utils.age import get_user_age
+from utils.user_time import user_today
 
 
 def get_user_score_summary(user, subscription_data, mode=None):
-    today = date.today()
+    # IMPORTANT: "today" must be computed in the user's timezone so dashboard/home
+    # matches workout/nutrition logging and daily reset semantics.
+    today = user_today(user)
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
 
