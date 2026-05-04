@@ -17,6 +17,7 @@ from django.utils import timezone
 import secrets
 import datetime
 from utils.age import get_user_age
+from utils.profile_completeness import compute_profile_update_status, compute_step_to_show
 from user_profile.models import Payment,UserProfile
 from django.db.models import Q
 from utils.check_payment import check_subscription_or_response
@@ -136,7 +137,11 @@ class RegisterView(APIView):
             subscription_data = subscription_response.data
 
             # 🟢 Profile info
-            profile = UserProfile.objects.get(user=user)
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            is_profile_updated, profile_update_missing = compute_profile_update_status(
+                user, profile
+            )
+            step_to_show = compute_step_to_show(user, profile)
 
             # 🔥 Final registration response (same as login response)
             return Response({
@@ -145,6 +150,9 @@ class RegisterView(APIView):
                 'has_paid': has_paid,
                 'subscription': subscription_data,
                 'last_scan': profile.last_scan,
+                'is_profile_updated': is_profile_updated,
+                'profile_update_missing': profile_update_missing,
+                'step_to_show': step_to_show,
                 'user': UserSerializer(user).data,
                 'access': access_token,
                 'refresh': str(refresh),
@@ -206,7 +214,11 @@ class SocialRegisterView(APIView):
             subscription_data = subscription_response.data
 
             # 👉 User profile
-            profile = UserProfile.objects.get(user=user)
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            is_profile_updated, profile_update_missing = compute_profile_update_status(
+                user, profile
+            )
+            step_to_show = compute_step_to_show(user, profile)
 
             # Final response matching login & register APIs
             return Response({
@@ -216,6 +228,9 @@ class SocialRegisterView(APIView):
                 "has_paid": has_paid,
                 "subscription": subscription_data,
                 "last_scan": profile.last_scan,
+                "is_profile_updated": is_profile_updated,
+                "profile_update_missing": profile_update_missing,
+                "step_to_show": step_to_show,
                 "user": UserSerializer(user).data,
                 "access": access_token,
                 "refresh": str(refresh),
@@ -275,7 +290,11 @@ class LoginView(APIView):
             subscription_response = check_subscription_or_response(user)
             subscription_data = subscription_response.data  # extract JSON data
 
-            profile = UserProfile.objects.get(user=user)
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            is_profile_updated, profile_update_missing = compute_profile_update_status(
+                user, profile
+            )
+            step_to_show = compute_step_to_show(user, profile)
 
             # 👇 Final login response
             return Response({
@@ -284,6 +303,9 @@ class LoginView(APIView):
                 'has_paid': has_paid,
                 'subscription': subscription_data,  # 🔥 integrated here
                 'last_scan': profile.last_scan,
+                'is_profile_updated': is_profile_updated,
+                'profile_update_missing': profile_update_missing,
+                'step_to_show': step_to_show,
                 'user': UserSerializer(user).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
