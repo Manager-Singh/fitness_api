@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,6 +28,48 @@ from workouts.models import WorkoutSession, WorkoutEntry
 from django.db.models import Sum, Count
 from workouts.serializers_leaderboard import LeaderboardResponseSerializer
 from nutration.models_log import NutraEntry
+
+logger = logging.getLogger(__name__)
+
+
+def _send_verification_otp_email(user):
+    """
+    Create a fresh 15-minute OTP and email it. Removes older OTP rows for this user
+    so verification always checks a single current code.
+    Returns True if the email was sent successfully.
+    """
+    otp_code = f"{secrets.randbelow(10000):04d}"
+    expires_at = timezone.now() + datetime.timedelta(minutes=15)
+    OTP.objects.filter(user=user).delete()
+    OTP.objects.create(user=user, code=otp_code, expires_at=expires_at)
+    subject = "Your One-Time Password (OTP)"
+    message = f"""Hello,
+
+Your OTP is: {otp_code}
+
+This OTP is valid for 15 minutes.
+
+If you did not request this, please ignore.
+
+Thanks,
+Team HeightMax
+"""
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed sending verification OTP email on login",
+            extra={"user_id": getattr(user, "id", None)},
+        )
+        return False
+
 
 # class RegisterView(APIView):
 #     permission_classes = [AllowAny]  # Allow registration without authentication
@@ -296,6 +340,11 @@ class LoginView(APIView):
             )
             step_to_show = compute_step_to_show(user, profile)
 
+            email_verification_pending = getattr(user, "verified", None) is None
+            verification_otp_sent = False
+            if email_verification_pending:
+                verification_otp_sent = _send_verification_otp_email(user)
+
             # 👇 Final login response
             return Response({
                 'message': 'Login successful',
@@ -306,6 +355,8 @@ class LoginView(APIView):
                 'is_profile_updated': is_profile_updated,
                 'profile_update_missing': profile_update_missing,
                 'step_to_show': step_to_show,
+                'email_verification_pending': email_verification_pending,
+                'verification_otp_sent': verification_otp_sent,
                 'user': UserSerializer(user).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
