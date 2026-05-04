@@ -173,6 +173,11 @@ def update_profile_users_old(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def update_profile_users(request):
+    """
+    POST /api/update-profile — JSON body merges into ``UserProfile`` (except ``base_height_cm`` in the generic merge).
+    When ``current_height_cm`` is sent and differs from ``base_height_cm``, base is re-synced to match (within allowed cm range).
+    Also accepts ``display_name``, ``avatar_url``, ``timezone``, ``profile_step`` on the user.
+    """
     # Debug visibility for client integration (prints only in DEBUG mode).
     if getattr(settings, "DEBUG", False):
         try:
@@ -343,37 +348,16 @@ def update_profile_users(request):
                     status=status.HTTP_409_CONFLICT,
                 )
 
-        # Base height lock (spec): immutable after onboarding is complete.
-        # Practical exception: allow correction during onboarding steps before the account has any height ledger
-        # entries (and before any scan is completed), because onboarding is multi-step.
+        # When client sends a new current_height_cm, keep base_height_cm in sync (same numeric value).
+        # Range is already enforced above via _bound on current_height_cm.
         if request.data.get("current_height_cm") is not None and str(profile.base_height_cm or "").strip() != "":
             base_f = _as_float(profile.base_height_cm, "base_height_cm")
             new_f = _as_float(request.data.get("current_height_cm"), "current_height_cm")
             if new_f is not None and base_f is not None and abs(new_f - base_f) > 0.01:
-                from users.models import HeightLedger, PostureState
-
-                def _step_num(val):
-                    try:
-                        return int(str(val).strip())
-                    except Exception:
-                        return None
-
-                req_step = _step_num(request.data.get("profile_step"))
-                user_step = _step_num(getattr(user, "profile_step", None))
-                onboarding_incomplete = (
-                    (req_step is not None and req_step < 3)
-                    or (user_step is not None and user_step < 3)
-                    or (req_step is None and user_step is None)
-                )
-                has_ledger = HeightLedger.objects.filter(user=user, entry_type="daily_compute").exists()
-                posture_state = PostureState.objects.filter(user=user).first()
-                has_scan = bool(posture_state and posture_state.scan_completed)
-
-                if onboarding_incomplete and (not has_ledger) and (not has_scan):
-                    # Allow correction: keep base_height_cm synced to the corrected onboarding height.
+                if USER_HEIGHT_CM_MIN <= new_f <= USER_HEIGHT_CM_MAX:
                     profile.base_height_cm = str(round(new_f, 4))
                 else:
-                    return Response({"error": MSG_BASE_HEIGHT_LOCKED}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": MSG_USER_HEIGHT_RANGE}, status=status.HTTP_400_BAD_REQUEST)
 
     except ValueError as exc:
         return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -421,6 +405,22 @@ def update_profile_users(request):
         user.profile_step = request.data['profile_step']
         user.save()
 
+    # User-level fields (same as my_profile POST): optional on update-profile.
+    user_update_fields = []
+    if "display_name" in request.data:
+        user.display_name = str(request.data.get("display_name") or "").strip() or None
+        user_update_fields.append("display_name")
+    if "avatar_url" in request.data:
+        user.avatar_url = str(request.data.get("avatar_url") or "").strip() or None
+        user_update_fields.append("avatar_url")
+    if "timezone" in request.data:
+        tz = str(request.data.get("timezone") or "").strip()
+        if tz:
+            user.timezone = tz
+            user_update_fields.append("timezone")
+    if user_update_fields:
+        user.save(update_fields=user_update_fields)
+
     profile_data = model_to_dict(profile)
     onboarding_extra = {}
     sex_r = normalize_sex(profile.gender)
@@ -457,6 +457,9 @@ def update_profile_users(request):
             'email': user.email,
             'profile_step': getattr(user, 'profile_step', None),
             'account_tier': getattr(user, "account_tier", None),
+            'display_name': getattr(user, "display_name", None),
+            'avatar_url': getattr(user, "avatar_url", None),
+            'timezone': getattr(user, "timezone", None),
             'profile': profile_data,
             **onboarding_extra,
         }
