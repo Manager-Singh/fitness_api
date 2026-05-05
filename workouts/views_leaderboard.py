@@ -10,7 +10,7 @@ from utils.age import get_user_age
 from utils.leaderboard import _current_validated_streak
 from users.models import Friendship
 from workouts.models import WorkoutEntry
-from nutration.models_log import NutraEntry
+from users.models import DailyLog
 
 import logging
 
@@ -133,39 +133,35 @@ class LeaderboardAPIView(APIView):
             qs = qs.filter(id__in=friend_ids)
 
         # Build points scope using workout + nutrition/lifestyle logs.
+        # Spec alignment: rank by traceable engine-counting points, not raw diary sums.
+        # Use DailyLog.engine1_points + DailyLog.engine2_points (already applies caps/gates).
         points_scope = {}
         user_ids = list(qs.values_list("id", flat=True))
         if view_name == "weekly":
             now_utc = timezone.now().astimezone(dt_timezone.utc)
             start = now_utc - timedelta(days=now_utc.weekday())
             start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-            w_rows = (
-                WorkoutEntry.objects.filter(session__user_id__in=user_ids, created_at__gte=start)
-                .values("session__user_id")
-                .annotate(total=Sum("points"))
-            )
-            n_rows = (
-                NutraEntry.objects.filter(session__user_id__in=user_ids, completed_at__gte=start)
-                .values("session__user_id")
-                .annotate(total=Sum("score"))
-            )
+            start_date = start.date()
+            daily_qs = DailyLog.objects.filter(user_id__in=user_ids, log_date__gte=start_date)
         else:
-            w_rows = (
-                WorkoutEntry.objects.filter(session__user_id__in=user_ids)
-                .values("session__user_id")
-                .annotate(total=Sum("points"))
+            daily_qs = DailyLog.objects.filter(user_id__in=user_ids)
+
+        rt = (routine_type or "").lower().strip()
+        if rt == "posture":
+            rows = daily_qs.values("user_id").annotate(total=Sum("engine1_points"))
+        elif rt == "hgh":
+            rows = daily_qs.values("user_id").annotate(total=Sum("engine2_points"))
+        else:
+            rows = daily_qs.values("user_id").annotate(
+                e1=Sum("engine1_points"),
+                e2=Sum("engine2_points"),
             )
-            n_rows = (
-                NutraEntry.objects.filter(session__user_id__in=user_ids)
-                .values("session__user_id")
-                .annotate(total=Sum("score"))
-            )
-        for r in w_rows:
-            uid = r["session__user_id"]
-            points_scope[uid] = int(points_scope.get(uid, 0) + (r["total"] or 0))
-        for r in n_rows:
-            uid = r["session__user_id"]
-            points_scope[uid] = int(points_scope.get(uid, 0) + (r["total"] or 0))
+        for r in rows:
+            uid = r["user_id"]
+            if "total" in r:
+                points_scope[uid] = int(r.get("total") or 0)
+            else:
+                points_scope[uid] = int((r.get("e1") or 0) + (r.get("e2") or 0))
 
         # Split by tier (adult/teen) and apply tie-break by streak length.
         tier_entries = []
