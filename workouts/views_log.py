@@ -189,6 +189,8 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             routine_type=routine_type,
             entry_kind="exercise",
         )
+        # Spec alignment UX: make dashboard numbers update immediately after logging.
+        rebuild_ledger_from_date(request.user, log_date)
 
         # Count total workouts logged today
         total_workouts_today = WorkoutSession.objects.filter(

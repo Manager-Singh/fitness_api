@@ -1537,10 +1537,10 @@ def get_dashboard_new(request):
     adult_height_live_cm = float(section4.get("height_live_cm") or adult_base_cm)
 
     top_cards = [
-        {"key": "base_height", "label": "Base Height", "value_cm": round(adult_base_cm, 4)},
-        {"key": "total_recovered", "label": "Total Recovered", "value_cm": round(adult_recovered_cm, 4)},
-        {"key": "daily_gains", "label": "Daily Gains", "value_cm": round(adult_daily_gain_cm, 4)},
-        {"key": "height", "label": "Height", "value_cm": round(adult_height_live_cm, 4)},
+        {"key": "base_height", "label": "Base Height", "value_cm": round(adult_base_cm, 3)},
+        {"key": "total_recovered", "label": "Total Recovered", "value_cm": round(adult_recovered_cm, 3)},
+        {"key": "daily_gains", "label": "Daily Gains", "value_cm": round(adult_daily_gain_cm, 3)},
+        {"key": "height", "label": "Height", "value_cm": round(adult_height_live_cm, 3)},
     ]
 
     segments = diagnostics.get("segments") or {}
@@ -1677,15 +1677,15 @@ def get_dashboard_new(request):
             {
                 "key": "genetic_plus",
                 "label": "Genetic +",
-                "value_cm": round(teen_genetic_plus_today_cm, 4),
+                "value_cm": round(teen_genetic_plus_today_cm, 3),
             },
             {
                 "key": "posture_plus",
                 "label": "Posture+",
-                "value_cm": round(teen_posture_plus_today_cm, 4),
+                "value_cm": round(teen_posture_plus_today_cm, 3),
             },
-            {"key": "daily_gains", "label": "Daily Gains", "value_cm": round(teen_daily_gain_cm, 4)},
-            {"key": "height", "label": "Height", "value_cm": round(teen_card_height_cm, 4)},
+            {"key": "daily_gains", "label": "Daily Gains", "value_cm": round(teen_daily_gain_cm, 3)},
+            {"key": "height", "label": "Height", "value_cm": round(teen_card_height_cm, 3)},
         ]
 
     # Canonical teen line model for dashboard + chart:

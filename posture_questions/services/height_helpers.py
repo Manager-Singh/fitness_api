@@ -24,4 +24,4 @@ def ft_in_to_cm(ft: int | str | None, inch: int | str | None) -> float | None:
 
 def fmt_cm(val: float | None) -> str:
     """Return '175.4 cm' or 'unknown'."""
-    return f"{val:.1f} cm" if val is not None else "unknown"
+    return f"{val:.3f} cm" if val is not None else "unknown"

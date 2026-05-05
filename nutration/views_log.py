@@ -166,6 +166,9 @@ class NutraLogViewSet(viewsets.ViewSet):
                     points=(nentry.score or 0),
                     entry_kind="lifestyle",
                 )
+        # Spec alignment UX: make dashboard numbers update immediately after logging.
+        # This rebuild applies routing + caps into DailyLog/HeightLedger for the log date.
+        rebuild_ledger_from_date(request.user, log_date)
         read_ser = NutraEntryReadSerializer(entries, many=True)
 
         # Return totals for resolved log date (supports grace-period backdate).

@@ -137,6 +137,7 @@ from django.utils import timezone
 from nutration.models_log import NutraEntry
 from workouts.models import WorkoutEntry, WorkoutSession, Tier, RoutineType
 from utils.age import get_user_age
+from users.models import DailyLog
 
 import logging
 
@@ -144,7 +145,8 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
-CACHE_TTL = 60 * 10  # 10 minutes
+# Keep rankings responsive; leaderboard points are recomputed frequently.
+CACHE_TTL = 30  # seconds
 
 
 def _is_valid_streak_day(user, day, age):
@@ -228,29 +230,39 @@ def _same_tier_users(base_user):
 
 
 def _build_rank_map(user_ids, until_date=None, routine_type=None):
-    workout_filter = {"session__user_id__in": user_ids}
-    nutra_filter = {"session__user_id__in": user_ids}
+    """
+    Spec alignment: rank by "traceable" engine-counting points, not raw diary sums.
+    We use DailyLog.engine1_points + DailyLog.engine2_points which already applies
+    routing, gates, and daily caps (e.g., teen nutrition max 35, adult nutrition max 12).
+    """
+    daily_filter = {"user_id__in": user_ids}
     if until_date:
-        workout_filter["session__date__lte"] = until_date
-        nutra_filter["session__date__lte"] = until_date
-    if routine_type:
-        workout_filter["session__user_routine__routine_type"] = routine_type
+        daily_filter["log_date__lte"] = until_date
 
-    workout_points = WorkoutEntry.objects.filter(**workout_filter).values("session__user_id").annotate(
-        total=Sum("points")
-    )
-    nutrition_points = NutraEntry.objects.filter(**nutra_filter).values("session__user_id").annotate(
-        total=Sum("score")
-    )
+    # Routine-specific leaderboard (if requested):
+    # - posture: engine1 only
+    # - hgh: engine2 only (teens); adults naturally return 0
+    rt = (routine_type or "").lower()
+    if rt == "posture":
+        points_rows = DailyLog.objects.filter(**daily_filter).values("user_id").annotate(
+            e1=Sum("engine1_points")
+        )
+    elif rt == "hgh":
+        points_rows = DailyLog.objects.filter(**daily_filter).values("user_id").annotate(
+            e2=Sum("engine2_points")
+        )
+    else:
+        points_rows = DailyLog.objects.filter(**daily_filter).values("user_id").annotate(
+            e1=Sum("engine1_points"),
+            e2=Sum("engine2_points"),
+        )
     sessions_completed = WorkoutSession.objects.filter(user_id__in=user_ids).values("user_id").annotate(
         total=Count("id", distinct=True)
     )
 
     totals = {uid: {"points": 0, "streak": 0, "sessions": 0} for uid in user_ids}
-    for row in workout_points:
-        totals[row["session__user_id"]]["points"] += row["total"] or 0
-    for row in nutrition_points:
-        totals[row["session__user_id"]]["points"] += row["total"] or 0
+    for row in points_rows:
+        totals[row["user_id"]]["points"] += int((row.get("e1") or 0) + (row.get("e2") or 0))
     for row in sessions_completed:
         totals[row["user_id"]]["sessions"] = row["total"] or 0
 
