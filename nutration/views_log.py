@@ -202,13 +202,18 @@ class NutraLogViewSet(viewsets.ViewSet):
             cap_limit = 35.0
         counts_toward_engine = bool(exercise_logged_today and effective_food_points > 0)
         cap_reached = bool(raw_food_points >= cap_limit)
-        diary_note = (
-            f"You hit your {int(cap_limit)}-point cap for logging food points today."
-            if cap_reached
-            else None
-        )
+        diary_note = None
+        if cap_reached:
+            diary_note = (
+                f"You've maxed traceable nutrition points for today ({int(cap_limit)}). "
+                "You can keep logging for personal tracking, but extra logs won’t increase traceable points."
+            )
         daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
-        daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else ((daily.food_points if daily else 0) or 0)))
+        # Raw totals can keep increasing (diary/tracking), but traceable points must cap.
+        # Adults: engine-countable nutrition already capped (12) and depends on exercise gate.
+        # Teens: traceable nutrition points cap at 35 (even if users keep logging).
+        traceable_food_points = min(raw_food_points, cap_limit)
+        daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else traceable_food_points))
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
         daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
@@ -227,8 +232,11 @@ class NutraLogViewSet(viewsets.ViewSet):
             "diary_note": diary_note,
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,
+            # Backward-compat: keep raw totals, but also provide capped totals for UI.
             "today_total_nutrition_score": total_today_score,
             "today_total_food_score": total_today_food_score,
+            "today_total_food_score_traceable": float(traceable_food_points),
+            "today_total_food_score_raw": float(raw_food_points),
             "today_logged_nutrition": cleaned_log,
         }
 
