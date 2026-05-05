@@ -273,6 +273,7 @@ class AgeGroupAdmin(admin.ModelAdmin):
 @admin.register(Module)
 class ModuleAdmin(admin.ModelAdmin):
     list_display = (
+        "sort_order",
         "name",
         "short_name",
         "type",
@@ -290,6 +291,7 @@ class ModuleAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Basic Info", {
             "fields": (
+                "sort_order",
                 "name",
                 "short_name",
                 "type",
@@ -338,6 +340,8 @@ class ModuleAdmin(admin.ModelAdmin):
         # CHANGE view
         inline_cls = ModuleFoodInline if obj.type == Module.NUTRITION else ModuleActivityInline
         return [inline_cls(self.model, self.admin_site)]
+
+    ordering = ("age_group__min_age", "type", "sort_order", "name")
 
 
 @admin.register(NutraSession)

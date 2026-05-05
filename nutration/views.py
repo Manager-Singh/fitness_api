@@ -219,6 +219,7 @@ class MyPlanView(APIView):
                 Q(age_group__max_age__isnull=True) |
                 Q(age_group__max_age__gte=age)
             )
+            .order_by("age_group__min_age", "type", "sort_order", "name")
         )
 
         # Spec-correct module visibility:

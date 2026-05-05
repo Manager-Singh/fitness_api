@@ -99,9 +99,15 @@ class Module(models.Model):
         help_text="Spec routing bucket for nutrition modules (adult disc vs adult muscle).",
     )
 
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        db_index=True,
+        help_text="UI ordering within a module type (e.g. Lifestyle 1-4, Nutrition 1-4). Lower comes first.",
+    )
+
     class Meta:
         unique_together = ("name", "age_group")
-        ordering = ("age_group__min_age", "type", "name")
+        ordering = ("age_group__min_age", "type", "sort_order", "name")
 
     def __str__(self):
         return f"{self.name} ({self.age_group})"
