@@ -489,6 +489,12 @@ def get_user_score_summary(user, subscription_data, mode=None):
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
 
+    # Age is used to apply spec caps to "traceable" points in summaries.
+    try:
+        age = int(get_user_age(user) or 0)
+    except Exception:
+        age = 0
+
     # ---------------- Nutrition entries ----------------
     nutra_qs = NutraEntry.objects.filter(session__user=user).annotate(entry_date=F("session__date"))
     nutra_df = pd.DataFrame(
@@ -540,6 +546,9 @@ def get_user_score_summary(user, subscription_data, mode=None):
                 hydration_score=("hydration_score", "sum"),
             )
         )
+        # Teen nutrition traceable points cap at 35/day (logs beyond are diary-only).
+        if age < 21 and not nutra_agg.empty:
+            nutra_agg["food_score"] = pd.to_numeric(nutra_agg.get("food_score", 0), errors="coerce").fillna(0).clip(upper=35.0)
     else:
         nutra_agg = pd.DataFrame(
             columns=[
@@ -687,11 +696,6 @@ def get_user_score_summary(user, subscription_data, mode=None):
 
     # explicit exercise count (number of workout entries today)
     today_summary["exercise_count"] = WorkoutEntry.objects.filter(session__user=user, session__date=today).count()
-
-    try:
-        age = get_user_age(user)
-    except Exception:
-        age = 0
 
     if age >= 21 and today_summary["workout_score"] == 0:
         today_summary["posture_gain_cm"] = 0.000

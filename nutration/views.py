@@ -313,7 +313,20 @@ class MyPlanView(APIView):
             .select_related("food")
         )
 
-        total_today_score = today_entries.aggregate(total=Sum("score"))["total"] or 0
+        raw_today_food_points = float(today_entries.aggregate(total=Sum("score"))["total"] or 0)
+        # Traceable nutrition points:
+        # - Teen: cap at 35 (still allow unlimited logging for diary/tracking).
+        # - Adult: keep raw here; adult traceable points are governed elsewhere (engine routing + caps).
+        traceable_cap = 35.0 if age < 21 else None
+        traceable_today_food_points = (
+            min(raw_today_food_points, traceable_cap) if traceable_cap is not None else raw_today_food_points
+        )
+        cap_reached = bool(traceable_cap is not None and raw_today_food_points >= traceable_cap)
+        diary_note = (
+            "You've maxed traceable nutrition points for today (35). You can keep logging for personal tracking, but extra logs won’t increase traceable points."
+            if cap_reached
+            else None
+        )
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
 
@@ -331,7 +344,12 @@ class MyPlanView(APIView):
         # ── 6. Final response ─────────────────────────────────────────────────
         payload = {
             "age": age,
-            "today_total_nutrition_score": total_today_score,
+            # Backward-compat: keep the existing key, but make it traceable (capped for teens).
+            "today_total_nutrition_score": traceable_today_food_points,
+            "today_total_nutrition_score_raw": raw_today_food_points,
+            "cap_reached": cap_reached,
+            "cap_limit": 35 if age < 21 else None,
+            "diary_note": diary_note,
             "today_logged_nutrition": cleaned_log,
         }
 
