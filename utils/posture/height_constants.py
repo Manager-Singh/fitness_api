@@ -104,6 +104,19 @@ def posture_segment_opt_pct(current_loss_cm: float, max_loss_cm: float) -> int:
     return max(0, min(100, pct))
 
 
+def posture_segment_opt_pct_precise(current_loss_cm: float, max_loss_cm: float, *, decimals: int = 2) -> float:
+    """
+    Spec bar formula is continuous; UI may want decimal precision (e.g. 64.25%).
+    Returns a clamped percentage in [0, 100] rounded to `decimals`.
+    """
+    if max_loss_cm <= 0:
+        return float(round(100.0, int(decimals)))
+    cur = clamp_current_loss_to_segment_max(current_loss_cm, max_loss_cm)
+    pct = (1.0 - cur / float(max_loss_cm)) * 100.0
+    pct = max(0.0, min(100.0, float(pct)))
+    return float(round(pct, int(decimals)))
+
+
 def clamp_current_loss_to_segment_max(current_loss_cm: float, max_loss_cm: float) -> float:
     """Section 1.2: clamp current loss to [0, Max_Loss]."""
     if max_loss_cm <= 0:

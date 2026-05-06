@@ -1560,9 +1560,14 @@ def get_dashboard_new(request):
     _pb_src = (teen_map if is_teen else adult_map).get("progress_bars_percent") or {}
     if isinstance(_pb_src, dict) and _pb_src:
         posture_bars = {str(k): int(v) for k, v in _pb_src.items()}
+        posture_bars_precise = None
     else:
         posture_bars = {
             seg: int((seg_payload or {}).get("percent_optimized", 0) or 0)
+            for seg, seg_payload in segments.items()
+        }
+        posture_bars_precise = {
+            seg: float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)) or 0.0)
             for seg, seg_payload in segments.items()
         }
     today_streak = int(((streaks.get("health") or {}).get("current_streak") or 0))
@@ -1865,6 +1870,7 @@ def get_dashboard_new(request):
             "total_recoverable_loss_cm": diagnostics.get("total_recoverable_loss_cm"),
             "total_current_loss_cm": diagnostics.get("total_current_loss_cm"),
             "bars_percent": posture_bars,
+            "bars_percent_precise": posture_bars_precise,
             "raw_segments": segments,
         },
         "ai_analysis": payload.get("ai_analysis") or {},

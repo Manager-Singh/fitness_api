@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from users.spec_runtime import get_user_runtime_state_snapshot
-from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
+from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct, posture_segment_opt_pct_precise
 
 
 def _segment_payload(current_loss_cm, max_loss_cm):
@@ -12,6 +12,7 @@ def _segment_payload(current_loss_cm, max_loss_cm):
         "current_loss_cm": round(current, 4),
         "max_loss_cm": float(max_loss_cm),
         "percent_optimized": posture_segment_opt_pct(current_loss_cm, max_loss_cm),
+        "percent_optimized_precise": posture_segment_opt_pct_precise(current_loss_cm, max_loss_cm, decimals=2),
     }
 
 

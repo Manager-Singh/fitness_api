@@ -44,6 +44,7 @@ class DashboardNewPostureOptimizationSerializer(serializers.Serializer):
     total_recoverable_loss_cm = serializers.FloatField(allow_null=True)
     total_current_loss_cm = serializers.FloatField(allow_null=True)
     bars_percent = serializers.DictField()
+    bars_percent_precise = serializers.DictField(required=False, allow_null=True)
     raw_segments = serializers.DictField()
 
 
