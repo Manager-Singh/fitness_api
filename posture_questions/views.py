@@ -1560,7 +1560,12 @@ def get_dashboard_new(request):
     _pb_src = (teen_map if is_teen else adult_map).get("progress_bars_percent") or {}
     if isinstance(_pb_src, dict) and _pb_src:
         posture_bars = {str(k): int(v) for k, v in _pb_src.items()}
-        posture_bars_precise = None
+        # Always provide a precise (2-decimal) variant derived from the live segment math.
+        # `progress_bars_percent` is legacy int-only mapping; UI can prefer the precise values.
+        posture_bars_precise = {
+            seg: float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)) or 0.0)
+            for seg, seg_payload in segments.items()
+        }
     else:
         posture_bars = {
             seg: int((seg_payload or {}).get("percent_optimized", 0) or 0)
