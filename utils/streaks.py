@@ -34,32 +34,13 @@ def _teen_food_requirement_met(user, day):
 
 
 def _core_exercises_done(user, day, routine_type):
-    completed_core_ids = set(
-        WorkoutEntry.objects.filter(
-            session__user=user,
-            session__date=day,
-            session__user_routine__routine_type=routine_type,
-            user_routine_exercise__tier=Tier.CORE,
-        ).values_list("user_routine_exercise_id", flat=True)
-    )
+    """
+    Spec-aligned: core assignment should come from the active routine itself, not
+    from whether a WorkoutSession row exists for the day.
 
-    assigned_core_ids = set(
-        WorkoutSession.objects.filter(
-            user=user,
-            date=day,
-            user_routine__routine_type=routine_type,
-            user_routine__is_active=True,
-            user_routine__exercises__tier=Tier.CORE,
-        ).values_list("user_routine__exercises__id", flat=True)
-    )
-
-    if not assigned_core_ids:
-        return False
-    if assigned_core_ids.issubset(completed_core_ids):
-        return True
-
-    # Fallback: older WorkoutEntry rows may have user_routine_exercise=NULL.
-    # Count completion by intersecting exercise_id against assigned core exercises.
+    A day counts as "core complete" when the user has completed every CORE exercise
+    assigned in their active routine for that routine_type on that calendar day.
+    """
     from workouts.models import UserRoutineExercise
 
     assigned_core_exercise_ids = set(
@@ -73,15 +54,28 @@ def _core_exercises_done(user, day, routine_type):
     if not assigned_core_exercise_ids:
         return False
 
+    # Preferred: rows linked to user_routine_exercise (newer data path).
     completed_exercise_ids = set(
         WorkoutEntry.objects.filter(
             session__user=user,
             session__date=day,
             session__user_routine__routine_type=routine_type,
-        )
-        .values_list("exercise_id", flat=True)
-        .distinct()
+            user_routine_exercise__tier=Tier.CORE,
+        ).values_list("exercise_id", flat=True)
     )
+
+    # Fallback: older rows may have user_routine_exercise=NULL; count by exercise_id.
+    if not assigned_core_exercise_ids.issubset(completed_exercise_ids):
+        completed_exercise_ids = set(
+            WorkoutEntry.objects.filter(
+                session__user=user,
+                session__date=day,
+                session__user_routine__routine_type=routine_type,
+            )
+            .values_list("exercise_id", flat=True)
+            .distinct()
+        )
+
     return assigned_core_exercise_ids.issubset(completed_exercise_ids)
 
 
