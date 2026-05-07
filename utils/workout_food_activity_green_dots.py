@@ -96,8 +96,8 @@ def calculate_green_dots(user, target_date=None):
             ):
                 hgh_dots += 1
 
-    #  Final posture dot (limit by age)
-    max_posture = 8 if age >= 21 else 6
+    # Final posture dot (spec v3.4 Issue 12: posture routine is 10 exercises)
+    max_posture = 10
     green_dots["posture"] = min(posture_dots, max_posture)
 
     #  Final HGH dot (max 2)

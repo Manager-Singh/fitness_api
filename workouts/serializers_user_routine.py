@@ -50,6 +50,13 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
 
     image = serializers.SerializerMethodField()
     description = serializers.CharField(source="exercise.description", allow_blank=True)
+    instruction_content = serializers.CharField(
+        source="exercise.instruction_content", allow_blank=True
+    )
+    instruction_steps = serializers.JSONField(
+        source="exercise.instruction_steps", read_only=True
+    )
+    instruction_lines = serializers.SerializerMethodField()
     completed = serializers.SerializerMethodField()
     section6_display_copy = serializers.SerializerMethodField()
 
@@ -64,6 +71,9 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "points",
             "image",
             "description",
+            "instruction_content",
+            "instruction_steps",
+            "instruction_lines",
             "order",
             "tier",
             "sets",
@@ -108,6 +118,9 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             return obj.exercise.photo.url
 
         return None
+
+    def get_instruction_lines(self, obj):
+        return obj.exercise.get_instruction_lines()
 
     def get_completed(self, obj):
         request = self.context.get("request")

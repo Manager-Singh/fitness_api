@@ -7,6 +7,7 @@ from django.contrib.admin.utils import get_deleted_objects
 from django.template.response import TemplateResponse
 from django.utils.translation import gettext_lazy as _
 
+from .forms import ExerciseAdminForm
 from .models import (
     Exercise, AgeBracket,
     RoutineTemplate, RoutineVariant, VariantExercise,
@@ -50,15 +51,38 @@ def _demo_scan_score_from_breakdown(breakdown: dict) -> dict:
 # ──────────────────────────  EXERCISE  ──────────────────────────
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
+    form = ExerciseAdminForm
+    exclude = ("instruction_content",)
     list_display   = ("name","short_name", "category", "points", "thumb")
     list_filter    = ("category",)
     list_editable  = ("category", "points")
     search_fields  = ("name",)
     readonly_fields = ("thumb",)
-    fields = (
-        "name","short_name", "description",
-        ("category", "points"),
-        "photo", "thumb",
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "name",
+                    "short_name",
+                    "description",
+                    ("category", "points"),
+                    "photo",
+                    "thumb",
+                )
+            },
+        ),
+        (
+            _("Instructions"),
+            {
+                "classes": ("wide",),
+                "fields": ("instruction_steps",),
+                "description": _(
+                    "Add one row per line (title or dosage can be step 1, then numbered cues). "
+                    "Use “Add more” for additional steps. Stored as an ordered list for the app."
+                ),
+            },
+        ),
     )
 
     def thumb(self, obj):

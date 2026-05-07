@@ -16,8 +16,13 @@ from utils.engine_routing import apply_engine_routing
 from utils.check_payment import check_subscription_or_response
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
+from users.models import NotificationEventLog
 from utils.user_time import user_localize_dt, user_today
 from users.spec_runtime import rebuild_ledger_from_date
+from utils.teen_nutrition_cap import (
+    TEEN_CAP_EVENT_KEY,
+    teen_cap_result,
+)
 
 class NutraLogViewSet(viewsets.ViewSet):
     @staticmethod
@@ -113,6 +118,15 @@ class NutraLogViewSet(viewsets.ViewSet):
         session, _ = NutraSession.objects.get_or_create(user=request.user, date=log_date)
 
         existing_entries = NutraEntry.objects.filter(session=session)
+        # For Issue 13 (teen cap): capture raw traceable food points *before* adding this payload.
+        raw_food_before = 0.0
+        if age < 21:
+            try:
+                raw_food_before = float(
+                    existing_entries.filter(food__isnull=False).aggregate(total=Sum("score"))["total"] or 0.0
+                )
+            except Exception:
+                raw_food_before = 0.0
         now = timezone.now()
 
         def is_duplicate(entry):
@@ -206,7 +220,34 @@ class NutraLogViewSet(viewsets.ViewSet):
         counts_toward_engine = bool(exercise_logged_today and effective_food_points > 0)
         cap_reached = bool(raw_food_points >= cap_limit)
         diary_note = None
-        if cap_reached:
+        teen_cap = None
+        teen_cap_modal_required = False
+        teen_cap_crossed_today = False
+        teen_cap_message = None
+        # Issue 13 teen safety copy + once/day gating.
+        if age < 21:
+            # Determine whether the user crossed the cap on this request.
+            raw_food_after = float(raw_food_points or 0.0)
+            modal_required = False
+            try:
+                crossed = bool(raw_food_before < 35.0 <= raw_food_after)
+                if crossed:
+                    _, created = NotificationEventLog.objects.get_or_create(
+                        user=request.user,
+                        event_key=TEEN_CAP_EVENT_KEY,
+                        event_date=log_date,
+                        defaults={"payload": {"raw_before": raw_food_before, "raw_after": raw_food_after}},
+                    )
+                    modal_required = bool(created)
+            except Exception:
+                modal_required = False
+            teen_cap = teen_cap_result(raw_before=raw_food_before, raw_after=raw_food_after, modal_required=modal_required)
+            teen_cap_modal_required = bool(teen_cap.modal_required)
+            teen_cap_crossed_today = bool(teen_cap.crossed_today)
+            teen_cap_message = teen_cap.message
+            # Replace any existing cap copy with the exact spec string when cap is reached.
+            diary_note = teen_cap_message
+        elif cap_reached:
             diary_note = (
                 f"You've maxed traceable nutrition points for today ({int(cap_limit)}). "
                 "You can keep logging for personal tracking, but extra logs won’t increase traceable points."
@@ -233,6 +274,11 @@ class NutraLogViewSet(viewsets.ViewSet):
             "cap_reached": cap_reached,
             "cap_limit": cap_limit,
             "diary_note": diary_note,
+            # Issue 13 explicit fields (teen-only message + once/day modal gating).
+            "teen_nutrition_cap_reached": bool(age < 21 and bool(teen_cap_message)),
+            "teen_nutrition_cap_message": teen_cap_message if age < 21 else None,
+            "teen_nutrition_cap_crossed_today": teen_cap_crossed_today if age < 21 else None,
+            "teen_nutrition_cap_modal_required": teen_cap_modal_required if age < 21 else None,
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,
             # Backward-compat: keep raw totals, but also provide capped totals for UI.

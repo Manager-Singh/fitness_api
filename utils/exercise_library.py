@@ -1,4 +1,6 @@
 SECTION6_DISPLAY_COPY = {
+    # Issue 15: canonical rename (keep legacy alias below for backward compatibility).
+    "Decompression Hang": "2 sets x 30-60 sec hold",
     "Hanging from Bar": "2 sets x 30-60 sec hold",
     "HGH Boost (Sprint & Burpees)": "3 rounds: 30 sec sprint + 10 burpees",
     "Jump Rope": "2-3 rounds x 1 minute",
@@ -31,4 +33,8 @@ SECTION6_DISPLAY_COPY = {
 
 
 def section6_display_copy_for_exercise(name):
-    return SECTION6_DISPLAY_COPY.get(str(name or "").strip(), None)
+    n = str(name or "").strip()
+    # Normalize legacy naming variants to the canonical v3.4 label.
+    if n.lower() in {"hanging from bar", "hanging form bar"}:
+        n = "Decompression Hang"
+    return SECTION6_DISPLAY_COPY.get(n, None)

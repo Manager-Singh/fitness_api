@@ -19,6 +19,7 @@ from .serializers_log import (
     NutraSessionSerializer
 )
 from datetime import date
+from utils.teen_nutrition_cap import TEEN_CAP_MESSAGE_EXACT
 
 
 
@@ -322,11 +323,13 @@ class MyPlanView(APIView):
             min(raw_today_food_points, traceable_cap) if traceable_cap is not None else raw_today_food_points
         )
         cap_reached = bool(traceable_cap is not None and raw_today_food_points >= traceable_cap)
-        diary_note = (
-            "You've maxed traceable nutrition points for today (35). You can keep logging for personal tracking, but extra logs won’t increase traceable points."
-            if cap_reached
-            else None
-        )
+        diary_note = None
+        if cap_reached:
+            diary_note = (
+                TEEN_CAP_MESSAGE_EXACT
+                if age < 21
+                else "You've maxed traceable nutrition points for today (35). You can keep logging for personal tracking, but extra logs won’t increase traceable points."
+            )
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
 

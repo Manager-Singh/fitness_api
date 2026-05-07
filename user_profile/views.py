@@ -1191,6 +1191,18 @@ def my_profile(request):
         runtime_state = get_user_runtime_state_snapshot(user) or {}
     except Exception:
         runtime_state = {}
+    # Spec: profile height must match dashboard formula.
+    # Height_Live_cm = Base_Height_cm + (HeightLedger.cumulative_um / 10000)
+    height_live_cm = None
+    try:
+        base0 = float(base_height_cm or 0.0)
+        cum_um = runtime_state.get("current_height_um", None)
+        if cum_um is not None:
+            height_live_cm = round(base0 + (float(cum_um) / 10000.0), 3)
+        else:
+            height_live_cm = round(base0, 3)
+    except Exception:
+        height_live_cm = None
 
     # --- today log + points ---
     from utils.user_time import user_today
@@ -1254,6 +1266,7 @@ def my_profile(request):
                     "birth_date": str(profile.birth_date) if profile.birth_date else None,
                     "current_height_cm": current_height_cm,
                     "base_height_cm": base_height_cm,
+                    "height_live_cm": height_live_cm,
                     "father_height_cm": fh,
                     "mother_height_cm": mh,
                 },

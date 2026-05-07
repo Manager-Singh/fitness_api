@@ -1,8 +1,22 @@
 # workouts/models.py
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 from django.conf import settings
+
+
+def validate_instruction_steps(value):
+    """instruction_steps must be a JSON array of strings (any length)."""
+    if value in (None, "", []):
+        return
+    if not isinstance(value, list):
+        raise ValidationError("Must be a JSON array, e.g. [\"#1. ...\", \"#2. ...\"].")
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ValidationError(f"Item {i + 1} must be a string.")
+        if len(item) > 2000:
+            raise ValidationError(f"Item {i + 1} is too long (max 2000 characters).")
 
 
 # ──────────────────── Exercise metadata ────────────────────
@@ -17,6 +31,24 @@ class Exercise(models.Model):
     name        = models.CharField(max_length=120, unique=True)
     short_name       = models.CharField(blank=True, max_length=160)
     description = models.TextField(blank=True)
+    instruction_content = models.TextField(
+        blank=True,
+        verbose_name="Instruction content (plain text)",
+        help_text=(
+            "Optional legacy format: multiple lines in one box (title + dosage, then #1, #2, …). "
+            "If “Instruction steps (JSON array)” is set, the API prefers that over this field."
+        ),
+    )
+    instruction_steps = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Instructions (steps)",
+        help_text=(
+            "Optional ordered list of lines for the app. In admin, use one text box per step "
+            "(Add more / Remove). Stored as JSON in the database."
+        ),
+        validators=[validate_instruction_steps],
+    )
     points      = models.PositiveIntegerField(default=0)
     category    = models.CharField(                   # NEW
         max_length=12,
@@ -30,6 +62,18 @@ class Exercise(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_instruction_lines(self):
+        """
+        Ordered lines for the app: prefer JSON array; else split legacy instruction_content.
+        """
+        steps = self.instruction_steps
+        if isinstance(steps, list) and len(steps) > 0:
+            return [str(s).strip() for s in steps if str(s).strip()]
+        text = (self.instruction_content or "").strip()
+        if not text:
+            return []
+        return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
 # ──────────────────── Variant-level metadata ────────────────────

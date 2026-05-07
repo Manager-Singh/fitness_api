@@ -12,15 +12,22 @@ from .models import (
 class ExerciseSerializer(serializers.ModelSerializer):
     category   = serializers.CharField(source="get_category_display")
     photo_url  = serializers.SerializerMethodField()
+    instruction_lines = serializers.SerializerMethodField()
 
     class Meta:
         model  = Exercise
         fields = (
             "id", "name", "description",
+            "instruction_content",
+            "instruction_steps",
+            "instruction_lines",
             "category",       # human‑readable string
             "points",
             "photo_url",      # absolute URL or null
         )
+
+    def get_instruction_lines(self, obj):
+        return obj.get_instruction_lines()
 
     # ---------- helpers ----------
     def get_photo_url(self, obj):

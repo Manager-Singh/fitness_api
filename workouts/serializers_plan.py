@@ -33,6 +33,13 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
     description = serializers.CharField(
         source="exercise.description", allow_blank=True
     )
+    instruction_content = serializers.CharField(
+        source="exercise.instruction_content", allow_blank=True
+    )
+    instruction_steps = serializers.JSONField(
+        source="exercise.instruction_steps", read_only=True
+    )
+    instruction_lines = serializers.SerializerMethodField()
 
     # prescription-level fields
     sets     = serializers.IntegerField()
@@ -50,11 +57,17 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
         model  = VariantExercise
         fields = (
             "id", "name","short_name", "points", "category", "image", "description",
+            "instruction_content",
+            "instruction_steps",
+            "instruction_lines",
             "order", "tier",'type', "sets", "qty_min", "qty_max", "unit",
             "completed", "section6_display_copy",
         )
 
     # helper --------------------------------------------------------------
+    def get_instruction_lines(self, obj):
+        return obj.exercise.get_instruction_lines()
+
     def get_image(self, obj):
         photo = obj.exercise.photo
         return photo.url if photo else None 

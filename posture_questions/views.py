@@ -971,12 +971,12 @@ def get_posture_questions(request):
         teen_nutrition_dots_from_food_points(teen_food_points_today) if is_teen_track else 0
     )
     teen_lifestyle_dots = teen_lifestyle_dots_for_day(user, user_local_today) if is_teen_track else 0
-    progress_bars = {}
-    for seg, seg_data in posture_optimization_diagnostics.get("segments", {}).items():
-        max_loss = float(seg_data.get("max_loss_cm", 0) or 0)
-        cur_loss = float(seg_data.get("current_loss_cm", 0) or 0)
-        pct = 100 if max_loss <= 0 else int(round((1 - (cur_loss / max_loss)) * 100))
-        progress_bars[seg] = max(0, min(100, pct))
+    # Use canonical percent values derived from runtime segment losses.
+    # (Avoid re-deriving the formula here; diagnostics_contract is the single source of truth.)
+    progress_bars = {
+        str(seg): int((seg_payload or {}).get("percent_optimized", 0) or 0)
+        for seg, seg_payload in (posture_optimization_diagnostics.get("segments", {}) or {}).items()
+    }
     trial_day_int = monetization["trial_day"]
     full_access_trial_active = bool(monetization["is_teen"] and monetization["is_trial"] and not monetization["full_access_trial_expired"])
     full_access_trial_expired = monetization["full_access_trial_expired"]
@@ -1219,7 +1219,7 @@ def get_posture_questions(request):
                 "segment_scoring_source": "questionnaire_then_fallback_optimization_breakdown",
                 "tie_break_priority": ["spinal_compression", "posture_collapse", "pelvic_tilt_back", "leg_hamstring"],
                 "adult_assignment": "core6 + 2 recommended + 2 beast",
-                "teen_assignment_13_17": "core4 + 1 recommended + 1 beast (posture)",
+                "teen_assignment_13_17": "core6 + 2 recommended + 2 beast (posture)",
                 "teen_assignment_18_20": "core6 + 2 recommended + 2 beast (posture)",
                 "hgh_assignment": "core2 + 1 beast by ranked segment fallback",
             },

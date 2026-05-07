@@ -15,7 +15,9 @@ from posture_questions.models import PostureQuestion
 # ----------------- AGE BASED PROGRAM CONFIG -----------------
 AGE_BASED_PROGRAM_TYPES = [
     (13, 17, {
-        "POSTURE": {"core": 4, "rec": 1, "beast": 1},
+        # Spec v3.4 (Issue 12): posture routine is always 10 exercises:
+        # 6 Core + 2 Recommended + 2 Beast Mode.
+        "POSTURE": {"core": 6, "rec": 2, "beast": 2},
         "HGH": {"core": 2, "rec": 0, "beast": 1},
     }),
     (18, 20, {
@@ -392,12 +394,11 @@ def assign_adult_exercises(variant, optimization_breakdown, ranked_segments=None
 def assign_teen_posture_exercises(variant, optimization_breakdown, age, ranked_segments=None):
     """
     Section 10 teen posture assignment:
-    - Ages 13-17: Core 4 + Recommended 1 + Beast 1
-    - Ages 18-20: Core 6 + Recommended 2 + Beast 2
+    - Ages 13-20: Core 6 + Recommended 2 + Beast 2 (10 total)
     """
-    core_count = 4 if 13 <= age <= 17 else 6
-    rec_count = 1 if 13 <= age <= 17 else 2
-    beast_count = 1 if 13 <= age <= 17 else 2
+    core_count = 6
+    rec_count = 2
+    beast_count = 2
     needs_sorted = ranked_segments or [seg for seg, _ in _sorted_needs(optimization_breakdown)]
     selected = []
     selected.extend(
