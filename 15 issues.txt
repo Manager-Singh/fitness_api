@@ -1,0 +1,309 @@
+Fix the following 12 issues across the app. Each issue includes the expected behavior. Reference TheHeightApp Spec v3.4 for any underlying logic where indicated.
+
+ISSUE 1 — Posture+ display formatting:
+- Currently shows ???.? cm in greyed/dimmed font
+- Must show 0.000 cm at start (3 decimal places after the period, always)
+- Font color must be white, same weight and styling as Genetic+, Daily Gains, and Height pills
+- Format must be applied consistently: +0.000 cm format with sign always shown
+- Update value live as PosturePlus_Daily_Gain accumulates
+
+ISSUE 2 — Posture Optimization bars not updating live:
+- Currently the 4 segment bars (Spinal, Collapse, Pelvic, Legs) do not update as exercises are completed
+- Per Section 4.3 / 5.4 of the spec: when an exercise is logged, PosturePlus_Daily_Gain increases, which redistributes across active segments using the 30/35/25/10 ratio, reducing each segment's Current_Loss
+- Opt_pct = (1 - Current_Loss / Max_Loss) × 100 must recalculate immediately after every exercise log
+- The bars and percentages on the dashboard must visually update on the fly without requiring a refresh or app restart
+- Trigger a ledger rebuild + dashboard state refresh after every POST /api/workout-logs response
+
+ISSUE 3 — Streak grammar:
+- Currently displays "1 days" on day 1 — grammatically wrong
+- Logic: if streak == 1 display "1 day" (singular). If streak != 1 display "X days" (plural)
+- Apply this same rule everywhere streak is displayed (dashboard, profile, leaderboard)
+
+ISSUE 4 — Logo size consistency:
+- The HEIGHT logo on the home/dashboard page is the correct size
+- All other screens (Routine, Nutrition, Leaderboard, Profile, onboarding screens, etc.) must use the exact same logo size as the dashboard
+- Use a shared constant or shared widget for the logo so size is identical everywhere
+
+ISSUE 5 — Button pulse animation logic:
+- The Log Nutrition button currently pulses always — must only pulse when Lifestyle & Nutrition completion is below 100%
+- Once Lifestyle & Nutrition reaches 100%, the pulse animation must stop and the button switches to its complete state per the AGENTS.md button state rules
+- Same logic for Daily Exercises button: pulse when not all exercises complete (e.g. 5 of 10), stop pulsing once at 10 of 10 / Routine Complete state
+- Pulse must restart automatically at midnight reset when both reset to 0-state
+
+ISSUE 6 — Log Nutrition button label:
+- Currently the button says only "Log Nutrition"
+- The section header above is "Lifestyle & nutrition" — the button label is inconsistent with what's being tracked (lifestyle = sleep/sunlight/meditation/hydration AND nutrition = food)
+- Update button label to "Log Lifestyle / Nutrition" so it accurately reflects both categories being logged
+- Apply the same dynamic state rules: "Log Lifestyle / Nutrition" → "Update Lifestyle / Nutrition" → "Lifestyle / Nutrition Complete ✓"
+
+ISSUE 7 — Chart Y-axis label cut off:
+- The vertical text "Height (cm)" on the left side of the chart is being cut off at the bottom — the descenders of the letters are clipped
+- Increase the chart container's left padding / margin so the rotated text is fully visible
+- The text must always render in full on every device — no clipping ever
+- Also verify the chart's bottom margin is sufficient that the age numbers (13–21) are not clipped
+
+ISSUE 8 — Profile page not updating live:
+- Profile page currently does not reflect live values for: current Height, Daily Points cumulative, Mother's Height, Father's Height
+- Profile page must pull live data from the same source as the dashboard — not a cached or stale value
+- Height shown on profile must equal Base_Height + Genetic_Cumulative + PosturePlus_Cumulative (same formula as dashboard top pill)
+- Mother's height and Father's height shown on profile must be editable and saving the edit must update MPH calculations across the app
+- Trigger profile refresh on screen open and after any data mutation
+
+ISSUE 9 — OTP delay too long:
+- After user enters email/name/password and taps Next, there is a ~30 second delay before the OTP entry step appears
+- This causes user confusion and bounce
+- Investigate root cause: API call latency, blocking UI thread, sequential calls that could be parallelized, or unnecessary waits
+- Target: OTP screen must appear within 2 seconds of tapping Next
+- Show a loading indicator with progress text during the wait so user knows the app is working, never a blank/frozen screen
+
+ISSUE 10 — Onboarding duplication bug:
+- On first install: user is asked age, gender, height — fills in
+- Then signup screen — fills in email/password
+- Then OTP — fills in
+- THEN the app asks AGAIN for age, birthday, gender, height — this is duplicate and broken
+- Fix: data captured in the first pre-signup step must be persisted and used to populate the post-signup user profile automatically
+- The post-OTP screen should skip directly to the next step that hasn't been completed (parents' height for teens, or scan/questionnaire choice)
+- If the post-OTP step needs DOB specifically (which the pre-signup step doesn't ask for), only ask for DOB — not age, gender, height again
+
+ISSUE 11 — Exercise popup overlap on GIF:
+- On the exercise detail page, when an exercise is opened, the popup containing the exercise name, start/stop timer, running indicator, and cancel button is overlapping on top of the GIF of the person doing the exercise
+- The GIF must always be fully visible — never covered by any UI element
+- Restructure the layout: GIF in the upper portion taking 50-60% of screen, controls/timer/buttons in the lower portion below the GIF
+- The popup must never overlay the GIF on any device size
+
+ISSUE 12 — Exercise count and assignment logic:
+- Currently only 8 exercises are showing — Beast Mode exercises are missing
+- Per Section 10 of the spec, the daily routine must contain 10 exercises total: 6 Core + 2 Recommended + 2 Beast Mode
+- The dashboard "X of Y done" indicator must show 10 dots (or whatever Total_Assigned actually is for that user's age group), not 8
+- Investigate why Beast Mode exercises are not being assigned — likely the assign_teen_posture_exercises() or assign_adult_exercises() function is not running fully through Step 5/6 (Beast Mode picks) per Section 10.5 / 10.3
+- Additionally: user reports the same exercises every day — verify the assignment is questionnaire-driven and is selecting from the pool correctly per the worst-segment ranking. The 6 Core exercises ARE supposed to be the same daily (those are fixed). But the 2 Recommended and 2 Beast Mode picks should reflect the user's specific segment scores from their questionnaire/scan
+- Run TC9 (pool exclusion test) and TC8 (Core 6 dynamic slot test) from AGENTS.md to verify
+- Confirm: 6 Core (fixed by age group) + 2 Recommended (questionnaire-driven) + 2 Beast Mode (questionnaire-driven) = 10 total assignments, all rendering, all logged through the Complete button
+
+
+ISSUE 13 — Nutrition daily cap message (teen safety):
+- When a teen reaches the 35 traceable nutrition points cap for the day, display the following message exactly:
+
+   "You've hit today's nutrition target. Your body has what it needs to grow. Logging more won't add points or height — come back tomorrow!"
+
+- This message must replace any existing cap message ("You've maxed traceable nutrition points" etc.)
+- Show the message as a clear, friendly modal or banner the moment the user logs the food that pushes them to or past 35 points
+- The message must NOT be dismissable in a way that allows it to be ignored — user must tap an acknowledgement ("Got it" or "OK") before continuing
+- Users can still log additional foods after the cap for personal tracking (existing behavior preserved), but the message above must be shown the first time the cap is reached each day
+- Adults: keep the existing 12 pt/day cap behavior unchanged — this message is teen-specific safety messaging because the teen audience is more at risk for over-logging behavior
+- Tone is intentional: celebrates the user, removes the urge to log more, communicates the safety message that more food does not equal more height growth, no shaming language
+
+Deliver fixes for all 13 issues. Confirm in your response which spec section was referenced for each fix and what was changed in the codebase.
+
+
+ISSUE 14 — Exercise instructions panel + full instruction set:
+
+Currently when a user opens an exercise from the routine, the GIF plays but there are NO instructions explaining how to do the exercise. This is unacceptable for a fitness app.
+
+DESIGN SPECIFICATION (visual layout — see attached screenshot for reference):
+
+- Top half of screen (55–60% of available height below header) — exercise GIF, fully visible, never covered by any overlay
+- Bottom half (40–45%) — dark rounded-corner instruction panel containing, in this top-to-bottom order:
+   1. Exercise name in teal/cyan accent color, centered, slightly larger font (e.g. 18sp bold)
+   2. Two side-by-side circular indicators: Time (left) and Set (right), teal outline circles with white values inside — keep current styling
+   3. Numbered instruction steps (#1, #2, #3) in white medium-weight font (e.g. 14–15sp), left-aligned, with comfortable line spacing. Maximum 3 steps per exercise. Each step is one short clear sentence
+   4. Single italic helper line in muted grey font below the steps: "The GIF shows the motion — follow the time and sets shown above, not the GIF's pace."
+   5. Two action buttons at the bottom: Cancel (red outline, left) and Running / Pause (teal outline, right) — keep current styling
+
+LAYOUT REQUIREMENTS:
+- The instruction panel must EXPAND vertically to fit the instructions and helper line — do not truncate or scroll instructions
+- The GIF area must SHRINK to whatever space remains above the panel — it must never be overlapped or covered by the panel even partially
+- On smaller screens (S9), reduce GIF height proportionally first, never cut off instructions
+- Use LayoutBuilder to compute panel height based on instruction text length, not a fixed pixel value
+- Padding inside the panel: 16dp on all sides, 8dp between sections
+- Background of instruction panel: solid dark (matches existing app dark theme), rounded corners on top edges only
+
+INSTRUCTION CONTENT (apply exactly these instructions to each exercise):
+
+COBRA STRETCH — 30 sec hold × 2 sets
+#1. Lie flat on your stomach with hands under your shoulders
+#2. Push your upper body up while keeping your hips on the floor
+#3. Hold and breathe deeply
+
+HANGING FROM BAR — 45–60 sec × 2 sets
+#1. Grip a pull-up bar shoulder-width apart
+#2. Hang fully relaxed and let your spine decompress
+#3. Stay still — don't swing
+
+HIP FLEXOR STRETCH — 15 reps each side × 3 sets
+#1. Kneel on one knee with the other foot forward, knee at 90°
+#2. Push your hips gently forward until you feel a stretch in front of the hip
+#3. Switch sides after each set
+
+WALL ANGELS — 12 reps × 2 sets
+#1. Stand with your back flat against a wall, feet 6 inches forward
+#2. Place your arms against the wall in a "W" shape
+#3. Slowly slide arms up into a "Y" then back down, keeping contact with the wall
+
+GLUTE BRIDGES — 15 reps × 3 sets
+#1. Lie on your back with knees bent, feet flat on the floor
+#2. Squeeze your glutes and lift your hips until your body is in a straight line
+#3. Lower slowly with control
+
+CAT-COW STRETCH — 10 reps × 2 sets
+#1. Start on your hands and knees in a tabletop position
+#2. Inhale — drop belly, lift chest and tailbone (Cow)
+#3. Exhale — round your spine, tuck your chin and tailbone (Cat)
+
+HAMSTRING STRETCH — 30 sec each leg × 2 sets
+#1. Sit with one leg straight, the other bent inward
+#2. Reach gently toward your toes on the straight leg
+#3. Switch legs after each set
+
+TADASANA / MOUNTAIN POSE — 30 sec × 2 sets
+#1. Stand tall with feet together, weight evenly distributed
+#2. Engage your thighs, tuck your tailbone, lift your chest
+#3. Reach the crown of your head toward the sky
+
+DOORWAY CHEST STRETCH — 30 sec each side × 2 sets
+#1. Stand in a doorway, place your forearm vertically against the frame
+#2. Step forward gently until you feel a stretch across your chest
+#3. Switch sides
+
+CHILD'S POSE WITH ARM WALKS — 30 sec × 2 sets
+#1. Kneel and sit back on your heels with arms stretched forward
+#2. Walk your hands forward to deepen the stretch
+#3. Walk your hands left, then right to stretch each side
+
+SPINAL TWIST STRETCH — 30 sec each side × 2 sets
+#1. Lie on your back with arms out in a "T"
+#2. Bring one knee across your body toward the floor
+#3. Keep both shoulders flat — switch sides
+
+BUTTERFLY STRETCH — 30 sec × 2 sets
+#1. Sit with the soles of your feet pressed together
+#2. Hold your feet and gently press your knees toward the floor
+#3. Sit tall — don't round your back
+
+CHIN TUCKS — 12 reps × 2 sets
+#1. Stand or sit tall with shoulders relaxed
+#2. Pull your chin straight back like making a "double chin"
+#3. Hold for 3 seconds, then release
+
+SUPERMAN HOLD — 20–30 sec × 2 sets
+#1. Lie on your stomach with arms extended forward
+#2. Lift your chest, arms, and legs off the floor at the same time
+#3. Hold the position — keep your gaze down
+
+PLANK — 30–60 sec × 2 sets
+#1. Place forearms on the floor, elbows directly under shoulders
+#2. Extend your legs back so your body is in a straight line
+#3. Engage your core — don't let your hips sag
+
+JUMP ROPE — 60 sec × 2–3 sets
+#1. Hold the rope handles at hip height (or pretend if no rope)
+#2. Jump with both feet, keeping jumps low and quick
+#3. Land softly on the balls of your feet
+
+BODYWEIGHT SQUATS — 20 reps × 3 sets
+#1. Stand with feet shoulder-width apart
+#2. Lower your hips back and down like sitting in a chair
+#3. Stand back up — keep your chest tall
+
+BOX JUMPS — 10 reps × 2 sets
+#1. Stand in front of a sturdy box or step
+#2. Bend slightly and jump explosively onto it
+#3. Step down (don't jump down) and reset
+
+HIGH KNEES — 30 sec × 2 sets
+#1. Stand tall, run in place lifting knees toward your chest
+#2. Pump your arms — stay light on your feet
+#3. Aim for waist-height knees each rep
+
+MOUNTAIN CLIMBERS — 30 sec × 2 sets
+#1. Start in a high plank position
+#2. Drive one knee toward your chest, then quickly switch legs
+#3. Keep your hips low and your core tight
+
+DEEP SQUAT HOLD — 30 sec × 2 sets
+#1. Squat down as low as you can with feet flat
+#2. Place your elbows inside your knees and gently push them apart
+#3. Keep your chest tall and breathe
+
+LUNGES — 12 reps each leg × 2 sets
+#1. Step one foot forward and lower your back knee toward the floor
+#2. Keep your front knee directly over your ankle
+#3. Push back to standing — alternate legs
+
+IMPLEMENTATION NOTES:
+- Store the instruction text and rep/set values in a single config map keyed by exercise name. Do not hardcode in widget files
+- Title and rep/set values displayed at top of panel come from the same config — single source of truth
+- The helper italic line ("The GIF shows the motion...") is the SAME on every exercise — store it as a global string constant
+- Apply the same panel layout to ALL exercises across both teen and adult routines — consistency required
+- Confirm that when a user taps an exercise on the Routine page, the resulting screen shows: GIF on top, instruction panel below, no overlap, all 3 instruction steps visible without scrolling on S9 5.8" and on a 6.5" device
+
+
+ISSUE 15 — Hanging exercise: rename + add home-friendly alternative method:
+
+The app is positioned as a HOME workout product. Most users will not own a pull-up bar. The exercise currently labeled "Hanging form Bar" (also has a typo — should be "from" not "form") assumes equipment most teens don't have at home, which means many users skip it entirely — losing the most valuable spinal decompression exercise in the routine.
+
+Fix this by renaming the exercise to a name that covers both methods, then updating the instructions to clearly explain BOTH the pull-up bar method AND the door frame method as equivalent options.
+
+1. RENAME THE EXERCISE
+
+- Old name: "Hanging form Bar" (also fixes existing typo)
+- New name: "Decompression Hang"
+
+Apply the rename everywhere in the codebase, database seeds, exercise config maps, spec references, AGENTS.md, and any UI labels. Search for any string containing "Hanging form Bar", "Hanging from Bar", or "hanging_from_bar" identifier and replace consistently.
+
+2. UPDATE THE INSTRUCTION CONTENT
+
+Replace the existing Cobra/Hanging instruction set in the exercise config with the following expanded version. This exercise is the only one in the routine with TWO methods — the user picks whichever is available to them. Both deliver the same spinal decompression benefit.
+
+DECOMPRESSION HANG — 30–60 sec × 2 sets
+
+Method A — Pull-up bar (if you have one):
+#1. Grip a pull-up bar shoulder-width apart with palms facing away
+#2. Hang fully relaxed and let your spine decompress under your bodyweight
+#3. Stay still — don't swing or kick
+
+Method B — Door frame (no equipment needed):
+#1. Find the sturdiest door in your home, open it 90° and place a towel over the top edge to protect the door
+#2. Place one hand near the top corner closest to the hinges (strongest side), other hand about 14 inches next to it along the top edge
+#3. Bend your knees to take all weight off your feet — hang and feel your spine decompress
+
+Safety note (display below the steps in muted grey italic):
+"Use only a solid wood or solid-core door. Stop if the door creaks, shifts, or shows any sign of stress."
+
+3. PANEL DESIGN UPDATE FOR THIS EXERCISE ONLY
+
+The exercise instruction panel layout from Issue 14 must accommodate two methods for this exercise specifically. Layout:
+
+- Exercise title at top: "Decompression Hang" (teal)
+- Time and Set circles below the title (same as other exercises)
+- A small toggle or label row below the circles: [ Bar ] [ Door Frame ] — user taps which method they're using. Default to Door Frame on first open since it's more accessible. Save the user's last choice and persist it across sessions.
+- Show the 3 instruction steps for the SELECTED method only (not both at once — keep the panel compact)
+- The italic helper line from Issue 14 ("The GIF shows the motion — follow the time and sets shown above, not the GIF's pace.") still appears below the steps
+- Then the safety note line (only shown when Door Frame is selected)
+- Cancel and Start/Running buttons at the bottom (same as other exercises)
+
+4. GIF HANDLING
+
+- The current GIF shows the bar method. Use this GIF for both methods for now — the helper line tells the user the GIF is for motion reference only, not exact form
+- Optional later enhancement: when Door Frame method is selected, swap to a door-frame-specific GIF if/when one is available. For now both methods share the same GIF
+- The GIF must never be overlapped by the panel (Issue 11 + Issue 14 layout rules apply here too)
+
+5. SPEC + AGENTS.md UPDATES
+
+- Update the exercise pool definitions in Section 10 of TheHeightApp Spec to use "Decompression Hang" as the canonical name
+- Add a note in AGENTS.md under exercise rules: "Decompression Hang has two equivalent methods (Bar / Door Frame). Both award the same points. The user selects their method per-session via toggle in the exercise panel. Default to Door Frame for new users."
+- Database identifier should be `decompression_hang` (replace any existing `hanging_from_bar` or similar)
+- Point value remains the same as the original exercise (+7 points)
+- Both methods count toward the same exercise slot — user does not need to do both
+
+6. DELIVERY CHECK
+
+Confirm in your response:
+- The exercise has been renamed everywhere in the codebase
+- The typo "form" → "from" no longer exists anywhere
+- Both methods render correctly in the instruction panel with toggle switching
+- Safety note appears only when Door Frame is selected
+- The exercise still awards the correct points and counts toward the daily routine
+- The GIF is not overlapped on any device
+
+
