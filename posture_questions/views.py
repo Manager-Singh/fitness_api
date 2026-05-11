@@ -714,8 +714,8 @@ def get_posture_questions(request):
     else:
         days_left = max(0, rescan_days - days_since_scan)
         if is_adult_track and not is_paid:
-            # Free adult state is always locked/read-only for re-scan timer text.
-            scan_message = f"Re-scan in {days_left} days."
+            # Free adult state is locked. For QA clarity, avoid a live countdown on unpaid accounts.
+            scan_message = "Re-scans are locked on free adult plan. Unlock paid plan to continue."
         else:
             scan_message = f"Re-scan in {days_left} days." if days_left > 0 else "Re-scan available."
     # v3.3: teen unlock can be scan OR questionnaire completion (do not rely on last_scan).

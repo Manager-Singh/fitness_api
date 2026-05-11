@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Count
 from django.db import transaction
+from django.conf import settings
 
 from .models import WorkoutSession, UserRoutine
 from .serializers_log import (
@@ -94,7 +95,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         except Exception:
             age = 0
         subscription_data = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(subscription_data.get("is_paid", False)):
+        if age >= 21 and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Exercise logging is locked for free adult accounts.",

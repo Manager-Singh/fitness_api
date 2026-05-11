@@ -76,10 +76,10 @@ class ExerciseAdmin(admin.ModelAdmin):
             _("Instructions"),
             {
                 "classes": ("wide",),
-                "fields": ("instruction_steps",),
+                "fields": ("instruction_methods", "instruction_steps",),
                 "description": _(
-                    "Add one row per line (title or dosage can be step 1, then numbered cues). "
-                    "Use “Add more” for additional steps. Stored as an ordered list for the app."
+                    "Preferred: add one or more methods (each with a title + ordered steps). "
+                    "Fallback: use per-line steps (one row per step). Stored as ordered JSON for the app."
                 ),
             },
         ),

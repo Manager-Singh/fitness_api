@@ -9,7 +9,7 @@ from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_
 def _segment_payload(current_loss_cm, max_loss_cm):
     current = max(0.0, min(float(max_loss_cm), float(current_loss_cm)))
     return {
-        "current_loss_cm": round(current, 4),
+        "current_loss_cm": round(current, 2),
         "max_loss_cm": float(max_loss_cm),
         "percent_optimized": posture_segment_opt_pct(current_loss_cm, max_loss_cm),
         "percent_optimized_precise": posture_segment_opt_pct_precise(current_loss_cm, max_loss_cm, decimals=2),
@@ -31,10 +31,10 @@ def build_posture_optimization_diagnostics(
     next_scan_at = None if last_scan_at is None else (last_scan_at + timedelta(days=int(rescan_days)))
 
     runtime_segments = {
-        "spinal_compression": round(float(runtime.get("spinal_current_loss_um", 0)) / 10000.0, 4),
-        "posture_collapse": round(float(runtime.get("collapse_current_loss_um", 0)) / 10000.0, 4),
-        "pelvic_tilt_back": round(float(runtime.get("pelvic_current_loss_um", 0)) / 10000.0, 4),
-        "leg_hamstring": round(float(runtime.get("legs_current_loss_um", 0)) / 10000.0, 4),
+        "spinal_compression": round(float(runtime.get("spinal_current_loss_um", 0)) / 10000.0, 2),
+        "posture_collapse": round(float(runtime.get("collapse_current_loss_um", 0)) / 10000.0, 2),
+        "pelvic_tilt_back": round(float(runtime.get("pelvic_current_loss_um", 0)) / 10000.0, 2),
+        "leg_hamstring": round(float(runtime.get("legs_current_loss_um", 0)) / 10000.0, 2),
     }
 
     segments = {}
@@ -45,8 +45,8 @@ def build_posture_optimization_diagnostics(
             seg_current = runtime_segments[seg]
         segments[seg] = _segment_payload(seg_current, max_loss)
 
-    total_current_loss_cm = round(sum(v["current_loss_cm"] for v in segments.values()), 4)
-    total_recoverable_loss_cm = round(float(runtime.get("total_recoverable_loss_um", 0)) / 10000.0, 4)
+    total_current_loss_cm = round(sum(v["current_loss_cm"] for v in segments.values()), 2)
+    total_recoverable_loss_cm = round(float(runtime.get("total_recoverable_loss_um", 0)) / 10000.0, 2)
     if total_recoverable_loss_cm <= 0:
         total_recoverable_loss_cm = total_current_loss_cm
 

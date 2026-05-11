@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Prefetch
+from django.conf import settings
 from .models import UserRoutine, UserRoutineExercise
 from .serializers_user_routine import UserRoutineSerializer
 from posture.models import PostureReport
@@ -21,7 +22,7 @@ class UserRoutineListView(APIView):
         except Exception:
             age = 0
         sub = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(sub.get("is_paid", False)):
+        if age >= 21 and not bool(sub.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Workout plan is locked for free adult accounts.",

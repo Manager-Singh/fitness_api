@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.conf import settings
 from workouts.models import Track
 from .models import RoutineVariant
 from .serializers_plan import RoutinePlanSerializer
@@ -61,7 +62,7 @@ class MyWorkoutPlanView(APIView):
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         subscription_data = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(subscription_data.get("is_paid", False)):
+        if age >= 21 and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Workout plan is locked for free adult accounts.",

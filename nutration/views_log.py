@@ -2,6 +2,7 @@ from datetime import date as dt, datetime, timedelta
 from django.db.models import Q, Sum
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -96,7 +97,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         except Exception:
             age = 0
         subscription_data = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(subscription_data.get("is_paid", False)):
+        if age >= 21 and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
@@ -282,7 +283,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,
             # Backward-compat: keep raw totals, but also provide capped totals for UI.
-            "today_total_nutrition_score": total_today_score,
+            # Historically this key was used by clients as "today nutrition points".
+            # Use FOOD-only traceable points here to avoid mixing lifestyle points into nutrition totals.
+            "today_total_nutrition_score": float(traceable_food_points),
+            "today_total_nutrition_score_all": float(total_today_score or 0),
             "today_total_food_score": total_today_food_score,
             "today_total_food_score_traceable": float(traceable_food_points),
             "today_total_food_score_raw": float(raw_food_points),

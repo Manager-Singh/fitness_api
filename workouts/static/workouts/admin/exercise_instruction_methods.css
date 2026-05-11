@@ -1,0 +1,87 @@
+/* Exercise instruction methods — admin widget (method groups + steps) */
+
+.instruction-methods {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  padding: 1rem 1.25rem 1.25rem;
+  margin: 0.5rem 0 1rem;
+  border: 1px solid var(--hairline-color, #c4c4c4);
+  border-radius: 8px;
+  background: var(--darkened-bg, #f8f8f8);
+}
+
+.instruction-methods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.instruction-method {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--hairline-color, #d0d0d0);
+  border-radius: 6px;
+  background: var(--body-bg, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.instruction-method-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.instruction-method-title {
+  flex: 1 1 320px;
+  min-width: 240px;
+}
+
+.instruction-method-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.instruction-method-step-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.instruction-method-step {
+  flex: 1 1 auto;
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.instruction-method-footer {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.instruction-method-add {
+  margin-top: 0.25rem;
+  padding: 0.55rem 1.1rem;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.instruction-method-add-step {
+  padding: 0.35rem 0.85rem;
+  font-size: 13px;
+}
+
+.instruction-method-remove,
+.instruction-method-step-remove {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.75rem;
+  font-size: 13px;
+}
+

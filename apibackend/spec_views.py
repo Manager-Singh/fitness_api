@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.utils import timezone
+from django.conf import settings
 from django.db.models import Q, Sum, Count
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -33,6 +34,8 @@ def _adult_free_logging_locked(user) -> bool:
     except Exception:
         age = 0
     if age < 21:
+        return False
+    if bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
         return False
     sub = check_subscription_or_response(user).data
     return not bool(sub.get("is_paid", False))

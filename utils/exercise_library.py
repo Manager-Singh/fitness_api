@@ -31,7 +31,6 @@ SECTION6_DISPLAY_COPY = {
     "Seated Forward Fold": "2 sets x 30 sec",
 }
 
-
 def section6_display_copy_for_exercise(name):
     n = str(name or "").strip()
     # Normalize legacy naming variants to the canonical v3.4 label.

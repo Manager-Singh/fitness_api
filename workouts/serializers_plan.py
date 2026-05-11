@@ -39,6 +39,9 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
     instruction_steps = serializers.JSONField(
         source="exercise.instruction_steps", read_only=True
     )
+    instruction_methods = serializers.JSONField(
+        source="exercise.instruction_methods", read_only=True
+    )
     instruction_lines = serializers.SerializerMethodField()
 
     # prescription-level fields
@@ -59,6 +62,7 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
             "id", "name","short_name", "points", "category", "image", "description",
             "instruction_content",
             "instruction_steps",
+            "instruction_methods",
             "instruction_lines",
             "order", "tier",'type', "sets", "qty_min", "qty_max", "unit",
             "completed", "section6_display_copy",

@@ -1,7 +1,7 @@
 from django import forms
 
 from .models import Exercise
-from .widgets import InstructionStepsArrayWidget
+from .widgets import InstructionStepsArrayWidget, InstructionMethodsWidget
 
 
 class ExerciseAdminForm(forms.ModelForm):
@@ -14,3 +14,4 @@ class ExerciseAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["instruction_steps"].widget = InstructionStepsArrayWidget()
+        self.fields["instruction_methods"].widget = InstructionMethodsWidget()

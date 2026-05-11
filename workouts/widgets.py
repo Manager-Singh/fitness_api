@@ -71,3 +71,76 @@ class InstructionStepsArrayWidget(forms.Widget):
             + str(closing)
             + str(json_script(steps, seed_id))
         )
+
+
+def _methods_as_list(value):
+    if value in (None, "", []):
+        return []
+    if isinstance(value, str):
+        try:
+            return _methods_as_list(json.loads(value))
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    out = []
+    for m in value:
+        if not isinstance(m, dict):
+            continue
+        title = m.get("title", "")
+        steps = m.get("steps", [])
+        if title is None:
+            title = ""
+        if not isinstance(title, str):
+            title = str(title)
+        if steps in (None, ""):
+            steps = []
+        if not isinstance(steps, list):
+            steps = []
+        steps2 = []
+        for s in steps:
+            if s is None:
+                continue
+            steps2.append(s if isinstance(s, str) else str(s))
+        out.append({"title": title, "steps": steps2})
+    return out
+
+
+class InstructionMethodsWidget(forms.Widget):
+    """
+    Admin-friendly UI: multiple methods, each with title + “Add step”.
+    Persists as JSON array in the bound hidden input (same name as the JSONField).
+    """
+
+    class Media:
+        css = {"all": ("workouts/admin/exercise_instruction_methods.css",)}
+        js = ("workouts/admin/exercise_instruction_methods.js",)
+
+    def render(self, name, value, attrs=None, renderer=None):
+        attrs = attrs or {}
+        methods = _methods_as_list(value)
+        field_id = attrs.get("id", "id_" + name)
+        container_id = field_id + "_methods_ui"
+        seed_id = field_id + "_seed"
+        hidden_attrs = {
+            "type": "hidden",
+            "name": name,
+            "id": field_id,
+            "value": json.dumps(methods),
+        }
+        hidden = format_html("<input{} />", flatatt(hidden_attrs))
+        opening = format_html(
+            '<div class="instruction-methods" id="{}" data-field-id="{}" data-remove-label="{}">'
+            '<div class="instruction-methods-list"></div>',
+            container_id,
+            field_id,
+            _("Remove"),
+        )
+        btn = format_html(
+            '<button type="button" class="button instruction-method-add">{}</button>',
+            _("Add method"),
+        )
+        closing = format_html("</div>")
+        return mark_safe(
+            str(opening) + str(btn) + str(hidden) + str(closing) + str(json_script(methods, seed_id))
+        )

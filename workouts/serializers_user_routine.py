@@ -56,6 +56,9 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     instruction_steps = serializers.JSONField(
         source="exercise.instruction_steps", read_only=True
     )
+    instruction_methods = serializers.JSONField(
+        source="exercise.instruction_methods", read_only=True
+    )
     instruction_lines = serializers.SerializerMethodField()
     completed = serializers.SerializerMethodField()
     section6_display_copy = serializers.SerializerMethodField()
@@ -73,6 +76,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "description",
             "instruction_content",
             "instruction_steps",
+            "instruction_methods",
             "instruction_lines",
             "order",
             "tier",

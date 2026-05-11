@@ -752,8 +752,11 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
                 "reason": "teen_pre_scan",
             },
         )
-    if age >= 21 and state:
-        _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
+    # Update posture optimization bars as Engine 1 posture gain is earned.
+    # Adults always apply redistribution; teens apply it only after unlock (scan or questionnaire).
+    if state and int(engine1_delta_um or 0) > 0:
+        if age >= 21 or bool(state.scan_completed) or bool(state.questionnaire_completed):
+            _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
     return {
         "user_id": user.id,
         "delta_um": max(0, delta_um),

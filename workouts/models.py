@@ -19,6 +19,40 @@ def validate_instruction_steps(value):
             raise ValidationError(f"Item {i + 1}: is too long (max 2000 characters).")
 
 
+def validate_instruction_methods(value):
+    """
+    instruction_methods must be a JSON array of objects:
+    [
+      {"title": "Method A ...", "steps": ["...", "..."]},
+      {"title": "Method B ...", "steps": ["...", "..."]},
+    ]
+    """
+    if value in (None, "", []):
+        return
+    if not isinstance(value, list):
+        raise ValidationError('Must be a JSON array, e.g. [{"title": "...", "steps": ["#1...", "#2..."]}].')
+    for i, m in enumerate(value):
+        if not isinstance(m, dict):
+            raise ValidationError(f"Method {i + 1} must be an object.")
+        title = m.get("title", "")
+        steps = m.get("steps", [])
+        if title is None:
+            title = ""
+        if not isinstance(title, str):
+            raise ValidationError(f"Method {i + 1} title must be a string.")
+        if len(title) > 200:
+            raise ValidationError(f"Method {i + 1} title is too long (max 200 characters).")
+        if steps in (None, ""):
+            steps = []
+        if not isinstance(steps, list):
+            raise ValidationError(f"Method {i + 1} steps must be a list.")
+        for j, s in enumerate(steps):
+            if not isinstance(s, str):
+                raise ValidationError(f"Method {i + 1} step {j + 1} must be a string.")
+            if len(s) > 2000:
+                raise ValidationError(f"Method {i + 1} step {j + 1} is too long (max 2000 characters).")
+
+
 # ──────────────────── Exercise metadata ────────────────────
 class ExerciseCategory(models.TextChoices):
     POSTURE      = "posture",      "Posture"
@@ -49,6 +83,16 @@ class Exercise(models.Model):
         ),
         validators=[validate_instruction_steps],
     )
+    instruction_methods = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Instructions (methods)",
+        help_text=(
+            "Optional structured instruction methods (each method has a title and ordered steps). "
+            "If set, the app can show Method A/Method B selectors. Stored as JSON."
+        ),
+        validators=[validate_instruction_methods],
+    )
     points      = models.PositiveIntegerField(default=0)
     category    = models.CharField(                   # NEW
         max_length=12,
@@ -67,6 +111,23 @@ class Exercise(models.Model):
         """
         Ordered lines for the app: prefer JSON array; else split legacy instruction_content.
         """
+        methods = self.instruction_methods
+        if isinstance(methods, list) and len(methods) > 0:
+            out = []
+            for m in methods:
+                if not isinstance(m, dict):
+                    continue
+                title = str(m.get("title") or "").strip()
+                steps = m.get("steps") or []
+                if title:
+                    out.append(title)
+                if isinstance(steps, list):
+                    for s in steps:
+                        s2 = str(s).strip()
+                        if s2:
+                            out.append(s2)
+            if out:
+                return out
         steps = self.instruction_steps
         if isinstance(steps, list) and len(steps) > 0:
             return [str(s).strip() for s in steps if str(s).strip()]
@@ -74,6 +135,25 @@ class Exercise(models.Model):
         if not text:
             return []
         return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+    def get_instruction_methods(self):
+        """
+        Normalized structured methods for the app.
+        Returns: [{"title": str, "steps": [str, ...]}, ...]
+        """
+        methods = self.instruction_methods
+        if not isinstance(methods, list):
+            return []
+        out = []
+        for m in methods:
+            if not isinstance(m, dict):
+                continue
+            title = str(m.get("title") or "").strip()
+            steps = m.get("steps") if isinstance(m.get("steps"), list) else []
+            steps2 = [str(s).strip() for s in steps if str(s).strip()]
+            if title or steps2:
+                out.append({"title": title, "steps": steps2})
+        return out
 
 
 # ──────────────────── Variant-level metadata ────────────────────

@@ -20,6 +20,7 @@ class ExerciseSerializer(serializers.ModelSerializer):
             "id", "name", "description",
             "instruction_content",
             "instruction_steps",
+            "instruction_methods",
             "instruction_lines",
             "category",       # human‑readable string
             "points",

@@ -1177,7 +1177,7 @@ def my_profile(request):
             mph_simple_cm = None
 
     base_height_cm = _round_cm_3(_as_float(profile.base_height_cm))
-    current_height_cm = _round_cm_3(_as_float(profile.current_height_cm))
+    current_height_cm_saved = _round_cm_3(_as_float(profile.current_height_cm))
 
     subscription_data = {}
     try:
@@ -1264,7 +1264,10 @@ def my_profile(request):
                     "sex_normalized": sex,
                     "age": profile.age,
                     "birth_date": str(profile.birth_date) if profile.birth_date else None,
-                    "current_height_cm": current_height_cm,
+                    # Return the live height as `current_height_cm` so the profile screen updates
+                    # immediately after workout/nutrition logs (spec: Base + ledger cumulative).
+                    "current_height_cm": height_live_cm if height_live_cm is not None else current_height_cm_saved,
+                    "current_height_cm_saved": current_height_cm_saved,
                     "base_height_cm": base_height_cm,
                     "height_live_cm": height_live_cm,
                     "father_height_cm": fh,
