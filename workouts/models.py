@@ -93,6 +93,11 @@ class Exercise(models.Model):
         ),
         validators=[validate_instruction_methods],
     )
+    safety_note = models.TextField(
+        blank=True,
+        verbose_name="Safety note",
+        help_text="Optional safety note shown under the instructions (plain text).",
+    )
     points      = models.PositiveIntegerField(default=0)
     category    = models.CharField(                   # NEW
         max_length=12,

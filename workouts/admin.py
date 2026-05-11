@@ -76,7 +76,7 @@ class ExerciseAdmin(admin.ModelAdmin):
             _("Instructions"),
             {
                 "classes": ("wide",),
-                "fields": ("instruction_methods",),
+                "fields": ("instruction_methods", "safety_note"),
                 "description": _(
                     "Add one or more methods (each with a title + ordered steps). Stored as structured JSON for the app."
                 ),

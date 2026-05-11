@@ -32,6 +32,10 @@ class WorkoutEntryReadSerializer(serializers.ModelSerializer):
     instruction_steps = serializers.JSONField(
         source="exercise.instruction_steps", read_only=True
     )
+    instruction_methods = serializers.JSONField(
+        source="exercise.instruction_methods", read_only=True
+    )
+    safety_note = serializers.CharField(source="exercise.safety_note", allow_blank=True, read_only=True)
     instruction_lines = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
 
@@ -44,6 +48,8 @@ class WorkoutEntryReadSerializer(serializers.ModelSerializer):
             "short_name",
             "instruction_content",
             "instruction_steps",
+            "instruction_methods",
+            "safety_note",
             "instruction_lines",
             "image",
             "points",
