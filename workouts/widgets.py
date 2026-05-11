@@ -64,5 +64,10 @@ class InstructionStepsArrayWidget(forms.Widget):
         )
         closing = format_html("</div>")
         return mark_safe(
-            str(opening) + str(btn) + str(hidden) + str(closing) + str(json_script(steps, seed_id))
+            str(opening)
+            + " "
+            + str(btn)
+            + str(hidden)
+            + str(closing)
+            + str(json_script(steps, seed_id))
         )

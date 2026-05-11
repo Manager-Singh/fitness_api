@@ -14,9 +14,9 @@ def validate_instruction_steps(value):
         raise ValidationError("Must be a JSON array, e.g. [\"#1. ...\", \"#2. ...\"].")
     for i, item in enumerate(value):
         if not isinstance(item, str):
-            raise ValidationError(f"Item {i + 1} must be a string.")
+            raise ValidationError(f"Item {i + 1}: must be a string.")
         if len(item) > 2000:
-            raise ValidationError(f"Item {i + 1} is too long (max 2000 characters).")
+            raise ValidationError(f"Item {i + 1}: is too long (max 2000 characters).")
 
 
 # ──────────────────── Exercise metadata ────────────────────
