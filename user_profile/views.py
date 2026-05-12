@@ -1007,6 +1007,27 @@ def get_profile(request):
                 if k in profile_data:
                     profile_data[k] = _round_cm_3(profile_data.get(k))
 
+    # Dashboard `top_cards` "height" / my_profile: live cm = base_height_cm + ledger cumulative_um/10000.
+    height_display_cm = None
+    if isinstance(profile_data, dict) and profile is not None:
+        try:
+            base_height_cm = _round_cm_3(profile_data.get("base_height_cm"))
+            current_saved = _round_cm_3(profile_data.get("current_height_cm"))
+            if base_height_cm is None:
+                base_height_cm = current_saved
+            base0 = float(base_height_cm or 0.0)
+            runtime_state = get_user_runtime_state_snapshot(user) or {}
+            cum_um = runtime_state.get("current_height_um", None)
+            if cum_um is not None:
+                height_display_cm = round(base0 + (float(cum_um) / 10000.0), 3)
+            else:
+                height_display_cm = round(base0, 3) if base_height_cm is not None else current_saved
+        except Exception:
+            logger.exception("get_profile: height_live_cm failed", extra={"user_id": getattr(user, "id", None)})
+            height_display_cm = _round_cm_3((profile_data or {}).get("current_height_cm"))
+    if height_display_cm is None and isinstance(profile_data, dict):
+        height_display_cm = _round_cm_3(profile_data.get("current_height_cm"))
+
     return Response({
         'message': 'Profile retrieved successfully',
         'data': {
@@ -1022,12 +1043,10 @@ def get_profile(request):
             'profile_type': profile_type_data,
             'current_package': current_package,
             'subscription': subscription_data,
-            # Convenience aliases so clients consistently render height in cm.
-            'height_cm': (_round_cm_3((profile_data or {}).get("current_height_cm")) if isinstance(profile_data, dict) else None),
+            # Same live height as dashboard-new `top_cards` key "height" / my_profile `height_live_cm`.
+            'height_cm': height_display_cm,
             'height_cm_display': (
-                (f"{_round_cm_3((profile_data or {}).get('current_height_cm')):.3f} cm")
-                if (isinstance(profile_data, dict) and _round_cm_3((profile_data or {}).get("current_height_cm")) is not None)
-                else None
+                f"{height_display_cm:.3f} cm" if height_display_cm is not None else None
             ),
             **onboarding_read,
         }
