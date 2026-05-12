@@ -4,7 +4,7 @@ from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
-from django.db.models import Count
+from django.db.models import Count, Sum
 from django.db import transaction
 from django.conf import settings
 
@@ -22,6 +22,7 @@ from utils.user_time import user_localize_dt, user_today
 from workouts.models import UserRoutineExercise
 from users.spec_runtime import rebuild_ledger_from_date
 from workouts.models import WorkoutEntry
+from nutration.models_log import NutraEntry
 
 
 class WorkoutLogViewSet(viewsets.ViewSet):
@@ -201,7 +202,18 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
         daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
-        daily_nutrition_pts_today = int((daily.food_points if daily else 0) or 0)
+        # Match POST /api/nutra-logs: capped traceable food from entries (DailyLog.food_points
+        # stays 0 for many adults until engine rules; teens looked "correct" by coincidence).
+        raw_food_pts = float(
+            NutraEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+                food__isnull=False,
+            ).aggregate(total=Sum("score"))["total"]
+            or 0
+        )
+        cap_limit = 12.0 if int(age or 0) >= 21 else 35.0
+        daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
 
         return Response({

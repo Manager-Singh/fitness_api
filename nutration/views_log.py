@@ -255,10 +255,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             )
         daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
         # Raw totals can keep increasing (diary/tracking), but traceable points must cap.
-        # Adults: engine-countable nutrition already capped (12) and depends on exercise gate.
-        # Teens: traceable nutrition points cap at 35 (even if users keep logging).
+        # daily_nutrition_pts_today matches today_total_nutrition_score (capped food traceable).
+        # Engine eligibility stays on counts_toward_engine (uses effective_food_points + exercise).
         traceable_food_points = min(raw_food_points, cap_limit)
-        daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else traceable_food_points))
+        daily_nutrition_pts_today = int(round(traceable_food_points))
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
         daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)

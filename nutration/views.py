@@ -348,6 +348,7 @@ class MyPlanView(APIView):
             "age": age,
             "log_date": str(log_date),
             # Same semantics as POST /api/nutra-logs: traceable food points (capped).
+            "daily_nutrition_pts_today": int(round(traceable_today_food_points)),
             "today_total_nutrition_score": float(traceable_today_food_points),
             "today_total_nutrition_score_raw": float(raw_today_food_points),
             "today_total_food_score_traceable": float(traceable_today_food_points),

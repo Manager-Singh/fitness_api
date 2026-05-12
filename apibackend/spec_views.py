@@ -141,7 +141,8 @@ def _daily_totals_payload(user, log_date, *, age_exact):
     counts_toward_engine_nutrition = bool(exercise_logged_today and effective_food_points > 0)
     diary_note = "Daily nutrition cap reached. Recorded in diary only." if cap_reached else None
 
-    daily_nutrition_pts_today = int(round(effective_food_points if age >= 21 else ((daily.food_points if daily else 0) or 0)))
+    traceable_food_points = min(raw_food_points, cap_limit)
+    daily_nutrition_pts_today = int(round(traceable_food_points))
 
     return {
         "daily_posture_pts_today": daily_posture_pts_today,
