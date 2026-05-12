@@ -18,8 +18,8 @@ from .serializers_log import (
     NutraEntryWriteSerializer, NutraEntryReadSerializer,
     NutraSessionSerializer
 )
-from datetime import date
 from utils.teen_nutrition_cap import TEEN_CAP_MESSAGE_EXACT
+from utils.user_time import user_today
 
 
 
@@ -302,34 +302,33 @@ class MyPlanView(APIView):
                 bundle["habits"] = habits
                 lifestyle.append(bundle)
 
-        # ── 5. Fetch today's nutrition logs ───────────────────────────────────
-        today = date.today()
+        # ── 5. Fetch today's nutrition logs (same rules as nutra-logs POST) ──
+        log_date = user_today(request.user)
         today_entries = (
             NutraEntry.objects
             .filter(
                 session__user=request.user,
-                session__date=today,
+                session__date=log_date,
                 food__isnull=False      # only nutrition logs
             )
             .select_related("food")
         )
 
         raw_today_food_points = float(today_entries.aggregate(total=Sum("score"))["total"] or 0)
-        # Traceable nutrition points:
-        # - Teen: cap at 35 (still allow unlimited logging for diary/tracking).
-        # - Adult: keep raw here; adult traceable points are governed elsewhere (engine routing + caps).
-        traceable_cap = 35.0 if age < 21 else None
-        traceable_today_food_points = (
-            min(raw_today_food_points, traceable_cap) if traceable_cap is not None else raw_today_food_points
-        )
-        cap_reached = bool(traceable_cap is not None and raw_today_food_points >= traceable_cap)
-        diary_note = None
-        if cap_reached:
+        # Traceable caps — must match nutration/views_log.py (adult 12, teen 35).
+        if age < 21:
+            cap_limit = 35.0
+            traceable_today_food_points = min(raw_today_food_points, cap_limit)
+            cap_reached = bool(raw_today_food_points >= cap_limit)
+            diary_note = TEEN_CAP_MESSAGE_EXACT if cap_reached else None
+        else:
+            cap_limit = 12.0
+            traceable_today_food_points = min(raw_today_food_points, cap_limit)
+            cap_reached = bool(raw_today_food_points >= cap_limit)
             diary_note = (
-                TEEN_CAP_MESSAGE_EXACT
-                if age < 21
-                else "You've maxed traceable nutrition points for today (35). You can keep logging for personal tracking, but extra logs won’t increase traceable points."
-            )
+                f"You've maxed traceable nutrition points for today ({int(cap_limit)}). "
+                "You can keep logging for personal tracking, but extra logs won’t increase traceable points."
+            ) if cap_reached else None
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
 
@@ -347,11 +346,14 @@ class MyPlanView(APIView):
         # ── 6. Final response ─────────────────────────────────────────────────
         payload = {
             "age": age,
-            # Backward-compat: keep the existing key, but make it traceable (capped for teens).
-            "today_total_nutrition_score": traceable_today_food_points,
-            "today_total_nutrition_score_raw": raw_today_food_points,
+            "log_date": str(log_date),
+            # Same semantics as POST /api/nutra-logs: traceable food points (capped).
+            "today_total_nutrition_score": float(traceable_today_food_points),
+            "today_total_nutrition_score_raw": float(raw_today_food_points),
+            "today_total_food_score_traceable": float(traceable_today_food_points),
+            "today_total_food_score_raw": float(raw_today_food_points),
             "cap_reached": cap_reached,
-            "cap_limit": 35 if age < 21 else None,
+            "cap_limit": cap_limit,
             "diary_note": diary_note,
             "today_logged_nutrition": cleaned_log,
         }

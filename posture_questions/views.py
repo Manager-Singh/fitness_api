@@ -66,7 +66,8 @@ from typing import Dict, Any, List
 
 from datetime import timedelta
 from utils.age import get_user_age_exact
-from utils.posture.section3_manual_scoring import build_section3_manual_breakdown
+from utils.posture.section3_manual_scoring import build_section3_manual_breakdown, _pick_single_with_options
+from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 from users.spec_runtime import get_user_runtime_state_snapshot, apply_pending_pre_scan_engine1
 from users.models import DailyLog, HeightLedger, PostureState
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
@@ -117,10 +118,11 @@ def upsert_posture_questions(request):
         current_age=current_age,
         current_height=current_height
     )
-    # ───── 2. Upsert Posture Questions using service ─────
+    # ───── 2. Upsert posture questions (same payload as before) ─────
+    body = request.data or {}
     posture_question_data, created = PostureQuestionService.upsert_posture_questions(
         user=user,
-        request_data=request.data
+        request_data=body,
     )
     # NOTE (product):
     # This backend supports two "scan" sources:
@@ -133,6 +135,7 @@ def upsert_posture_questions(request):
     section3_contract = None
     posture_q = PostureQuestionService.get_posture_questions(user)
     if posture_q:
+        state, _ = PostureState.objects.get_or_create(user=user)
         required_answers = [
             posture_q.forward_head_posture_answer,
             posture_q.gap_between_your_lower_back_answer,
@@ -144,7 +147,6 @@ def upsert_posture_questions(request):
             posture_q.active_your_core_during_daily_task_answer,
         ]
         questionnaire_complete = all((v is not None and str(v).strip() != "") for v in required_answers)
-        state, _ = PostureState.objects.get_or_create(user=user)
         state.questionnaire_completed = questionnaire_complete
 
         if questionnaire_complete:
@@ -183,24 +185,85 @@ def upsert_posture_questions(request):
                     except Exception:
                         logger.exception("Failed saving teen trial_start/trial_end on questionnaire unlock")
 
-            clamp_min = 1.0 if is_adult else 0.0
-            manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
-            total_recoverable = float(manual["total_recoverable_loss_cm"])
-            target_height = round(base_height + total_recoverable, 2)
-            section3_contract = {
-                "raw_score_cm": manual["raw_score_cm"],
-                "total_recoverable_loss_cm": total_recoverable,
-                "distribution_ratio": "30/35/25/10",
-                "optimization_breakdown": manual["optimization_breakdown"],
-                "target_height_cm": target_height,
-                "target_height_formula": "Base_Height + Total_Recoverable_Loss",
+            # Try Issue9 scoring using the SAME stored answers/options.
+            # If answers/options don't map cleanly to A-D, fall back to legacy manual scoring.
+            issue9_letters = {
+                "q1": _pick_single_with_options(posture_q.forward_head_posture_answer, posture_q.forward_head_posture_options),
+                "q2": _pick_single_with_options(posture_q.gap_between_your_lower_back_answer, posture_q.gap_between_your_lower_back_options),
+                "q3": _pick_single_with_options(posture_q.tightness_or_discomfort_answer, posture_q.tightness_or_discomfort_options),
+                "q4": _pick_single_with_options(posture_q.slouch_when_standing_or_sitting_answer, posture_q.slouch_when_standing_or_sitting_options),
+                "q5": _pick_single_with_options(posture_q.feel_noticeably_shorter_end_of_day_compare_to_morning_answer, posture_q.feel_noticeably_shorter_end_of_day_compare_to_morning_options),
+                "q6": _pick_single_with_options(posture_q.perfectly_aligned_and_decompressed_answer, posture_q.perfectly_aligned_and_decompressed_options),
+                "q7": _pick_single_with_options(posture_q.flexible_in_your_hamstrings_and_hips_answer, posture_q.flexible_in_your_hamstrings_and_hips_options),
+                "q8": _pick_single_with_options(posture_q.active_your_core_during_daily_task_answer, posture_q.active_your_core_during_daily_task_options),
             }
-            state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
-            seg = manual["optimization_breakdown"]
-            state.spinal_current_loss_um = int(round(float(seg["spinal_compression"]["current_loss_cm"]) * 10000))
-            state.collapse_current_loss_um = int(round(float(seg["posture_collapse"]["current_loss_cm"]) * 10000))
-            state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
-            state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
+            use_issue9 = all(v in ("A", "B", "C", "D") for v in issue9_letters.values())
+
+            if use_issue9:
+                issue9_result = compute_issue9_visual_results(issue9_letters)
+                total_recoverable = float(issue9_result["total_recoverable_loss_cm"])
+                target_height = round(base_height + total_recoverable, 2)
+                segs = issue9_result["segments"]
+                optimization_breakdown = {
+                    "spinal_compression": {
+                        "current_loss_cm": float(segs["spinal"]["loss_cm"]),
+                        "max_loss_cm": float(segs["spinal"]["max_loss"]),
+                        "percent_optimized": float(segs["spinal"]["opt_pct"]),
+                    },
+                    "posture_collapse": {
+                        "current_loss_cm": float(segs["collapse"]["loss_cm"]),
+                        "max_loss_cm": float(segs["collapse"]["max_loss"]),
+                        "percent_optimized": float(segs["collapse"]["opt_pct"]),
+                    },
+                    "pelvic_tilt_back": {
+                        "current_loss_cm": float(segs["pelvic"]["loss_cm"]),
+                        "max_loss_cm": float(segs["pelvic"]["max_loss"]),
+                        "percent_optimized": float(segs["pelvic"]["opt_pct"]),
+                    },
+                    "leg_hamstring": {
+                        "current_loss_cm": float(segs["legs"]["loss_cm"]),
+                        "max_loss_cm": float(segs["legs"]["max_loss"]),
+                        "percent_optimized": float(segs["legs"]["opt_pct"]),
+                    },
+                }
+                section3_contract = {
+                    "mode": "issue9_visual",
+                    "answers": issue9_letters,
+                    "raw_loss_cm": issue9_result["raw_loss_cm"],
+                    "total_loss_cm": issue9_result["total_loss_cm"],
+                    "total_recoverable_loss_cm": total_recoverable,
+                    "structural_loss_cm": issue9_result["structural_loss_cm"],
+                    "ranked_segments": issue9_result["ranked_segments"],
+                    "optimization_breakdown": optimization_breakdown,
+                    "target_height_cm": target_height,
+                    "target_height_formula": "Base_Height + Total_Recoverable_Loss",
+                }
+
+                state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
+                state.spinal_current_loss_um = int(round(float(segs["spinal"]["loss_cm"]) * 10000))
+                state.collapse_current_loss_um = int(round(float(segs["collapse"]["loss_cm"]) * 10000))
+                state.pelvic_current_loss_um = int(round(float(segs["pelvic"]["loss_cm"]) * 10000))
+                state.legs_current_loss_um = int(round(float(segs["legs"]["loss_cm"]) * 10000))
+            else:
+                clamp_min = 1.0 if is_adult else 0.0
+                manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
+                total_recoverable = float(manual["total_recoverable_loss_cm"])
+                target_height = round(base_height + total_recoverable, 2)
+                section3_contract = {
+                    "mode": "legacy_manual",
+                    "raw_score_cm": manual["raw_score_cm"],
+                    "total_recoverable_loss_cm": total_recoverable,
+                    "distribution_ratio": "30/35/25/10",
+                    "optimization_breakdown": manual["optimization_breakdown"],
+                    "target_height_cm": target_height,
+                    "target_height_formula": "Base_Height + Total_Recoverable_Loss",
+                }
+                state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
+                seg = manual["optimization_breakdown"]
+                state.spinal_current_loss_um = int(round(float(seg["spinal_compression"]["current_loss_cm"]) * 10000))
+                state.collapse_current_loss_um = int(round(float(seg["posture_collapse"]["current_loss_cm"]) * 10000))
+                state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
+                state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
             state.save(update_fields=[
                 "scan_completed",
                 "questionnaire_completed",
@@ -223,7 +286,7 @@ def upsert_posture_questions(request):
                     )
                 # v3.3: Run exercise assignment pipeline immediately after teen questionnaire unlock.
                 try:
-                    RoutineService.ensure_active_routine(user, manual["optimization_breakdown"])
+                    RoutineService.ensure_active_routine(user, section3_contract["optimization_breakdown"])
                 except Exception:
                     logger.exception(
                         "Failed generating teen routine after questionnaire unlock",
