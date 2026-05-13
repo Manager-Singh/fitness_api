@@ -1,6 +1,12 @@
+import logging
 from typing import Dict, Any
+
+from django.core.exceptions import ValidationError
+
 from workouts.models import UserRoutine
 from utils.routine_genrate import generate_user_routines
+
+logger = logging.getLogger(__name__)
 
 
 class RoutineService:
@@ -19,9 +25,19 @@ class RoutineService:
         ).exists()
         
         if not has_active_routine:
-            generate_user_routines(user, optimization_breakdown)
+            try:
+                generate_user_routines(user, optimization_breakdown)
+            except ValidationError as exc:
+                # Missing AgeBracket / RoutineVariant seed data should not block
+                # questionnaire unlock or posture loss persistence.
+                logger.warning(
+                    "Routine generation skipped: %s",
+                    exc,
+                    extra={"user_id": getattr(user, "id", None)},
+                )
+                return False
             return True
-        
+
         return False
 
     @staticmethod

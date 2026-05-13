@@ -73,7 +73,7 @@ def _coerce_to_letters(value, options=None):
         raw = value.strip()
         try:
             parsed = json.loads(raw)
-            vals = parsed if isinstance(parsed, list) else [raw]
+            vals = parsed if isinstance(parsed, list) else [parsed]
         except Exception:
             vals = [raw]
     else:
@@ -120,7 +120,7 @@ def _extract_letters(value):
         raw = value.strip()
         try:
             parsed = json.loads(raw)
-            vals = parsed if isinstance(parsed, list) else [raw]
+            vals = parsed if isinstance(parsed, list) else [parsed]
         except Exception:
             vals = [raw]
     else:

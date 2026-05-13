@@ -1,12 +1,21 @@
 # nutration/utils/age.py
 from datetime import date
-from django.core.exceptions import ImproperlyConfigured
+
+
+def _whole_years_from_dob(dob: date, *, on_date: date | None = None) -> int:
+    """Whole years from DOB; matches get_user_age_exact-style averaging."""
+    ref = on_date or date.today()
+    days = max(0, (ref - dob).days)
+    return int(days / 365.2425)
 
 
 def get_user_age(user, default='currently') -> int | None:
     """
     Return the user's age in whole years.
-    
+
+    Prefer birth_date over the stored ``age`` string when both exist so routine
+    brackets and teen/adult logic stay aligned with DOB (avoids stale age text).
+
     If default='register', return None if age is not available.
     If default='currently' (default), return a safe fallback age (25) if age is not found.
     """
@@ -18,21 +27,18 @@ def get_user_age(user, default='currently') -> int | None:
             return None
         return FALLBACK_AGE_YEARS
 
-    # Try age field
+    dob = getattr(profile, "birth_date", None) or getattr(profile, "date_of_birth", None)
+    if dob:
+        return _whole_years_from_dob(dob)
+
     years = getattr(profile, "age", None)
-    if years:
+    if years not in (None, ""):
         try:
             return int(float(years))
         except ValueError:
             if default == 'register':
                 return None
             return FALLBACK_AGE_YEARS
-
-    # Try birth_date / date_of_birth if exists
-    dob = getattr(profile, "birth_date", None) or getattr(profile, "date_of_birth", None)
-    if dob:
-        today = date.today()
-        return (today - dob).days // 365
 
     if default == 'register':
         return None
@@ -53,10 +59,10 @@ def get_user_age_on_date(user, on_date: date, default="currently") -> int | None
 
     dob = getattr(profile, "birth_date", None) or getattr(profile, "date_of_birth", None)
     if dob:
-        return (on_date - dob).days // 365
+        return _whole_years_from_dob(dob, on_date=on_date)
 
     years = getattr(profile, "age", None)
-    if years:
+    if years not in (None, ""):
         try:
             return int(float(years))
         except ValueError:

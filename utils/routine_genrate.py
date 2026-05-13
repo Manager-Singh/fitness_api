@@ -440,11 +440,12 @@ def _get_valid_variant(age, routine_type):
         "HGH": [Track.HGH],
     }
 
-    age_bracket = AgeBracket.objects.filter(
-        min_age__lte=age
-    ).filter(
-        Q(max_age__gte=age) | Q(max_age__isnull=True)
-    ).first()
+    age_bracket = (
+        AgeBracket.objects.filter(min_age__lte=age)
+        .filter(Q(max_age__gte=age) | Q(max_age__isnull=True))
+        .order_by("-min_age")
+        .first()
+    )
 
     if not age_bracket:
         raise ValidationError("No suitable age bracket found")
