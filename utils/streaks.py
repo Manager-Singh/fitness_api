@@ -1,8 +1,8 @@
 from datetime import timedelta
-from django.utils import timezone
 from nutration.models_log import NutraSession, NutraEntry
 from workouts.models import WorkoutSession, WorkoutEntry, Tier, RoutineType
 from utils.age import get_user_age
+from utils.user_time import user_today
 
 
 def _adult_food_requirement_met(user, day):
@@ -104,7 +104,8 @@ def get_user_streaks(user,subscription_data):
     Returns all streak-related data in one call.
     """
 
-    today = timezone.localdate()
+    # Must match workout/nutrition log_date semantics (user timezone), not server local midnight.
+    today = user_today(user)
 
     nutra_set = set(
         NutraSession.objects

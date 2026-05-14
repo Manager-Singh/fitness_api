@@ -19,6 +19,7 @@ from django.utils import timezone
 import secrets
 import datetime
 from utils.age import get_user_age
+from utils.user_time import user_today
 from utils.profile_completeness import compute_profile_update_status, compute_step_to_show
 from user_profile.models import Payment,UserProfile
 from django.db.models import Q
@@ -851,7 +852,6 @@ class FriendsLeaderboardView(APIView):
 
         from utils.leaderboard import _current_validated_streak
         tier_entries = []
-        today_local = timezone.localdate()
         for u in qs:
             try:
                 user_age = get_user_age(u)
@@ -865,7 +865,7 @@ class FriendsLeaderboardView(APIView):
                     "display_name": (u.name or u.username or u.email or f"User {u.id}"),
                     "avatar_url": u.profile_image_url or None,
                     "points": int((u.score or 0) + nutrition_by_user.get(int(u.id), 0)),
-                    "streak": _current_validated_streak(u, today_local),
+                    "streak": _current_validated_streak(u, user_today(u)),
                     "is_current_user": u.id == request.user.id,
                 }
             )

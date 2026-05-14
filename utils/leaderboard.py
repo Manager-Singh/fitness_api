@@ -133,11 +133,11 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.db.models import Sum, Count
 from django.core.cache import cache
-from django.utils import timezone
 from nutration.models_log import NutraEntry
 from workouts.models import WorkoutEntry, WorkoutSession, Tier, RoutineType
 from utils.age import get_user_age
 from users.models import DailyLog
+from utils.user_time import user_today
 
 import logging
 
@@ -266,10 +266,14 @@ def _build_rank_map(user_ids, until_date=None, routine_type=None):
     for row in sessions_completed:
         totals[row["user_id"]]["sessions"] = row["total"] or 0
 
-    today = timezone.localdate() if not until_date else until_date
     for uid in user_ids:
         user_obj = User.objects.filter(id=uid).first()
-        totals[uid]["streak"] = _current_validated_streak(user_obj, today) if user_obj else 0
+        if not user_obj:
+            totals[uid]["streak"] = 0
+            continue
+        # Historical rank snapshots anchor streaks to ``until_date``; live totals use each user's local "today".
+        streak_anchor = until_date if until_date else user_today(user_obj)
+        totals[uid]["streak"] = _current_validated_streak(user_obj, streak_anchor)
 
     ordered = sorted(
         totals.items(),
@@ -301,7 +305,7 @@ def get_user_leaderboard_rank(user, subscription_data, routine_type=None):
     - rank change
     """
 
-    today = timezone.localdate()
+    today = user_today(user)
     yesterday = today - timedelta(days=1)
 
     cache_key = f"leaderboard:total:{user.id}:{routine_type or 'all'}"

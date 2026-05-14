@@ -15,7 +15,9 @@ import json
 import logging
 from posture.serializers import PostureImageSerializer
 from utils.chatgpt_service import generate_chatgpt_response
-from utils.age import get_user_age
+import calendar
+from utils.age import get_user_age, age_years_days_since_last_birthday, format_age_exact_years_days
+from utils.user_time import user_today
 from decimal import Decimal, ROUND_HALF_UP
 from django.utils import timezone
 from datetime import timedelta, date, datetime
@@ -1224,8 +1226,6 @@ def my_profile(request):
         height_live_cm = None
 
     # --- today log + points ---
-    from utils.user_time import user_today
-
     today = user_today(user)
     daily = DailyLog.objects.filter(user=user, log_date=today).first()
     today_log = {
@@ -1260,6 +1260,22 @@ def my_profile(request):
     )
     streak_history = [{"date": str(r["log_date"]), "validated": bool(r["validated"])} for r in history_rows]
 
+    age_exact = None
+    if profile.birth_date:
+        parts = age_years_days_since_last_birthday(profile.birth_date, today)
+        if parts is not None:
+            y, d = parts
+            age_exact = {
+                "years": y,
+                "days_since_last_birthday": d,
+                "label": format_age_exact_years_days(profile.birth_date, today),
+            }
+
+    local_calendar = {
+        "today_date": str(today),
+        "weekday": calendar.day_name[today.weekday()],
+    }
+
     # --- my plan (active routines summary) ---
     active_routines = list(
         UserRoutine.objects.filter(user=user, is_active=True).values("id", "routine_type", "created_at")[:10]
@@ -1283,6 +1299,8 @@ def my_profile(request):
                     "sex_normalized": sex,
                     "age": profile.age,
                     "birth_date": str(profile.birth_date) if profile.birth_date else None,
+                    "age_exact": age_exact,
+                    "base_height_label": "Starting Height",
                     # Return the live height as `current_height_cm` so the profile screen updates
                     # immediately after workout/nutrition logs (spec: Base + ledger cumulative).
                     "current_height_cm": height_live_cm if height_live_cm is not None else current_height_cm_saved,
@@ -1295,6 +1313,7 @@ def my_profile(request):
                 "mph_simple_cm": mph_simple_cm,
                 "subscription": subscription_data,
                 "runtime_state": runtime_state,
+                "local_calendar": local_calendar,
                 "today_log": today_log,
                 "all_time_points": all_time_points,
                 "streaks": streaks,

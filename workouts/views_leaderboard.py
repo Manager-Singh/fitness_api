@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta, timezone as dt_timezone
-from utils.age import get_user_age
+from utils.user_time import user_today
 from utils.leaderboard import _current_validated_streak
 from users.models import Friendship
 from workouts.models import WorkoutEntry
@@ -165,7 +165,6 @@ class LeaderboardAPIView(APIView):
 
         # Split by tier (adult/teen) and apply tie-break by streak length.
         tier_entries = []
-        today_local = timezone.localdate()
         for u in qs:
             try:
                 user_age = get_user_age(u)
@@ -174,7 +173,7 @@ class LeaderboardAPIView(APIView):
                 continue
             if (user_age >= 21) != current_is_adult:
                 continue
-            streak = _current_validated_streak(u, today_local)
+            streak = _current_validated_streak(u, user_today(u))
             tier_entries.append(
                 {
                     "user_id": u.id,
