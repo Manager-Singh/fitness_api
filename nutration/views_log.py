@@ -13,7 +13,6 @@ from .serializers_log import (
     NutraSessionSerializer
 )
 from utils.age import get_user_age
-from utils.engine_routing import apply_engine_routing
 from utils.check_payment import check_subscription_or_response
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
@@ -25,6 +24,20 @@ from utils.teen_nutrition_cap import (
     TEEN_CAP_EVENT_KEY,
     teen_cap_result,
 )
+
+
+def _adult_flat_food_rules(user, age) -> bool:
+    """
+    Adult PosturePlus flat food rules (once per food / day, toggle, 1 pt).
+    Prefer account_tier so a mis-parsed age (0) does not route paid adults to teen behavior.
+    """
+    if getattr(user, "account_tier", None) == "adult":
+        return True
+    try:
+        return int(age) >= 21
+    except (TypeError, ValueError):
+        return False
+
 
 class NutraLogViewSet(viewsets.ViewSet):
     @staticmethod
@@ -100,7 +113,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         except Exception:
             age = 0
         subscription_data = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
+        if _adult_flat_food_rules(request.user, age) and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
@@ -124,7 +137,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         existing_entries = NutraEntry.objects.filter(session=session)
         # For Issue 13 (teen cap): capture raw traceable food points *before* adding this payload.
         raw_food_before = 0.0
-        if age < 21:
+        if not _adult_flat_food_rules(request.user, age):
             try:
                 raw_food_before = float(
                     existing_entries.filter(food__isnull=False).aggregate(total=Sum("score"))["total"] or 0.0
@@ -144,7 +157,7 @@ class NutraLogViewSet(viewsets.ViewSet):
                 activity = activity.id
 
             # Adults: same food same day is handled as toggle (un-log); never treat as double-submit.
-            if age >= 21 and food:
+            if _adult_flat_food_rules(request.user, age) and food:
                 return False
 
             # Duplicate protection is only to prevent accidental double-submits.
@@ -172,37 +185,32 @@ class NutraLogViewSet(viewsets.ViewSet):
             entry_payload.pop("client_timestamp", None)
 
             food = entry_payload.get("food") or entry_payload.get("food_id")
-            if age >= 21 and food:
+            if _adult_flat_food_rules(request.user, age) and food:
                 if hasattr(food, "id"):
-                    food = int(food.id)
+                    food_pk = int(food.id)
                 else:
-                    food = int(food)
-                existing_same = NutraEntry.objects.filter(session=session, food_id=food).first()
-                if existing_same:
-                    existing_same.delete()
+                    food_pk = int(food)
+                removed, _ = NutraEntry.objects.filter(session=session, food_id=food_pk).delete()
+                if removed:
+                    entries[:] = [e for e in entries if getattr(e, "food_id", None) != food_pk]
                     continue
                 entry_payload["score"] = 1
 
             entries.append(NutraEntry.objects.create(session=session, **entry_payload))
-        for nentry in entries:
-            if nentry.food_id:
-                apply_engine_routing(
-                    user=request.user,
-                    log_date=session.date,
-                    age_exact=age,
-                    points=(nentry.score or 0),
-                    entry_kind="food",
-                )
-            elif nentry.activity_id:
-                apply_engine_routing(
-                    user=request.user,
-                    log_date=session.date,
-                    age_exact=age,
-                    points=(nentry.score or 0),
-                    entry_kind="lifestyle",
-                )
-        # Spec alignment UX: make dashboard numbers update immediately after logging.
-        # This rebuild applies routing + caps into DailyLog/HeightLedger for the log date.
+
+        # Collapse accidental duplicate rows (same session + food_id) before ledger rebuild.
+        if _adult_flat_food_rules(request.user, age):
+            for fid in (
+                NutraEntry.objects.filter(session=session, food_id__isnull=False)
+                .values_list("food_id", flat=True)
+                .distinct()
+            ):
+                qs = NutraEntry.objects.filter(session=session, food_id=fid).order_by("-completed_at", "-id")
+                pks = list(qs.values_list("pk", flat=True))
+                if len(pks) > 1:
+                    NutraEntry.objects.filter(pk__in=pks[1:]).delete()
+
+        # DailyLog / HeightLedger are fully derived via rebuild (avoid per-entry routing drift).
         rebuild_ledger_from_date(request.user, log_date)
         read_ser = NutraEntryReadSerializer(entries, many=True)
 
@@ -232,7 +240,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             session__date=log_date,
         ).exists()
         raw_food_points = float(total_today_food_score or 0)
-        if age >= 21:
+        if _adult_flat_food_rules(request.user, age):
             effective_food_points = self._adult_traceable_food_points(request.user, log_date, exercise_logged_today)
             cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
             cap_reached = bool(effective_food_points >= cap_limit)
@@ -247,7 +255,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         teen_cap_crossed_today = False
         teen_cap_message = None
         # Issue 13 teen safety copy + once/day gating.
-        if age < 21:
+        if not _adult_flat_food_rules(request.user, age):
             # Determine whether the user crossed the cap on this request.
             raw_food_after = float(raw_food_points or 0.0)
             modal_required = False
@@ -269,7 +277,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             teen_cap_message = teen_cap.message
             # Replace any existing cap copy with the exact spec string when cap is reached.
             diary_note = teen_cap_message
-        elif cap_reached and age >= 21:
+        elif cap_reached and _adult_flat_food_rules(request.user, age):
             diary_note = (
                 f"You've logged all {int(cap_limit)} traceable adult nutrition foods for today."
             )
@@ -282,7 +290,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         # Raw totals can keep increasing (diary/tracking), but traceable points must cap.
         # daily_nutrition_pts_today matches today_total_nutrition_score (capped food traceable).
         # Engine eligibility stays on counts_toward_engine (uses effective_food_points + exercise).
-        if age >= 21:
+        if _adult_flat_food_rules(request.user, age):
             traceable_food_points = float(effective_food_points)
         else:
             traceable_food_points = min(raw_food_points, cap_limit)
@@ -304,10 +312,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             "cap_limit": cap_limit,
             "diary_note": diary_note,
             # Issue 13 explicit fields (teen-only message + once/day modal gating).
-            "teen_nutrition_cap_reached": bool(age < 21 and bool(teen_cap_message)),
-            "teen_nutrition_cap_message": teen_cap_message if age < 21 else None,
-            "teen_nutrition_cap_crossed_today": teen_cap_crossed_today if age < 21 else None,
-            "teen_nutrition_cap_modal_required": teen_cap_modal_required if age < 21 else None,
+            "teen_nutrition_cap_reached": bool(not _adult_flat_food_rules(request.user, age) and bool(teen_cap_message)),
+            "teen_nutrition_cap_message": teen_cap_message if not _adult_flat_food_rules(request.user, age) else None,
+            "teen_nutrition_cap_crossed_today": teen_cap_crossed_today if not _adult_flat_food_rules(request.user, age) else None,
+            "teen_nutrition_cap_modal_required": teen_cap_modal_required if not _adult_flat_food_rules(request.user, age) else None,
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,
             # Backward-compat: keep raw totals, but also provide capped totals for UI.
@@ -340,7 +348,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         log_date = entry.session.date
 
         try:
-            age = int(get_user_age(request.user) or 0)
+            age = get_user_age(request.user)
         except Exception:
             age = 0
 
@@ -348,7 +356,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         if "servings" in request.data:
             entry.servings = str(request.data.get("servings") or "")
         if "score" in request.data:
-            if age >= 21 and entry.food_id:
+            if _adult_flat_food_rules(request.user, age) and entry.food_id:
                 entry.score = 1
             else:
                 try:
