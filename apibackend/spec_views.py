@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from django.db.models import Q, Sum, Count
@@ -18,6 +19,12 @@ from utils.check_payment import check_subscription_or_response
 from utils.monetization_gate import compute_monetization_flags
 from utils.engine_routing import apply_engine_routing
 from utils.user_time import user_localize_dt, user_today
+from users.spec_runtime import rebuild_ledger_from_date
+from utils.adult_nutrition import (
+    dedupe_adult_food_entries_for_session,
+    is_adult_flat_food_user,
+    toggle_adult_food_entry,
+)
 from workouts.models import Exercise, UserRoutine, WorkoutEntry, WorkoutSession
 from workouts.serializers_log import WorkoutEntryReadSerializer
 from nutration.serializers_log import NutraEntryReadSerializer
@@ -287,22 +294,47 @@ class LogFoodAPIView(APIView):
         before = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
         before_engine1 = int((before.engine1_points if before else 0) or 0)
         before_engine2 = int((before.engine2_points if before else 0) or 0)
-        session, _ = NutraSession.objects.get_or_create(user=request.user, date=local_date)
-        entry = NutraEntry.objects.create(
-            session=session,
-            module_id=module_id,
-            food_id=food_id,
-            servings=request.data.get("servings", ""),
-            score=request.data.get("score"),
-        )
+        try:
+            age = int(get_user_age(request.user) or 0)
+        except Exception:
+            age = 0
+        adult = is_adult_flat_food_user(request.user, age)
+        unlogged = False
+
+        with transaction.atomic():
+            session, _ = (
+                NutraSession.objects.select_for_update()
+                .get_or_create(user=request.user, date=local_date)
+            )
+            if adult:
+                unlogged = toggle_adult_food_entry(
+                    session,
+                    module_id=module_id,
+                    food_id=food_id,
+                    servings=request.data.get("servings", ""),
+                )
+                dedupe_adult_food_entries_for_session(session)
+            else:
+                entry = NutraEntry.objects.create(
+                    session=session,
+                    module_id=module_id,
+                    food_id=food_id,
+                    servings=request.data.get("servings", ""),
+                    score=request.data.get("score"),
+                )
+            rebuild_ledger_from_date(request.user, local_date)
+
         age_exact = get_user_age_exact(request.user)
-        apply_engine_routing(
-            user=request.user,
-            log_date=local_date,
-            age_exact=age_exact,
-            points=(entry.score or 0),
-            entry_kind="food",
-        )
+
+        entry = None
+        if not unlogged:
+            entry = (
+                NutraEntry.objects.filter(session__user=request.user, session__date=local_date, food_id=int(food_id))
+                .select_related("food", "activity", "module")
+                .order_by("-completed_at", "-id")
+                .first()
+            )
+
         daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
         after_engine1 = int((daily.engine1_points if daily else 0) or 0)
         after_engine2 = int((daily.engine2_points if daily else 0) or 0)
@@ -310,7 +342,8 @@ class LogFoodAPIView(APIView):
         counts_toward_engine = bool(totals["nutrition_counts_toward_engine"])
         return Response(
             {
-                "logged": True,
+                "logged": not unlogged,
+                "unlogged": unlogged,
                 "log_date": str(local_date),
                 "counts_toward_engine": counts_toward_engine,
                 "daily_posture_pts_today": totals["daily_posture_pts_today"],
@@ -322,7 +355,7 @@ class LogFoodAPIView(APIView):
                 "diary_note": totals["diary_note"],
                 "engine1_points_delta": max(0, after_engine1 - before_engine1),
                 "engine2_points_delta": max(0, after_engine2 - before_engine2),
-                "entry": NutraEntryReadSerializer(entry).data,
+                "entry": NutraEntryReadSerializer(entry).data if entry else None,
             },
             status=status.HTTP_200_OK,
         )

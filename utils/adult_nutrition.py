@@ -64,3 +64,53 @@ def adult_nutrition_bar_percent(disc_ids: set[int], muscle_ids: set[int]) -> int
     if disc_ids and muscle_ids:
         return 100
     return 50
+
+
+def is_adult_flat_food_user(user, age) -> bool:
+    """
+    Adult PosturePlus flat food rules (once per food / day, toggle, 1 pt).
+    Prefer account_tier so a mis-parsed age (0) does not route paid adults to teen behavior.
+    """
+    if getattr(user, "account_tier", None) == "adult":
+        return True
+    try:
+        return int(age) >= 21
+    except (TypeError, ValueError):
+        return False
+
+
+def toggle_adult_food_entry(session, *, module_id, food_id, servings="") -> bool:
+    """
+    Tap-to-toggle adult food log for one local day.
+
+    Returns True if the food was un-logged, False if it was logged.
+    """
+    from nutration.models_log import NutraEntry
+
+    food_id = int(food_id)
+    removed, _ = NutraEntry.objects.filter(session=session, food_id=food_id).delete()
+    if removed:
+        return True
+    NutraEntry.objects.create(
+        session=session,
+        module_id=int(module_id),
+        food_id=food_id,
+        servings=servings or "",
+        score=1,
+    )
+    return False
+
+
+def dedupe_adult_food_entries_for_session(session) -> None:
+    """Keep a single NutraEntry per food_id within a session (newest wins)."""
+    from nutration.models_log import NutraEntry
+
+    for fid in (
+        NutraEntry.objects.filter(session=session, food_id__isnull=False)
+        .values_list("food_id", flat=True)
+        .distinct()
+    ):
+        qs = NutraEntry.objects.filter(session=session, food_id=fid).order_by("-completed_at", "-id")
+        pks = list(qs.values_list("pk", flat=True))
+        if len(pks) > 1:
+            NutraEntry.objects.filter(pk__in=pks[1:]).delete()

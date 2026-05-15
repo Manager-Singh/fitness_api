@@ -20,24 +20,16 @@ from users.models import DailyLog
 from users.models import NotificationEventLog
 from utils.user_time import user_localize_dt, user_today
 from users.spec_runtime import rebuild_ledger_from_date
-from utils.adult_nutrition import ADULT_NUTRITION_FOOD_SLOT_MAX
+from utils.adult_nutrition import (
+    ADULT_NUTRITION_FOOD_SLOT_MAX,
+    dedupe_adult_food_entries_for_session,
+    is_adult_flat_food_user,
+    toggle_adult_food_entry,
+)
 from utils.teen_nutrition_cap import (
     TEEN_CAP_EVENT_KEY,
     teen_cap_result,
 )
-
-
-def _adult_flat_food_rules(user, age) -> bool:
-    """
-    Adult PosturePlus flat food rules (once per food / day, toggle, 1 pt).
-    Prefer account_tier so a mis-parsed age (0) does not route paid adults to teen behavior.
-    """
-    if getattr(user, "account_tier", None) == "adult":
-        return True
-    try:
-        return int(age) >= 21
-    except (TypeError, ValueError):
-        return False
 
 
 class NutraLogViewSet(viewsets.ViewSet):
@@ -114,7 +106,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         except Exception:
             age = 0
         subscription_data = check_subscription_or_response(request.user).data
-        if _adult_flat_food_rules(request.user, age) and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
+        if is_adult_flat_food_user(request.user, age) and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
@@ -151,107 +143,94 @@ class NutraLogViewSet(viewsets.ViewSet):
         validated_items = write_ser.validated_data if many else [write_ser.validated_data]
 
         log_date = self._resolve_log_date(request)
-        session, _ = NutraSession.objects.get_or_create(user=request.user, date=log_date)
-
-        existing_entries = NutraEntry.objects.filter(session=session)
-        # For Issue 13 (teen cap): capture raw traceable food points *before* adding this payload.
-        raw_food_before = 0.0
-        if not _adult_flat_food_rules(request.user, age):
-            try:
-                raw_food_before = float(
-                    existing_entries.filter(food__isnull=False).aggregate(total=Sum("score"))["total"] or 0.0
-                )
-            except Exception:
-                raw_food_before = 0.0
         now = timezone.now()
+        adult = is_adult_flat_food_user(request.user, age)
+        raw_food_before = 0.0
 
-        def is_duplicate(entry):
-            food = entry.get("food") or entry.get("food_id")
-            activity = entry.get("activity") or entry.get("activity_id")
+        with transaction.atomic():
+            session, _ = (
+                NutraSession.objects.select_for_update()
+                .get_or_create(user=request.user, date=log_date)
+            )
+            existing_entries = NutraEntry.objects.filter(session=session)
 
-            # If it's a model instance, extract ID
-            if hasattr(food, 'id'):
-                food = food.id
-            if hasattr(activity, 'id'):
-                activity = activity.id
+            if not adult:
+                try:
+                    raw_food_before = float(
+                        existing_entries.filter(food__isnull=False).aggregate(total=Sum("score"))["total"] or 0.0
+                    )
+                except Exception:
+                    raw_food_before = 0.0
 
-            # Adults: same food same day is handled as toggle (un-log); never treat as double-submit.
-            if _adult_flat_food_rules(request.user, age) and food:
+            def is_duplicate(entry):
+                food = entry.get("food") or entry.get("food_id")
+                activity = entry.get("activity") or entry.get("activity_id")
+                if hasattr(food, "id"):
+                    food = food.id
+                if hasattr(activity, "id"):
+                    activity = activity.id
+                if adult and food:
+                    return False
+                window_start = now - timedelta(seconds=2)
+                if food:
+                    return existing_entries.filter(
+                        food_id=int(food),
+                        completed_at__gte=window_start,
+                    ).exists()
+                if activity:
+                    return existing_entries.filter(
+                        activity_id=int(activity),
+                        completed_at__gte=window_start,
+                    ).exists()
                 return False
 
-            # Duplicate protection is only to prevent accidental double-submits.
-            # Users must be allowed to intentionally log the same food repeatedly.
-            window_start = now - timedelta(seconds=2)
-            if food:
-                return existing_entries.filter(
-                    food_id=int(food),
-                    completed_at__gte=window_start,
-                ).exists()
-            if activity:
-                return existing_entries.filter(
-                    activity_id=int(activity),
-                    completed_at__gte=window_start,
-                ).exists()
-            return False
+            cleaned_data = [entry for entry in validated_items if not is_duplicate(entry)]
 
-        # Filter out duplicates
-        cleaned_data = [entry for entry in validated_items if not is_duplicate(entry)]
+            if adult:
+                food_groups = defaultdict(list)
 
-        # Adults: multiple toggles for the same food in one request net to odd/even (pairs cancel).
-        if _adult_flat_food_rules(request.user, age):
-            food_groups = defaultdict(list)
+                def _food_pk_from_entry(entry):
+                    food = entry.get("food") or entry.get("food_id")
+                    if not food:
+                        return None
+                    return int(food.id) if hasattr(food, "id") else int(food)
 
-            def _food_pk_from_entry(entry):
-                food = entry.get("food") or entry.get("food_id")
-                if not food:
-                    return None
-                return int(food.id) if hasattr(food, "id") else int(food)
+                non_food = []
+                for entry in cleaned_data:
+                    pk = _food_pk_from_entry(entry)
+                    if pk is None:
+                        non_food.append(entry)
+                    else:
+                        food_groups[pk].append(entry)
+                collapsed = []
+                for _fid, group in food_groups.items():
+                    if len(group) % 2 == 1:
+                        collapsed.append(group[-1])
+                cleaned_data = collapsed + non_food
 
-            non_food = []
             for entry in cleaned_data:
-                pk = _food_pk_from_entry(entry)
-                if pk is None:
-                    non_food.append(entry)
-                else:
-                    food_groups[pk].append(entry)
-            collapsed = []
-            for _fid, group in food_groups.items():
-                if len(group) % 2 == 1:
-                    collapsed.append(group[-1])
-            cleaned_data = collapsed + non_food
-
-        # Save entries: adults get per-food daily toggle (re-post same food_id = un-log).
-        for entry in cleaned_data:
-            entry_payload = dict(entry)
-            entry_payload.pop("client_timestamp", None)
-
-            food = entry_payload.get("food") or entry_payload.get("food_id")
-            if _adult_flat_food_rules(request.user, age) and food:
-                if hasattr(food, "id"):
-                    food_pk = int(food.id)
-                else:
-                    food_pk = int(food)
-                removed, _ = NutraEntry.objects.filter(session=session, food_id=food_pk).delete()
-                if removed:
+                entry_payload = dict(entry)
+                entry_payload.pop("client_timestamp", None)
+                food = entry_payload.get("food") or entry_payload.get("food_id")
+                if adult and food:
+                    module = entry_payload.get("module")
+                    module_id = int(module.id) if hasattr(module, "id") else int(module)
+                    food_pk = int(food.id) if hasattr(food, "id") else int(food)
+                    toggle_adult_food_entry(
+                        session,
+                        module_id=module_id,
+                        food_id=food_pk,
+                        servings=entry_payload.get("servings") or "",
+                    )
                     continue
-                entry_payload["score"] = 1
+                if adult:
+                    entry_payload["score"] = 1
+                NutraEntry.objects.create(session=session, **entry_payload)
 
-            NutraEntry.objects.create(session=session, **entry_payload)
+            if adult:
+                dedupe_adult_food_entries_for_session(session)
 
-        # Collapse accidental duplicate rows (same session + food_id) before ledger rebuild.
-        if _adult_flat_food_rules(request.user, age):
-            for fid in (
-                NutraEntry.objects.filter(session=session, food_id__isnull=False)
-                .values_list("food_id", flat=True)
-                .distinct()
-            ):
-                qs = NutraEntry.objects.filter(session=session, food_id=fid).order_by("-completed_at", "-id")
-                pks = list(qs.values_list("pk", flat=True))
-                if len(pks) > 1:
-                    NutraEntry.objects.filter(pk__in=pks[1:]).delete()
-
-        # DailyLog / HeightLedger are fully derived via rebuild (avoid per-entry routing drift).
-        rebuild_ledger_from_date(request.user, log_date)
+            rebuild_ledger_from_date(request.user, log_date)
 
         # Return totals for resolved log date (supports grace-period backdate).
         today = log_date
@@ -280,7 +259,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             session__date=log_date,
         ).exists()
         raw_food_points = float(total_today_food_score or 0)
-        if _adult_flat_food_rules(request.user, age):
+        if is_adult_flat_food_user(request.user, age):
             effective_food_points = self._adult_traceable_food_points(request.user, log_date, exercise_logged_today)
             cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
             cap_reached = bool(effective_food_points >= cap_limit)
@@ -295,7 +274,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         teen_cap_crossed_today = False
         teen_cap_message = None
         # Issue 13 teen safety copy + once/day gating.
-        if not _adult_flat_food_rules(request.user, age):
+        if not is_adult_flat_food_user(request.user, age):
             # Determine whether the user crossed the cap on this request.
             raw_food_after = float(raw_food_points or 0.0)
             modal_required = False
@@ -317,7 +296,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             teen_cap_message = teen_cap.message
             # Replace any existing cap copy with the exact spec string when cap is reached.
             diary_note = teen_cap_message
-        elif cap_reached and _adult_flat_food_rules(request.user, age):
+        elif cap_reached and is_adult_flat_food_user(request.user, age):
             diary_note = (
                 f"You've logged all {int(cap_limit)} traceable adult nutrition foods for today."
             )
@@ -330,7 +309,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         # Raw totals can keep increasing (diary/tracking), but traceable points must cap.
         # daily_nutrition_pts_today matches today_total_nutrition_score (capped food traceable).
         # Engine eligibility stays on counts_toward_engine (uses effective_food_points + exercise).
-        if _adult_flat_food_rules(request.user, age):
+        if is_adult_flat_food_user(request.user, age):
             traceable_food_points = float(effective_food_points)
         else:
             traceable_food_points = min(raw_food_points, cap_limit)
@@ -352,10 +331,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             "cap_limit": cap_limit,
             "diary_note": diary_note,
             # Issue 13 explicit fields (teen-only message + once/day modal gating).
-            "teen_nutrition_cap_reached": bool(not _adult_flat_food_rules(request.user, age) and bool(teen_cap_message)),
-            "teen_nutrition_cap_message": teen_cap_message if not _adult_flat_food_rules(request.user, age) else None,
-            "teen_nutrition_cap_crossed_today": teen_cap_crossed_today if not _adult_flat_food_rules(request.user, age) else None,
-            "teen_nutrition_cap_modal_required": teen_cap_modal_required if not _adult_flat_food_rules(request.user, age) else None,
+            "teen_nutrition_cap_reached": bool(not is_adult_flat_food_user(request.user, age) and bool(teen_cap_message)),
+            "teen_nutrition_cap_message": teen_cap_message if not is_adult_flat_food_user(request.user, age) else None,
+            "teen_nutrition_cap_crossed_today": teen_cap_crossed_today if not is_adult_flat_food_user(request.user, age) else None,
+            "teen_nutrition_cap_modal_required": teen_cap_modal_required if not is_adult_flat_food_user(request.user, age) else None,
             "nutrition": read_ser.data,
             "nutrastion": read_ser.data,
             # Backward-compat: keep raw totals, but also provide capped totals for UI.
@@ -396,7 +375,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         if "servings" in request.data:
             entry.servings = str(request.data.get("servings") or "")
         if "score" in request.data:
-            if _adult_flat_food_rules(request.user, age) and entry.food_id:
+            if is_adult_flat_food_user(request.user, age) and entry.food_id:
                 entry.score = 1
             else:
                 try:
