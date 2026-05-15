@@ -22,9 +22,26 @@ class ModuleFoodSerializer(serializers.ModelSerializer):
     food_id = serializers.PrimaryKeyRelatedField(
         write_only=True, queryset=Food.objects.all(), source="food"
     )
+    score = serializers.SerializerMethodField()
+
     class Meta:
         model  = ModuleFood
-        fields = ("id", "food", "food_id", "score", "serving_size", "details")
+        fields = (
+            "id",
+            "food",
+            "food_id",
+            "score",
+            "serving_size",
+            "details",
+        )
+
+    def get_score(self, obj):
+        from nutration.scoring import module_food_score_for_user
+
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return int(obj.score or 0)
+        return module_food_score_for_user(obj, request.user)
 
 # — Lifestyle —
 class ActivitySerializer(serializers.ModelSerializer):

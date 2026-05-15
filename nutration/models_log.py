@@ -57,7 +57,12 @@ class NutraEntry(models.Model):
         if self.score is None:
             if self.food:
                 rel = self.module.module_foods.filter(food=self.food).first()
-                self.score = rel.score if rel else 0
+                if rel:
+                    from nutration.scoring import module_food_score_for_user
+
+                    self.score = module_food_score_for_user(rel, self.session.user)
+                else:
+                    self.score = 0
             elif self.activity:
                 rel = self.module.module_activities.filter(activity=self.activity).first()
                 self.score = rel.score if rel else 0

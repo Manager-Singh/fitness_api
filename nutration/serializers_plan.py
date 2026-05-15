@@ -113,9 +113,17 @@ class FoodSlim(serializers.Serializer):
     short_name  = serializers.CharField(source="food.short_name")
     image       = serializers.SerializerMethodField()
     serving     = serializers.CharField(source="serving_size")
-    score       = serializers.IntegerField()
+    score       = serializers.SerializerMethodField()
 
     completed   = serializers.SerializerMethodField()      # ← NEW
+
+    def get_score(self, obj):
+        from nutration.scoring import module_food_score_for_user
+
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return int(obj.score or 0)
+        return module_food_score_for_user(obj, request.user)
 
     def get_image(self, obj):
         img = obj.food.image

@@ -199,7 +199,7 @@ class ModuleFoodInline(admin.TabularInline):
     model  = ModuleFood
     extra  = 1
     autocomplete_fields = ("food",)
-    fields = ("preview", "food", "score", "serving_size")
+    fields = ("preview", "food", "score", "adult_score", "serving_size")
     readonly_fields = ("preview",)
 
     def preview(self, obj):

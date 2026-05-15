@@ -136,7 +136,15 @@ class ModuleFood(models.Model):
     food          = models.ForeignKey(
         Food, on_delete=models.CASCADE, related_name="module_foods"
     )
-    score         = models.PositiveSmallIntegerField(validators=[MinValueValidator(1)])
+    score = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        help_text="Teen track: points per log (variable scores, 35 pt/day cap).",
+    )
+    adult_score = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Adult track: points per log (flat model; usually 1).",
+    )
     serving_size  = models.CharField(max_length=120, blank=True)
     details       = models.TextField(blank=True)
 

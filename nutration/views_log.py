@@ -8,7 +8,9 @@ from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from .models import ModuleFood
 from .models_log import NutraSession, NutraEntry
+from .scoring import module_food_score_for_user
 from .serializers_log import (
     NutraEntryWriteSerializer, NutraEntryReadSerializer,
     NutraSessionSerializer
@@ -216,15 +218,22 @@ class NutraLogViewSet(viewsets.ViewSet):
                     module = entry_payload.get("module")
                     module_id = int(module.id) if hasattr(module, "id") else int(module)
                     food_pk = int(food.id) if hasattr(food, "id") else int(food)
+                    rel = ModuleFood.objects.filter(module_id=module_id, food_id=food_pk).first()
+                    food_score = module_food_score_for_user(rel, request.user, age) if rel else 1
                     toggle_adult_food_entry(
                         session,
                         module_id=module_id,
                         food_id=food_pk,
                         servings=entry_payload.get("servings") or "",
+                        score=food_score,
                     )
                     continue
                 if adult:
-                    entry_payload["score"] = 1
+                    module = entry_payload.get("module")
+                    module_id = int(module.id) if hasattr(module, "id") else int(module)
+                    food_pk = int(food.id) if hasattr(food, "id") else int(food)
+                    rel = ModuleFood.objects.filter(module_id=module_id, food_id=food_pk).first()
+                    entry_payload["score"] = module_food_score_for_user(rel, request.user, age) if rel else 1
                 NutraEntry.objects.create(session=session, **entry_payload)
 
             if adult:
@@ -376,7 +385,8 @@ class NutraLogViewSet(viewsets.ViewSet):
             entry.servings = str(request.data.get("servings") or "")
         if "score" in request.data:
             if is_adult_flat_food_user(request.user, age) and entry.food_id:
-                entry.score = 1
+                rel = entry.module.module_foods.filter(food_id=entry.food_id).first()
+                entry.score = module_food_score_for_user(rel, request.user, age) if rel else 1
             else:
                 try:
                     v = request.data.get("score")

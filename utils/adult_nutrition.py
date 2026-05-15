@@ -79,7 +79,7 @@ def is_adult_flat_food_user(user, age) -> bool:
         return False
 
 
-def toggle_adult_food_entry(session, *, module_id, food_id, servings="") -> bool:
+def toggle_adult_food_entry(session, *, module_id, food_id, servings="", score=1) -> bool:
     """
     Tap-to-toggle adult food log for one local day.
 
@@ -96,7 +96,7 @@ def toggle_adult_food_entry(session, *, module_id, food_id, servings="") -> bool
         module_id=int(module_id),
         food_id=food_id,
         servings=servings or "",
-        score=1,
+        score=max(1, int(score or 1)),
     )
     return False
 

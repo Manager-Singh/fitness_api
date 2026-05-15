@@ -307,11 +307,17 @@ class LogFoodAPIView(APIView):
                 .get_or_create(user=request.user, date=local_date)
             )
             if adult:
+                from nutration.models import ModuleFood
+                from nutration.scoring import module_food_score_for_user
+
+                rel = ModuleFood.objects.filter(module_id=module_id, food_id=food_id).first()
+                food_score = module_food_score_for_user(rel, request.user, age) if rel else 1
                 unlogged = toggle_adult_food_entry(
                     session,
                     module_id=module_id,
                     food_id=food_id,
                     servings=request.data.get("servings", ""),
+                    score=food_score,
                 )
                 dedupe_adult_food_entries_for_session(session)
             else:
