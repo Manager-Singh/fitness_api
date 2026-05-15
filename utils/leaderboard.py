@@ -131,7 +131,7 @@
 
 from datetime import timedelta
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Count
+from django.db.models import Q, Sum, Count
 from django.core.cache import cache
 from nutration.models_log import NutraEntry
 from workouts.models import WorkoutEntry, WorkoutSession, Tier, RoutineType
@@ -144,6 +144,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+
+
+def leaderboard_users_queryset():
+    """Active app users eligible for public leaderboards (excludes staff/admin accounts)."""
+    return User.objects.filter(is_active=True).exclude(
+        Q(is_staff=True) | Q(is_superuser=True) | Q(role="admin")
+    )
 
 
 def is_adult_track_user(user, age_years: int | None) -> bool:
@@ -235,7 +242,7 @@ def _same_tier_users(base_user):
         logger.exception("Failed computing base user age for tier match", extra={"user_id": getattr(base_user, "id", None)})
         base_age = 0
     want_adult = base_age >= 21
-    for candidate in User.objects.filter(is_active=True):
+    for candidate in leaderboard_users_queryset():
         try:
             age = get_user_age(candidate)
         except Exception:

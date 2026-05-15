@@ -8,7 +8,11 @@ from django.utils import timezone
 from datetime import timedelta, timezone as dt_timezone
 from utils.user_time import user_today
 from utils.age import get_user_age
-from utils.leaderboard import _current_validated_streak, is_adult_track_user
+from utils.leaderboard import (
+    _current_validated_streak,
+    is_adult_track_user,
+    leaderboard_users_queryset,
+)
 from users.models import Friendship
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
@@ -105,19 +109,23 @@ class LeaderboardAPIView(APIView):
             current_age = None
         current_is_adult = is_adult_track_user(request.user, current_age)
 
-        qs = User.objects.filter(is_active=True)
+        qs = leaderboard_users_queryset()
+        week_start_utc = None
+        week_start_date = None
 
         if routine_type:
             qs = qs.filter(
                 workout_sessions__user_routine__routine_type=routine_type
-            )
+            ).distinct()
 
         # ---------- SCOPE FILTER ----------
         if view_name == "weekly":
             now_utc = timezone.now().astimezone(dt_timezone.utc)
-            start = now_utc - timedelta(days=now_utc.weekday())
-            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-            qs = qs.filter(workout_sessions__entries__created_at__gte=start)
+            week_start_utc = now_utc - timedelta(days=now_utc.weekday())
+            week_start_utc = week_start_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start_date = week_start_utc.date()
+            # Join on workout entries duplicates User rows (one per entry); distinct() required.
+            qs = qs.filter(workout_sessions__entries__created_at__gte=week_start_utc).distinct()
         elif view_name == "friends":
             accepted = Friendship.objects.filter(
                 status=Friendship.STATUS_ACCEPTED,
@@ -141,13 +149,9 @@ class LeaderboardAPIView(APIView):
         # Spec alignment: rank by traceable engine-counting points, not raw diary sums.
         # Use DailyLog.engine1_points + DailyLog.engine2_points (already applies caps/gates).
         points_scope = {}
-        user_ids = list(qs.values_list("id", flat=True))
+        user_ids = list(qs.distinct().values_list("id", flat=True))
         if view_name == "weekly":
-            now_utc = timezone.now().astimezone(dt_timezone.utc)
-            start = now_utc - timedelta(days=now_utc.weekday())
-            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-            start_date = start.date()
-            daily_qs = DailyLog.objects.filter(user_id__in=user_ids, log_date__gte=start_date)
+            daily_qs = DailyLog.objects.filter(user_id__in=user_ids, log_date__gte=week_start_date)
         else:
             daily_qs = DailyLog.objects.filter(user_id__in=user_ids)
 
@@ -168,9 +172,9 @@ class LeaderboardAPIView(APIView):
             else:
                 points_scope[uid] = int((r.get("e1") or 0) + (r.get("e2") or 0))
 
-        # Split by tier (adult/teen) and apply tie-break by streak length.
-        tier_entries = []
-        for u in qs:
+        # Split by tier (adult/teen); one row per user_id (joins can duplicate without distinct).
+        tier_by_user = {}
+        for u in qs.distinct().order_by("id"):
             try:
                 user_age = get_user_age(u)
             except Exception:
@@ -182,17 +186,18 @@ class LeaderboardAPIView(APIView):
             if is_adult_track_user(u, user_age) != current_is_adult:
                 continue
             streak = _current_validated_streak(u, user_today(u))
-            tier_entries.append(
-                {
-                    "user_id": u.id,
-                    "display_name": (u.name or u.username or u.email or f"User {u.id}"),
-                    "avatar_url": u.profile_image_url or None,
-                    "points": int(points_scope.get(u.id, 0)),
-                    "streak": streak,
-                }
-            )
+            tier_by_user[u.id] = {
+                "user_id": u.id,
+                "display_name": (u.name or u.username or u.email or f"User {u.id}"),
+                "avatar_url": u.profile_image_url or None,
+                "points": int(points_scope.get(u.id, 0)),
+                "streak": streak,
+            }
 
-        tier_entries.sort(key=lambda x: (-x["points"], -x["streak"], x["user_id"]))
+        tier_entries = sorted(
+            tier_by_user.values(),
+            key=lambda x: (-x["points"], -x["streak"], x["user_id"]),
+        )
         ranked = []
         prev_points = None
         rank = 0

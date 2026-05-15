@@ -817,7 +817,11 @@ class FriendsLeaderboardView(APIView):
         page = max(int(request.query_params.get("page", 1)), 1)
         limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
 
-        from utils.leaderboard import _current_validated_streak, is_adult_track_user
+        from utils.leaderboard import (
+            _current_validated_streak,
+            is_adult_track_user,
+            leaderboard_users_queryset,
+        )
 
         try:
             current_age = get_user_age(request.user)
@@ -845,7 +849,7 @@ class FriendsLeaderboardView(APIView):
                 friend_ids.add(rel.user_id_a_id)
         friend_ids.add(request.user.id)
 
-        qs = User.objects.filter(id__in=friend_ids, is_active=True).annotate(
+        qs = leaderboard_users_queryset().filter(id__in=friend_ids).annotate(
             score=Sum("workout_sessions__entries__points"),
             sessions_completed=Count("workout_sessions", distinct=True),
         )
