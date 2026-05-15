@@ -145,6 +145,21 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
+
+def is_adult_track_user(user, age_years: int | None) -> bool:
+    """
+    Bucket for global/friends leaderboard. Matches dashboard posture convention:
+    adult track if ``account_tier == 'adult'`` OR whole-year age is 21+.
+
+    ``age_years`` may be None when age lookup fails; tier still follows ``account_tier``.
+    """
+    if getattr(user, "account_tier", None) == "adult":
+        return True
+    if age_years is not None and age_years >= 21:
+        return True
+    return False
+
+
 # Keep rankings responsive; leaderboard points are recomputed frequently.
 CACHE_TTL = 30  # seconds
 

@@ -234,6 +234,45 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
         self.assertEqual(r2.status_code, 200)
         self.assertTrue(r2.data["user"]["questionnaire_completed"])
 
+    def test_teen_submit_creates_or_updates_genetic_estimate(self, _mock_sub):
+        u = self._create_user_with_profile(
+            email_suffix="teen_ge",
+            years_old=14,
+            father_cm=178,
+            mother_cm=162,
+        )
+        self._call_upsert(u, _full_questionnaire_body())
+        self.assertTrue(GeneticHeightEstimate.objects.filter(user=u).exists())
+
+    def test_creates_posture_question_row(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="newrow", years_old=30)
+        self.assertFalse(PostureQuestion.objects.filter(user=u).exists())
+        self._call_upsert(u, _full_questionnaire_body())
+        pq = PostureQuestion.objects.get(user=u)
+        self.assertEqual(pq.forward_head_posture_answer, "A")
+
+    def test_response_includes_subscription_data(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="subecho", years_old=27)
+        resp = self._call_upsert(u, _full_questionnaire_body())
+        self.assertIn("subscription_data", resp.data["user"])
+        self.assertFalse(resp.data["user"]["subscription_data"]["is_paid"])
+
+    def test_account_tier_adult_with_young_age_still_adult_track(self, _mock_sub):
+        # Under 21 still requires parent heights for profile parsing; tier flags adult scoring path.
+        u = self._create_user_with_profile(
+            email_suffix="tier_adult",
+            years_old=16,
+            father_cm=182,
+            mother_cm=165,
+        )
+        u.account_tier = "adult"
+        u.save()
+        resp = self._call_upsert(u, _full_questionnaire_body())
+        self.assertIn(resp.status_code, (200, 201), msg=str(getattr(resp, "data", None)))
+        contract = resp.data["user"].get("section3_contract") or {}
+        self.assertIn("total_recoverable_loss_cm", contract)
+        self.assertGreaterEqual(float(contract["total_recoverable_loss_cm"]), 1.0)
+
 
 class Issue9VisualQuestionnaireScoringTests(TestCase):
     def test_issue9_example_matches_spec(self):
@@ -274,6 +313,7 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
         Ensures the legacy "update-posture-questions" payload can drive Issue9 scoring
         when answers are already letter-coded A-D.
         """
+        import uuid
         from unittest.mock import MagicMock, patch
         from rest_framework.test import APIRequestFactory, force_authenticate
         from posture_questions.views import upsert_posture_questions
@@ -282,10 +322,16 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
         from datetime import date, timedelta
 
         User = get_user_model()
-        u = User.objects.create_user(username="issue9_letters", email="i9_letters@test.example", password="x")
+        suf = uuid.uuid4().hex[:10]
+        u = User.objects.create_user(
+            username=f"i9_can_{suf}",
+            email=f"i9_can_{suf}@test.example",
+            password="x",
+        )
         prof = UserProfile.objects.get(user=u)
         today = date.today()
         prof.birth_date = today - timedelta(days=int(365.2425 * 25))
+        prof.age = "25"
         prof.base_height_cm = "175"
         prof.current_height_cm = "175"
         prof.gender = "male"
@@ -328,44 +374,78 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
         self.assertIn(resp.status_code, (200, 201))
         self.assertEqual(resp.data["user"]["section3_contract"]["mode"], "issue9_visual")
 
-    def test_teen_submit_creates_or_updates_genetic_estimate(self, _mock_sub):
-        u = self._create_user_with_profile(
-            email_suffix="teen_ge",
-            years_old=14,
-            father_cm=178,
-            mother_cm=162,
+    def test_issue9_json_wrapped_scalar_answers(self):
+        """
+        Clients sometimes send answers JSON-encoded twice, e.g. the string \"B\"
+        (stored as quote-B-quote). That must still map to Issue9 letters, not zeros.
+        """
+        from unittest.mock import MagicMock, patch
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        import uuid
+        from posture_questions.views import upsert_posture_questions
+        from django.contrib.auth import get_user_model
+        from user_profile.models import UserProfile
+        from datetime import date, timedelta
+
+        def _q(ch: str) -> str:
+            return f'"{ch}"'
+
+        User = get_user_model()
+        suf = uuid.uuid4().hex[:10]
+        u = User.objects.create_user(
+            username=f"i9_wrap_{suf}",
+            email=f"i9_wrap_{suf}@test.example",
+            password="x",
         )
-        self._call_upsert(u, _full_questionnaire_body())
-        self.assertTrue(GeneticHeightEstimate.objects.filter(user=u).exists())
+        prof = UserProfile.objects.get(user=u)
+        today = date.today()
+        prof.birth_date = today - timedelta(days=int(365.2425 * 15))
+        prof.age = "15"
+        prof.base_height_cm = "173"
+        prof.current_height_cm = "173"
+        prof.gender = "male"
+        prof.father_height_cm = "180"
+        prof.mother_height_cm = "165"
+        prof.save()
 
-    def test_creates_posture_question_row(self, _mock_sub):
-        u = self._create_user_with_profile(email_suffix="newrow", years_old=30)
-        self.assertFalse(PostureQuestion.objects.filter(user=u).exists())
-        self._call_upsert(u, _full_questionnaire_body())
-        pq = PostureQuestion.objects.get(user=u)
-        self.assertEqual(pq.forward_head_posture_answer, "A")
+        body = {
+            "forward_head_posture_question": "Q1",
+            "forward_head_posture_options": '["A","B","C","D"]',
+            "forward_head_posture_answer": _q("B"),
+            "gap_between_your_lower_back_question": "Q2",
+            "gap_between_your_lower_back_options": '["A","B","C","D"]',
+            "gap_between_your_lower_back_answer": _q("B"),
+            "tightness_or_discomfort_question": "Q3",
+            "tightness_or_discomfort_options": '["A","B","C","D"]',
+            "tightness_or_discomfort_answer": _q("A"),
+            "slouch_when_standing_or_sitting_question": "Q4",
+            "slouch_when_standing_or_sitting_options": '["A","B","C","D"]',
+            "slouch_when_standing_or_sitting_answer": _q("B"),
+            "feel_noticeably_shorter_end_of_day_compare_to_morning_question": "Q5",
+            "feel_noticeably_shorter_end_of_day_compare_to_morning_options": '["A","B","C","D"]',
+            "feel_noticeably_shorter_end_of_day_compare_to_morning_answer": _q("A"),
+            "perfectly_aligned_and_decompressed_question": "Q6",
+            "perfectly_aligned_and_decompressed_options": '["A","B","C","D"]',
+            "perfectly_aligned_and_decompressed_answer": _q("B"),
+            "flexible_in_your_hamstrings_and_hips_question": "Q7",
+            "flexible_in_your_hamstrings_and_hips_options": '["A","B","C","D"]',
+            "flexible_in_your_hamstrings_and_hips_answer": _q("A"),
+            "active_your_core_during_daily_task_question": "Q8",
+            "active_your_core_during_daily_task_options": '["A","B","C","D"]',
+            "active_your_core_during_daily_task_answer": _q("B"),
+        }
 
-    def test_response_includes_subscription_data(self, _mock_sub):
-        u = self._create_user_with_profile(email_suffix="subecho", years_old=27)
-        resp = self._call_upsert(u, _full_questionnaire_body())
-        self.assertIn("subscription_data", resp.data["user"])
-        self.assertFalse(resp.data["user"]["subscription_data"]["is_paid"])
+        factory = APIRequestFactory()
+        req = factory.post("/api/update-posture-questions", body, format="json")
+        force_authenticate(req, user=u)
 
-    def test_account_tier_adult_with_young_age_still_adult_track(self, _mock_sub):
-        # Under 21 still requires parent heights for profile parsing; tier flags adult scoring path.
-        u = self._create_user_with_profile(
-            email_suffix="tier_adult",
-            years_old=16,
-            father_cm=182,
-            mother_cm=165,
-        )
-        u.account_tier = "adult"
-        u.save()
-        resp = self._call_upsert(u, _full_questionnaire_body())
+        with patch("posture_questions.views.check_subscription_or_response", return_value=MagicMock(data={"is_paid": False})):
+            resp = upsert_posture_questions(req)
+
         self.assertIn(resp.status_code, (200, 201), msg=str(getattr(resp, "data", None)))
-        contract = resp.data["user"].get("section3_contract") or {}
-        self.assertIn("total_recoverable_loss_cm", contract)
-        self.assertGreaterEqual(float(contract["total_recoverable_loss_cm"]), 1.0)
+        contract = resp.data["user"]["section3_contract"]
+        self.assertEqual(contract["mode"], "issue9_visual")
+        self.assertGreater(float(contract["total_recoverable_loss_cm"]), 0.0)
 
 
 @patch("posture_questions.views.apply_pending_pre_scan_engine1", lambda *a, **k: None)

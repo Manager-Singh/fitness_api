@@ -7,7 +7,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta, timezone as dt_timezone
 from utils.user_time import user_today
-from utils.leaderboard import _current_validated_streak
+from utils.age import get_user_age
+from utils.leaderboard import _current_validated_streak, is_adult_track_user
 from users.models import Friendship
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
@@ -97,8 +98,12 @@ class LeaderboardAPIView(APIView):
         try:
             current_age = get_user_age(request.user)
         except Exception:
-            current_age = 0
-        current_is_adult = current_age >= 21
+            logger.exception(
+                "Failed computing viewer age for leaderboard",
+                extra={"user_id": getattr(request.user, "id", None)},
+            )
+            current_age = None
+        current_is_adult = is_adult_track_user(request.user, current_age)
 
         qs = User.objects.filter(is_active=True)
 
@@ -169,9 +174,12 @@ class LeaderboardAPIView(APIView):
             try:
                 user_age = get_user_age(u)
             except Exception:
-                logger.exception("Failed computing user_age for leaderboard", extra={"user_id": getattr(u, "id", None)})
-                continue
-            if (user_age >= 21) != current_is_adult:
+                logger.exception(
+                    "Failed computing user_age for leaderboard",
+                    extra={"user_id": getattr(u, "id", None)},
+                )
+                user_age = None
+            if is_adult_track_user(u, user_age) != current_is_adult:
                 continue
             streak = _current_validated_streak(u, user_today(u))
             tier_entries.append(

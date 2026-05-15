@@ -817,11 +817,17 @@ class FriendsLeaderboardView(APIView):
         page = max(int(request.query_params.get("page", 1)), 1)
         limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
 
+        from utils.leaderboard import _current_validated_streak, is_adult_track_user
+
         try:
             current_age = get_user_age(request.user)
         except Exception:
-            current_age = 0
-        current_is_adult = current_age >= 21
+            logger.exception(
+                "Failed computing viewer age for friends leaderboard",
+                extra={"user_id": getattr(request.user, "id", None)},
+            )
+            current_age = None
+        current_is_adult = is_adult_track_user(request.user, current_age)
 
         accepted = Friendship.objects.filter(
             status=Friendship.STATUS_ACCEPTED,
@@ -850,14 +856,17 @@ class FriendsLeaderboardView(APIView):
         )
         nutrition_by_user = {int(r["session__user_id"]): int(r["total"] or 0) for r in nutra_rows}
 
-        from utils.leaderboard import _current_validated_streak
         tier_entries = []
         for u in qs:
             try:
                 user_age = get_user_age(u)
             except Exception:
-                continue
-            if (user_age >= 21) != current_is_adult:
+                logger.exception(
+                    "Failed computing user_age for friends leaderboard",
+                    extra={"user_id": getattr(u, "id", None)},
+                )
+                user_age = None
+            if is_adult_track_user(u, user_age) != current_is_adult:
                 continue
             tier_entries.append(
                 {
