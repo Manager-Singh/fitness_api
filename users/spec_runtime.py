@@ -492,8 +492,6 @@ def _daily_engine_points(user, log_date, age, subscription_data):
 
     nutra_qs = NutraEntry.objects.filter(session__user=user, session__date=log_date).select_related("module")
     food_pts = 0.0
-    adult_disc_scores = []
-    adult_muscle_scores = []
     sleep_pts = 0.0
     sun_pts = 0.0
     med_pts = 0.0
@@ -505,11 +503,6 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
         if n.food_id:
             food_pts += pts
-            if age >= 21:
-                if module_cat == "disc" or any(token in module_name for token in ("disc", "lubric", "spine")):
-                    adult_disc_scores.append(pts)
-                elif module_cat == "muscle" or any(token in module_name for token in ("muscle", "repair", "fuel")):
-                    adult_muscle_scores.append(pts)
             continue
         if "sleep" in module_name:
             sleep_pts += pts
@@ -525,10 +518,12 @@ def _daily_engine_points(user, log_date, age, subscription_data):
     food_points = int(round(food_pts))
 
     if age >= 21:
-        # Section 4.1/11.3 adult nutrition math:
-        # only top 2 disc + top 2 muscle foods count toward engine.
-        valid_food_scores = sorted(adult_disc_scores, reverse=True)[:2] + sorted(adult_muscle_scores, reverse=True)[:2]
-        nutrition_for_engine = min(sum(valid_food_scores), 12.0) if posture_pts > 0 else 0.0
+        # Adult Engine 1 nutrition: flat 1 pt per unique Disc + Muscle food / day; gated by posture work.
+        from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+
+        adult_food_rows = [n for n in nutra_qs if n.food_id]
+        disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(adult_food_rows)
+        nutrition_for_engine = adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
         return posture_pts + nutrition_for_engine, 0.0, exercise_points, food_points, lifestyle_points
 
     trial_day = subscription_data.get("trial_day")

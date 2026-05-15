@@ -80,6 +80,11 @@ from utils.teen_dashboard_dots import (
     teen_lifestyle_nutrition_combined_percent,
     teen_nutrition_dots_from_food_points,
 )
+from utils.adult_nutrition import (
+    adult_disc_muscle_food_id_sets,
+    adult_engine_nutrition_points,
+    adult_nutrition_bar_percent,
+)
 from utils.posture.teen_genetic_average import (
     compute_daily_genetic_average_gain_cm,
     compute_genetic_average_cm,
@@ -1000,7 +1005,22 @@ def get_posture_questions(request):
     today_block = score_summary.get("today", {}) if isinstance(score_summary, dict) else {}
     today_workout_points = float(today_block.get("workout_score", 0) or 0)
     today_food_points = float(today_block.get("food_score", 0) or 0)
-    adult_daily_gains_cm = round((today_workout_points + min(today_food_points, 12.0)) * 0.001, 4)
+    posture_pts_today = float(
+        WorkoutEntry.objects.filter(
+            session__user=user,
+            session__date=user_local_today,
+            session__user_routine__routine_type=RoutineType.POSTURE,
+        ).aggregate(total=Sum("points"))["total"]
+        or 0
+    )
+    today_entries_n = NutraEntry.objects.filter(
+        session__user=user,
+        session__date=user_local_today,
+        food__isnull=False,
+    ).select_related("module")
+    disc_ids_today, muscle_ids_today = adult_disc_muscle_food_id_sets(today_entries_n)
+    adult_nutrition_engine_pts = adult_engine_nutrition_points(posture_pts_today, disc_ids_today, muscle_ids_today)
+    adult_daily_gains_cm = round((posture_pts_today + adult_nutrition_engine_pts) * 0.001, 4)
     if not monetization["conversion_enabled"]:
         adult_daily_gains_cm = 0.0
     teen_daily_posture_plus_cm = round(today_workout_points * 0.001, 4)
@@ -1013,22 +1033,7 @@ def get_posture_questions(request):
         daily_gains_cm = round(teen_engine1_today_cm + teen_engine2_today_cm + teen_bio_today_cm, 4)
     adult_nutrition_pct = None
     if is_adult_track:
-        today_entries = NutraEntry.objects.filter(
-            session__user=user,
-            session__date=user_local_today,
-            food__isnull=False,
-        ).select_related("module")
-        disc_count = 0
-        muscle_count = 0
-        for entry in today_entries:
-            module = getattr(entry, "module", None)
-            module_name = str(getattr(module, "name", "") or "").lower()
-            module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
-            if (module_cat == "disc" or any(k in module_name for k in ("disc", "lubrication", "spine"))) and disc_count < 2:
-                disc_count += 1
-            elif (module_cat == "muscle" or any(k in module_name for k in ("muscle", "repair", "fuel"))) and muscle_count < 2:
-                muscle_count += 1
-        adult_nutrition_pct = int(max(0, min(100, (disc_count + muscle_count) * 25)))
+        adult_nutrition_pct = adult_nutrition_bar_percent(disc_ids_today, muscle_ids_today)
     teen_food_points_today = float(today_food_points)
     teen_nutrition_dots = (
         teen_nutrition_dots_from_food_points(teen_food_points_today) if is_teen_track else 0
@@ -1219,7 +1224,7 @@ def get_posture_questions(request):
                     "ui_to_code_variable_names": UI_TO_CODE_VARIABLE_NAMES,
                 },
                 "adult_dashboard_mapping": {
-                    "daily_gains_formula": "(posture_pts + min(nutrition_pts,12)) * 0.001",
+                    "daily_gains_formula": "(posture_pts + traceable_nutrition_pts) * 0.001",
                     "daily_gains_cm": adult_daily_gains_cm,
                     "top_graph_height_formula": "Base_Height + SUM(Daily_Gains)",
                     "target_height_formula": "Base_Height + Total_Recoverable_Loss",
@@ -1227,7 +1232,7 @@ def get_posture_questions(request):
                     "rescan_timer_days": rescan_timer_days,
                     "progress_bars_formula": "if Max_Loss<=0 then 100 else (1-Current_Loss/Max_Loss)*100",
                     "progress_bars_percent": progress_bars,
-                    "adult_nutrition_percent_formula": "(foods_logged / 4) * 100",
+                    "adult_nutrition_percent_formula": "0% none · 50% one category only · 100% ≥1 Disc + ≥1 Muscle",
                     "adult_nutrition_percent": adult_nutrition_pct,
                 },
                 "teen_dashboard_mapping": {
@@ -1254,7 +1259,7 @@ def get_posture_questions(request):
             "section9_quick_reference": {
                 "point_to_height_engine1_cm_per_point": 0.001,
                 "point_to_height_engine2_cm_per_point": 0.00005,
-                "adult_daily_gain_formula": "(posture_pts + min(nutrition_pts,12)) * 0.001",
+                "adult_daily_gain_formula": "(posture_pts + traceable_nutrition_pts) * 0.001",
                 "teen_postureplus_daily_formula": "posture_pts * 0.001",
                 "teen_engine2_caps": {
                     "nutrition": 35,

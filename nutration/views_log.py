@@ -20,6 +20,7 @@ from users.models import DailyLog
 from users.models import NotificationEventLog
 from utils.user_time import user_localize_dt, user_today
 from users.spec_runtime import rebuild_ledger_from_date
+from utils.adult_nutrition import ADULT_NUTRITION_FOOD_SLOT_MAX
 from utils.teen_nutrition_cap import (
     TEEN_CAP_EVENT_KEY,
     teen_cap_result,
@@ -54,25 +55,27 @@ class NutraLogViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     @staticmethod
-    def _adult_food_counts_for_engine(user, log_date):
+    def _adult_traceable_food_points(user, log_date, exercise_logged_today):
+        """Adult flat nutrition: 1 pt per unique Disc + Muscle food, gated by posture work logged."""
+        from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+
+        posture_pts = 0.0
+        if exercise_logged_today:
+            posture_pts = float(
+                WorkoutEntry.objects.filter(
+                    session__user=user,
+                    session__date=log_date,
+                    session__user_routine__routine_type__iexact="posture",
+                ).aggregate(total=Sum("points"))["total"]
+                or 0.0
+            )
         entries = NutraEntry.objects.filter(
             session__user=user,
             session__date=log_date,
             food__isnull=False,
         ).select_related("module")
-        disc = []
-        muscle = []
-        for e in entries:
-            module = getattr(e, "module", None)
-            module_name = str(getattr(module, "name", "") or "").lower()
-            module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
-            score = float(e.score or 0)
-            if module_cat == "disc" or any(t in module_name for t in ("disc", "lubric", "spine")):
-                disc.append(score)
-            elif module_cat == "muscle" or any(t in module_name for t in ("muscle", "repair", "fuel")):
-                muscle.append(score)
-        selected = sorted(disc, reverse=True)[:2] + sorted(muscle, reverse=True)[:2]
-        return sum(selected)
+        disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(entries)
+        return adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
 
     def list(self, request):
         d = request.query_params.get("date")
@@ -140,6 +143,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             if hasattr(activity, 'id'):
                 activity = activity.id
 
+            # Adults: same food same day is handled as toggle (un-log); never treat as double-submit.
+            if age >= 21 and food:
+                return False
+
             # Duplicate protection is only to prevent accidental double-submits.
             # Users must be allowed to intentionally log the same food repeatedly.
             window_start = now - timedelta(seconds=2)
@@ -158,11 +165,24 @@ class NutraLogViewSet(viewsets.ViewSet):
         # Filter out duplicates
         cleaned_data = [entry for entry in validated_items if not is_duplicate(entry)]
 
-        # Save only non-duplicate entries
+        # Save entries: adults get per-food daily toggle (re-post same food_id = un-log).
         entries = []
         for entry in cleaned_data:
             entry_payload = dict(entry)
             entry_payload.pop("client_timestamp", None)
+
+            food = entry_payload.get("food") or entry_payload.get("food_id")
+            if age >= 21 and food:
+                if hasattr(food, "id"):
+                    food = int(food.id)
+                else:
+                    food = int(food)
+                existing_same = NutraEntry.objects.filter(session=session, food_id=food).first()
+                if existing_same:
+                    existing_same.delete()
+                    continue
+                entry_payload["score"] = 1
+
             entries.append(NutraEntry.objects.create(session=session, **entry_payload))
         for nentry in entries:
             if nentry.food_id:
@@ -213,13 +233,14 @@ class NutraLogViewSet(viewsets.ViewSet):
         ).exists()
         raw_food_points = float(total_today_food_score or 0)
         if age >= 21:
-            effective_food_points = min(self._adult_food_counts_for_engine(request.user, log_date), 12.0) if exercise_logged_today else 0.0
-            cap_limit = 12.0
+            effective_food_points = self._adult_traceable_food_points(request.user, log_date, exercise_logged_today)
+            cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
+            cap_reached = bool(effective_food_points >= cap_limit)
         else:
             effective_food_points = min(raw_food_points, 35.0) if exercise_logged_today else 0.0
             cap_limit = 35.0
+            cap_reached = bool(raw_food_points >= cap_limit)
         counts_toward_engine = bool(exercise_logged_today and effective_food_points > 0)
-        cap_reached = bool(raw_food_points >= cap_limit)
         diary_note = None
         teen_cap = None
         teen_cap_modal_required = False
@@ -248,6 +269,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             teen_cap_message = teen_cap.message
             # Replace any existing cap copy with the exact spec string when cap is reached.
             diary_note = teen_cap_message
+        elif cap_reached and age >= 21:
+            diary_note = (
+                f"You've logged all {int(cap_limit)} traceable adult nutrition foods for today."
+            )
         elif cap_reached:
             diary_note = (
                 f"You've maxed traceable nutrition points for today ({int(cap_limit)}). "
@@ -257,7 +282,10 @@ class NutraLogViewSet(viewsets.ViewSet):
         # Raw totals can keep increasing (diary/tracking), but traceable points must cap.
         # daily_nutrition_pts_today matches today_total_nutrition_score (capped food traceable).
         # Engine eligibility stays on counts_toward_engine (uses effective_food_points + exercise).
-        traceable_food_points = min(raw_food_points, cap_limit)
+        if age >= 21:
+            traceable_food_points = float(effective_food_points)
+        else:
+            traceable_food_points = min(raw_food_points, cap_limit)
         daily_nutrition_pts_today = int(round(traceable_food_points))
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
         daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
@@ -311,15 +339,23 @@ class NutraLogViewSet(viewsets.ViewSet):
             return Response({"detail": "Nutrition entry not found"}, status=status.HTTP_404_NOT_FOUND)
         log_date = entry.session.date
 
+        try:
+            age = int(get_user_age(request.user) or 0)
+        except Exception:
+            age = 0
+
         # Allow updating servings/score only. (Changing food/activity would change routing semantics.)
         if "servings" in request.data:
             entry.servings = str(request.data.get("servings") or "")
         if "score" in request.data:
-            try:
-                v = request.data.get("score")
-                entry.score = None if (v is None or v == "") else max(0, int(v))
-            except Exception:
-                return Response({"detail": "Invalid score"}, status=status.HTTP_400_BAD_REQUEST)
+            if age >= 21 and entry.food_id:
+                entry.score = 1
+            else:
+                try:
+                    v = request.data.get("score")
+                    entry.score = None if (v is None or v == "") else max(0, int(v))
+                except Exception:
+                    return Response({"detail": "Invalid score"}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
             entry.save()

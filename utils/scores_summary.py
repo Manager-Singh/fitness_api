@@ -505,6 +505,7 @@ def get_user_score_summary(user, subscription_data, mode=None):
             "activity_id",
             "module__name",
             "module__type",
+            "module__nutrition_category",
         )
     )
 
@@ -518,6 +519,7 @@ def get_user_score_summary(user, subscription_data, mode=None):
         nutra_df["activity_score"] = nutra_df["score"] * nutra_df["is_activity"].astype(int)
         nutra_df["module_name"] = nutra_df["module__name"].fillna("").astype(str).str.lower()
         nutra_df["module_type"] = nutra_df["module__type"].fillna("").astype(str).str.upper()
+        nutra_df["module_cat"] = nutra_df["module__nutrition_category"].fillna("").astype(str).str.lower()
 
         # Engine 2 lifestyle channels for teens.
         nutra_df["sleep_score"] = 0.0
@@ -740,9 +742,55 @@ def get_user_score_summary(user, subscription_data, mode=None):
     teen_engine2_boost_cm = 0.0
 
     if age >= 21:
-        # Adult Engine 1: posture + min(nutrition, 12/day).
-        daily_engine1 = df["posture_score"] + df["food_score"].clip(upper=12)
-        total_engine1_points = float(daily_engine1.sum())
+        # Adult Engine 1: posture + flat nutrition (1 pt per unique Disc/Muscle food; exercise-gated in helper).
+        from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+
+        if df.empty:
+            total_engine1_points = 0.0
+        else:
+            if nutra_df.empty:
+                df["adult_engine_food"] = 0.0
+            else:
+
+                class _Mod:
+                    __slots__ = ("name", "nutrition_category")
+
+                    def __init__(self, name: str, nutrition_category: str):
+                        self.name = name
+                        self.nutrition_category = nutrition_category
+
+                class _NRow:
+                    __slots__ = ("food_id", "module")
+
+                    def __init__(self, food_id: int, module_name: str, module_cat: str):
+                        self.food_id = int(food_id)
+                        self.module = _Mod(module_name, module_cat)
+
+                def _adult_engine_for_day(ed_val, posture_pts: float) -> float:
+                    sub = nutra_df[
+                        (nutra_df["entry_date"] == ed_val)
+                        & nutra_df["is_food"]
+                        & nutra_df["food_id"].notnull()
+                    ]
+                    rows = []
+                    for _, r in sub.iterrows():
+                        rows.append(
+                            _NRow(
+                                int(r["food_id"]),
+                                str(r["module_name"]),
+                                str(r.get("module_cat", "") or ""),
+                            )
+                        )
+                    d_ids, m_ids = adult_disc_muscle_food_id_sets(rows)
+                    return adult_engine_nutrition_points(float(posture_pts or 0.0), d_ids, m_ids)
+
+                df["adult_engine_food"] = df.apply(
+                    lambda row: _adult_engine_for_day(row["entry_date"], float(row.get("posture_score") or 0.0)),
+                    axis=1,
+                )
+
+            daily_engine1 = df["posture_score"] + df["adult_engine_food"]
+            total_engine1_points = float(daily_engine1.sum())
     else:
         # Teen Engine 1: posture only.
         daily_engine1 = df["posture_score"]

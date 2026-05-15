@@ -36,7 +36,7 @@ def apply_engine_routing(user, log_date, age_exact, points=0, routine_type=None,
 
     # Caps
     if age_exact >= 21:
-        daily.food_points = min(max(0, int(daily.food_points)), 12)
+        daily.food_points = max(0, int(daily.food_points))
         daily.engine1_points = max(0, int(daily.engine1_points))
     else:
         # Section-11 teen per-channel caps (write-time recompute):

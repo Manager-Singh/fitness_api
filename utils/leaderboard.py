@@ -188,6 +188,8 @@ def _is_valid_streak_day(user, day, age):
         return assigned_core.issubset(done_core)
 
     if age >= 21:
+        from utils.adult_nutrition import adult_food_bucket
+
         foods = NutraEntry.objects.filter(
             session__user=user,
             session__date=day,
@@ -196,10 +198,10 @@ def _is_valid_streak_day(user, day, age):
         has_disc = False
         has_muscle = False
         for entry in foods:
-            name = ((entry.module.name if entry.module else "") or "").lower()
-            if any(k in name for k in ("disc", "lubric", "spine")):
+            b = adult_food_bucket(entry.module)
+            if b == "disc":
                 has_disc = True
-            if any(k in name for k in ("muscle", "repair", "fuel")):
+            elif b == "muscle":
                 has_muscle = True
         return core_done(RoutineType.POSTURE) and has_disc and has_muscle
 
@@ -248,7 +250,7 @@ def _build_rank_map(user_ids, until_date=None, routine_type=None):
     """
     Spec alignment: rank by "traceable" engine-counting points, not raw diary sums.
     We use DailyLog.engine1_points + DailyLog.engine2_points which already applies
-    routing, gates, and daily caps (e.g., teen nutrition max 35, adult nutrition max 12).
+    routing, gates, and daily caps (e.g., teen nutrition max 35; adults use flat 1 pt / unique food, no 12 cap).
     """
     daily_filter = {"user_id__in": user_ids}
     if until_date:

@@ -212,8 +212,32 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             ).aggregate(total=Sum("score"))["total"]
             or 0
         )
-        cap_limit = 12.0 if int(age or 0) >= 21 else 35.0
-        daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
+        if int(age or 0) >= 21:
+            from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+
+            exercise_any = WorkoutEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+            ).exists()
+            posture_pts = float(
+                WorkoutEntry.objects.filter(
+                    session__user=request.user,
+                    session__date=log_date,
+                    session__user_routine__routine_type__iexact="posture",
+                ).aggregate(total=Sum("points"))["total"]
+                or 0
+            )
+            entries = NutraEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+                food__isnull=False,
+            ).select_related("module")
+            d_ids, m_ids = adult_disc_muscle_food_id_sets(entries)
+            traceable = adult_engine_nutrition_points(posture_pts, d_ids, m_ids) if exercise_any else 0.0
+            daily_nutrition_pts_today = int(round(traceable))
+        else:
+            cap_limit = 35.0
+            daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
 
         return Response({

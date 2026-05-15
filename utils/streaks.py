@@ -15,11 +15,13 @@ def _adult_food_requirement_met(user, day):
     has_disc_or_spine = False
     has_muscle_or_repair = False
 
+    from utils.adult_nutrition import adult_food_bucket
+
     for entry in foods:
-        module_name = ((entry.module.name if entry.module else "") or "").lower()
-        if any(token in module_name for token in ("disc", "lubric", "spine")):
+        b = adult_food_bucket(entry.module)
+        if b == "disc":
             has_disc_or_spine = True
-        if any(token in module_name for token in ("muscle", "repair", "fuel")):
+        elif b == "muscle":
             has_muscle_or_repair = True
 
     return has_disc_or_spine and has_muscle_or_repair

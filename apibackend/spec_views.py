@@ -21,6 +21,11 @@ from utils.user_time import user_localize_dt, user_today
 from workouts.models import Exercise, UserRoutine, WorkoutEntry, WorkoutSession
 from workouts.serializers_log import WorkoutEntryReadSerializer
 from nutration.serializers_log import NutraEntryReadSerializer
+from utils.adult_nutrition import (
+    ADULT_NUTRITION_FOOD_SLOT_MAX,
+    adult_disc_muscle_food_id_sets,
+    adult_engine_nutrition_points,
+)
 
 import logging
 
@@ -70,28 +75,24 @@ def _to_local_date(request, fallback):
 
 def _adult_food_points_for_engine(user, log_date):
     """
-    Spec Section 11.3/11.6 (adults):
-    - only 4 qualifying foods count: top 2 from Disc + top 2 from Muscle
-    - cap at 12 points/day
+    Adult traceable nutrition points for Engine 1 (flat 1 per unique Disc/Muscle food / day),
+    gated by same-day posture workout points.
     """
+    posture_pts = float(
+        WorkoutEntry.objects.filter(
+            session__user=user,
+            session__date=log_date,
+            session__user_routine__routine_type__iexact="posture",
+        ).aggregate(total=Sum("points"))["total"]
+        or 0.0
+    )
     entries = NutraEntry.objects.filter(
         session__user=user,
         session__date=log_date,
         food__isnull=False,
     ).select_related("module")
-    disc = []
-    muscle = []
-    for e in entries:
-        module = getattr(e, "module", None)
-        module_name = str(getattr(module, "name", "") or "").lower()
-        module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
-        score = float(e.score or 0)
-        if module_cat == "disc" or any(t in module_name for t in ("disc", "lubric", "spine")):
-            disc.append(score)
-        elif module_cat == "muscle" or any(t in module_name for t in ("muscle", "repair", "fuel")):
-            muscle.append(score)
-    selected = sorted(disc, reverse=True)[:2] + sorted(muscle, reverse=True)[:2]
-    return float(sum(selected))
+    d_ids, m_ids = adult_disc_muscle_food_id_sets(entries)
+    return float(adult_engine_nutrition_points(posture_pts, d_ids, m_ids))
 
 
 def _daily_totals_payload(user, log_date, *, age_exact):
@@ -124,24 +125,36 @@ def _daily_totals_payload(user, log_date, *, age_exact):
     )
     raw_food_points = float(raw_food_points or 0)
     if age >= 21:
-        effective_food_points = min(_adult_food_points_for_engine(user, log_date), 12.0) if exercise_logged_today else 0.0
-        cap_limit = 12.0
-        # "Cap reached" in adult mode means logged beyond what the engine can count.
-        food_entry_count = NutraEntry.objects.filter(
-            session__user=user,
-            session__date=log_date,
-            food__isnull=False,
-        ).count()
-        cap_reached = bool(food_entry_count > 4 or raw_food_points > effective_food_points or effective_food_points >= cap_limit)
+        effective_food_points = _adult_food_points_for_engine(user, log_date) if exercise_logged_today else 0.0
+        cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
+        disc_n, musc_n = adult_disc_muscle_food_id_sets(
+            NutraEntry.objects.filter(
+                session__user=user,
+                session__date=log_date,
+                food__isnull=False,
+            ).select_related("module")
+        )
+        n_traceable_slots = len(disc_n) + len(musc_n)
+        cap_reached = bool(n_traceable_slots >= int(ADULT_NUTRITION_FOOD_SLOT_MAX))
     else:
         effective_food_points = min(raw_food_points, 35.0) if exercise_logged_today else 0.0
         cap_limit = 35.0
         cap_reached = bool(raw_food_points >= cap_limit)
 
     counts_toward_engine_nutrition = bool(exercise_logged_today and effective_food_points > 0)
-    diary_note = "Daily nutrition cap reached. Recorded in diary only." if cap_reached else None
+    if cap_reached:
+        diary_note = (
+            "Daily nutrition cap reached. Recorded in diary only."
+            if age < 21
+            else f"All {int(cap_limit)} traceable adult nutrition foods logged for today."
+        )
+    else:
+        diary_note = None
 
-    traceable_food_points = min(raw_food_points, cap_limit)
+    if age >= 21:
+        traceable_food_points = float(effective_food_points)
+    else:
+        traceable_food_points = min(raw_food_points, cap_limit)
     daily_nutrition_pts_today = int(round(traceable_food_points))
 
     return {

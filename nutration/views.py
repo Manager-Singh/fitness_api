@@ -311,23 +311,46 @@ class MyPlanView(APIView):
                 session__date=log_date,
                 food__isnull=False      # only nutrition logs
             )
-            .select_related("food")
+            .select_related("food", "module")
         )
 
         raw_today_food_points = float(today_entries.aggregate(total=Sum("score"))["total"] or 0)
-        # Traceable caps — must match nutration/views_log.py (adult 12, teen 35).
+        # Traceable caps — must match nutration/views_log.py (adult flat model, teen 35).
         if age < 21:
             cap_limit = 35.0
             traceable_today_food_points = min(raw_today_food_points, cap_limit)
             cap_reached = bool(raw_today_food_points >= cap_limit)
             diary_note = TEEN_CAP_MESSAGE_EXACT if cap_reached else None
         else:
-            cap_limit = 12.0
-            traceable_today_food_points = min(raw_today_food_points, cap_limit)
-            cap_reached = bool(raw_today_food_points >= cap_limit)
+            from workouts.models import WorkoutEntry
+            from utils.adult_nutrition import (
+                ADULT_NUTRITION_FOOD_SLOT_MAX,
+                adult_disc_muscle_food_id_sets,
+                adult_engine_nutrition_points,
+            )
+
+            exercise_logged = WorkoutEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+            ).exists()
+            posture_pts = float(
+                WorkoutEntry.objects.filter(
+                    session__user=request.user,
+                    session__date=log_date,
+                    session__user_routine__routine_type__iexact="posture",
+                ).aggregate(total=Sum("points"))["total"]
+                or 0.0
+            )
+            disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(today_entries)
+            traceable_today_food_points = float(
+                adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
+                if exercise_logged
+                else 0.0
+            )
+            cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
+            cap_reached = bool(len(disc_ids) + len(muscle_ids) >= int(ADULT_NUTRITION_FOOD_SLOT_MAX))
             diary_note = (
-                f"You've maxed traceable nutrition points for today ({int(cap_limit)}). "
-                "You can keep logging for personal tracking, but extra logs won’t increase traceable points."
+                f"You've logged all {int(cap_limit)} traceable adult nutrition foods for today."
             ) if cap_reached else None
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
