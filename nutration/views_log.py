@@ -1,5 +1,6 @@
+from collections import defaultdict
 from datetime import date as dt, datetime, timedelta
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
@@ -125,6 +126,24 @@ class NutraLogViewSet(viewsets.ViewSet):
 
         raw = request.data
         data = raw.get("food_activity", raw)
+
+        def _normalize_write_payload(item):
+            """Accept legacy keys (food, module, activity) used by some clients/tests."""
+            if not isinstance(item, dict):
+                return item
+            out = dict(item)
+            if "food_id" not in out and out.get("food") is not None:
+                out["food_id"] = out.pop("food")
+            if "module_id" not in out and out.get("module") is not None:
+                out["module_id"] = out.pop("module")
+            if "activity_id" not in out and out.get("activity") is not None:
+                out["activity_id"] = out.pop("activity")
+            return out
+
+        if isinstance(data, list):
+            data = [_normalize_write_payload(x) for x in data]
+        else:
+            data = _normalize_write_payload(data)
         many = isinstance(data, list)
 
         write_ser = NutraEntryWriteSerializer(data=data, many=many)
@@ -178,8 +197,30 @@ class NutraLogViewSet(viewsets.ViewSet):
         # Filter out duplicates
         cleaned_data = [entry for entry in validated_items if not is_duplicate(entry)]
 
+        # Adults: multiple toggles for the same food in one request net to odd/even (pairs cancel).
+        if _adult_flat_food_rules(request.user, age):
+            food_groups = defaultdict(list)
+
+            def _food_pk_from_entry(entry):
+                food = entry.get("food") or entry.get("food_id")
+                if not food:
+                    return None
+                return int(food.id) if hasattr(food, "id") else int(food)
+
+            non_food = []
+            for entry in cleaned_data:
+                pk = _food_pk_from_entry(entry)
+                if pk is None:
+                    non_food.append(entry)
+                else:
+                    food_groups[pk].append(entry)
+            collapsed = []
+            for _fid, group in food_groups.items():
+                if len(group) % 2 == 1:
+                    collapsed.append(group[-1])
+            cleaned_data = collapsed + non_food
+
         # Save entries: adults get per-food daily toggle (re-post same food_id = un-log).
-        entries = []
         for entry in cleaned_data:
             entry_payload = dict(entry)
             entry_payload.pop("client_timestamp", None)
@@ -192,11 +233,10 @@ class NutraLogViewSet(viewsets.ViewSet):
                     food_pk = int(food)
                 removed, _ = NutraEntry.objects.filter(session=session, food_id=food_pk).delete()
                 if removed:
-                    entries[:] = [e for e in entries if getattr(e, "food_id", None) != food_pk]
                     continue
                 entry_payload["score"] = 1
 
-            entries.append(NutraEntry.objects.create(session=session, **entry_payload))
+            NutraEntry.objects.create(session=session, **entry_payload)
 
         # Collapse accidental duplicate rows (same session + food_id) before ledger rebuild.
         if _adult_flat_food_rules(request.user, age):
@@ -212,7 +252,6 @@ class NutraLogViewSet(viewsets.ViewSet):
 
         # DailyLog / HeightLedger are fully derived via rebuild (avoid per-entry routing drift).
         rebuild_ledger_from_date(request.user, log_date)
-        read_ser = NutraEntryReadSerializer(entries, many=True)
 
         # Return totals for resolved log date (supports grace-period backdate).
         today = log_date
@@ -221,9 +260,10 @@ class NutraLogViewSet(viewsets.ViewSet):
             session__date=today,
         ).select_related('food', 'activity')
 
+        read_ser = NutraEntryReadSerializer(today_entries, many=True)
         total_today_score = today_entries.aggregate(total=Sum('score'))['total'] or 0
         total_today_food_score = today_entries.filter(food__isnull=False).aggregate(total=Sum('score'))['total'] or 0
-        today_log = NutraEntryReadSerializer(today_entries, many=True).data
+        today_log = read_ser.data
 
         cleaned_log = [
             {
