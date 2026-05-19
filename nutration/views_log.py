@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from .models import ModuleFood
 from .models_log import NutraSession, NutraEntry
+from .lifestyle_log import upsert_lifestyle_nutra_entry
 from .scoring import module_food_score_for_user
 from .serializers_log import (
     NutraEntryWriteSerializer, NutraEntryReadSerializer,
@@ -181,10 +182,8 @@ class NutraLogViewSet(viewsets.ViewSet):
                         completed_at__gte=window_start,
                     ).exists()
                 if activity:
-                    return existing_entries.filter(
-                        activity_id=int(activity),
-                        completed_at__gte=window_start,
-                    ).exists()
+                    # Lifestyle: upsert by module/day — do not drop re-logs as duplicates.
+                    return False
                 return False
 
             cleaned_data = [entry for entry in validated_items if not is_duplicate(entry)]
@@ -229,12 +228,24 @@ class NutraLogViewSet(viewsets.ViewSet):
                         score=food_score,
                     )
                     continue
-                if adult:
+                if adult and food:
                     module = entry_payload.get("module")
                     module_id = int(module.id) if hasattr(module, "id") else int(module)
                     food_pk = int(food.id) if hasattr(food, "id") else int(food)
                     rel = ModuleFood.objects.filter(module_id=module_id, food_id=food_pk).first()
                     entry_payload["score"] = module_food_score_for_user(rel, request.user, age) if rel else 1
+
+                activity = entry_payload.get("activity")
+                if activity and not food:
+                    upsert_lifestyle_nutra_entry(
+                        session,
+                        module=entry_payload["module"],
+                        activity=activity,
+                        score=entry_payload.get("score"),
+                        servings=entry_payload.get("servings"),
+                    )
+                    continue
+
                 NutraEntry.objects.create(session=session, **entry_payload)
 
             if adult:

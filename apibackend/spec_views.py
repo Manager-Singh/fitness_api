@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from nutration.lifestyle_log import upsert_lifestyle_nutra_entry
 from nutration.models_log import NutraEntry, NutraSession
 from posture.models import PostureReport
 from user_profile.models import UserProfile
@@ -389,21 +390,22 @@ class LogLifestyleAPIView(APIView):
         before_engine1 = int((before.engine1_points if before else 0) or 0)
         before_engine2 = int((before.engine2_points if before else 0) or 0)
         before_lifestyle = int((before.lifestyle_points if before else 0) or 0)
+        from nutration.models import Activity, Module
+
         session, _ = NutraSession.objects.get_or_create(user=request.user, date=local_date)
-        entry = NutraEntry.objects.create(
-            session=session,
-            module_id=module_id,
-            activity_id=activity_id,
-            score=request.data.get("score"),
+        module = Module.objects.get(pk=module_id)
+        activity = Activity.objects.get(pk=activity_id)
+        score_raw = request.data.get("score")
+        score = None if score_raw in (None, "") else score_raw
+        entry, _created = upsert_lifestyle_nutra_entry(
+            session,
+            module=module,
+            activity=activity,
+            score=score,
+            servings=request.data.get("servings"),
         )
         age_exact = get_user_age_exact(request.user)
-        apply_engine_routing(
-            user=request.user,
-            log_date=local_date,
-            age_exact=age_exact,
-            points=(entry.score or 0),
-            entry_kind="lifestyle",
-        )
+        rebuild_ledger_from_date(request.user, local_date)
         daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
         after_engine1 = int((daily.engine1_points if daily else 0) or 0)
         after_engine2 = int((daily.engine2_points if daily else 0) or 0)
