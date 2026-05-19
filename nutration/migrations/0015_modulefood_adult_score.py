@@ -5,8 +5,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        # Production may stop at 0013; 0014 (module Meta ordering) is optional and parallel.
-        ("nutration", "0013_module_sort_order"),
+        ("nutration", "0014_alter_module_options"),
     ]
 
     operations = [
