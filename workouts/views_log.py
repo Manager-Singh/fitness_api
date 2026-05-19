@@ -253,7 +253,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             "entry": WorkoutEntryReadSerializer(entry).data,
             "total_workouts_today": total_workouts_today,
         }
-        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date)
+        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date, request=request)
         return Response(payload, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):

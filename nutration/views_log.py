@@ -357,7 +357,7 @@ class NutraLogViewSet(viewsets.ViewSet):
             "today_total_food_score_raw": float(raw_food_points),
             "today_logged_nutrition": cleaned_log,
         }
-        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date)
+        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date, request=request)
 
         return Response(payload, status=status.HTTP_201_CREATED)
 
