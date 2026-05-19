@@ -388,5 +388,8 @@ class MyPlanView(APIView):
 
         if type_q in ("", "lifestyle"):
             payload["lifestyle"] = lifestyle  # ← audio/video included here
+            from habits.services import build_habits_plan_payload
+
+            payload["habits"] = build_habits_plan_payload(request.user, log_date)
 
         return Response(payload)

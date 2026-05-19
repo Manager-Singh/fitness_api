@@ -467,8 +467,11 @@ def _interpolated_teen_bio_gain_cm(user, base_height_cm, on_date=None):
 def _daily_engine_points(user, log_date, age, subscription_data):
     """
     Section 11 routing/caps on current day data.
-    Returns (engine1_points, engine2_points, exercise_points, food_points, lifestyle_points)
+    Returns (engine1_points, engine2_points, exercise_points, food_points, lifestyle_points, habit_points)
     """
+    from habits.services import capped_habit_points_for_engine
+
+    habit_pts = float(capped_habit_points_for_engine(user, log_date))
     workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
         "session__user_routine"
     )
@@ -524,7 +527,14 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         adult_food_rows = [n for n in nutra_qs if n.food_id]
         disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(adult_food_rows)
         nutrition_for_engine = adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
-        return posture_pts + nutrition_for_engine, 0.0, exercise_points, food_points, lifestyle_points
+        return (
+            posture_pts + nutrition_for_engine + habit_pts,
+            0.0,
+            exercise_points,
+            food_points,
+            lifestyle_points,
+            int(habit_pts),
+        )
 
     trial_day = subscription_data.get("trial_day")
     is_paid = bool(subscription_data.get("is_paid", False))
@@ -532,13 +542,13 @@ def _daily_engine_points(user, log_date, age, subscription_data):
     trial_expired_unpaid = bool((not is_paid) and (not is_trial) and trial_day is not None and int(trial_day) > 7)
 
     if trial_expired_unpaid:
-        return 0.0, 0.0, exercise_points, food_points, lifestyle_points
+        return 0.0, 0.0, exercise_points, food_points, lifestyle_points, 0
 
-    engine1 = posture_pts
+    engine1 = posture_pts + habit_pts
     if exercise_points <= 0:
         # Zero-log day: lifestyle still eligible for engine2.
         engine2 = min(sleep_pts, 10.0) + min(sun_pts, 6.0) + min(med_pts, 2.0) + min(hyd_pts, 1.0)
-        return engine1, engine2, exercise_points, food_points, lifestyle_points
+        return engine1, engine2, exercise_points, food_points, lifestyle_points, int(habit_pts)
 
     engine2 = (
         min(hgh_pts, 30.0)
@@ -548,7 +558,7 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         + min(med_pts, 2.0)
         + min(hyd_pts, 1.0)
     )
-    return engine1, engine2, exercise_points, food_points, lifestyle_points
+    return engine1, engine2, exercise_points, food_points, lifestyle_points, int(habit_pts)
 
 
 def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
@@ -583,7 +593,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         age = 0
 
     subscription_data = check_subscription_or_response(user).data
-    e1, e2, exercise_points, food_points, lifestyle_points = _daily_engine_points(
+    e1, e2, exercise_points, food_points, lifestyle_points, habit_points = _daily_engine_points(
         user=user,
         log_date=log_date,
         age=age,
@@ -594,6 +604,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     daily.exercise_points = exercise_points
     daily.food_points = food_points
     daily.lifestyle_points = lifestyle_points
+    daily.habit_points = habit_points
     daily.engine1_points = int(round(float(e1)))
     daily.engine2_points = int(round(float(e2)))
     if 13 <= age <= 20:

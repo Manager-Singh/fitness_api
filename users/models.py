@@ -147,6 +147,10 @@ class DailyLog(models.Model):
     exercise_points = models.IntegerField(default=0)
     food_points = models.IntegerField(default=0)
     lifestyle_points = models.IntegerField(default=0)
+    habit_points = models.IntegerField(
+        default=0,
+        help_text="Issue #13 micro-habits (Engine 1), capped at 6/day.",
+    )
     engine1_points = models.IntegerField(default=0)
     engine2_points = models.IntegerField(default=0)
     diary_only_points = models.IntegerField(default=0)
