@@ -201,6 +201,7 @@ class ModulePlanSerializer(serializers.ModelSerializer):
             "name",
             "short_name",
             "type",
+            "wheel_type",
             "action_btn",
             "background_image",
             "icon_image",

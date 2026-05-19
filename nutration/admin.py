@@ -277,13 +277,14 @@ class ModuleAdmin(admin.ModelAdmin):
         "name",
         "short_name",
         "type",
+        "wheel_type",
         "nutrition_category",
         "age_group",
         "icon_preview",
         "background_preview",
     )
 
-    list_filter = ("type", "age_group")
+    list_filter = ("type", "wheel_type", "age_group")
     search_fields = ("name", "short_name", "tag_line")
 
     readonly_fields = ("icon_preview", "background_preview")
@@ -295,6 +296,7 @@ class ModuleAdmin(admin.ModelAdmin):
                 "name",
                 "short_name",
                 "type",
+                "wheel_type",
                 "nutrition_category",
                 "age_group",
             )

@@ -270,6 +270,7 @@ class MyPlanView(APIView):
                 "module_id": m["id"],
                 "module": m["name"],
                 "short_name": m["short_name"],
+                "wheel_type": bool(m.get("wheel_type")),
                 "action_btn": m["action_btn"],
                 "background_image": m["background_image"],
                 "icon_image": m["icon_image"],

@@ -105,6 +105,11 @@ class Module(models.Model):
         help_text="UI ordering within a module type (e.g. Lifestyle 1-4, Nutrition 1-4). Lower comes first.",
     )
 
+    wheel_type = models.BooleanField(
+        default=False,
+        help_text="Lifestyle: use scroll/wheel picker when True; tap/habit list when False.",
+    )
+
     class Meta:
         unique_together = ("name", "age_group")
         ordering = ("age_group__min_age", "type", "sort_order", "name")
