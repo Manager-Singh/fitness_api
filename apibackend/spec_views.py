@@ -15,6 +15,7 @@ from user_profile.models import UserProfile
 from users.models import DailyLog, HeightLedger, PostureState
 from utils.age import get_user_age, get_user_age_exact
 from users.spec_runtime import compute_daily_height_for_user
+from utils.adult_dashboard_live import build_adult_dashboard_live_payload
 from utils.check_payment import check_subscription_or_response
 from utils.monetization_gate import compute_monetization_flags
 from utils.engine_routing import apply_engine_routing
@@ -251,26 +252,28 @@ class LogExerciseAPIView(APIView):
             routine_type=(user_routine.routine_type if user_routine else None),
             entry_kind="exercise",
         )
+        rebuild_ledger_from_date(request.user, local_date)
         daily = DailyLog.objects.filter(user=request.user, log_date=local_date).first()
         after_engine1 = int((daily.engine1_points if daily else 0) or 0)
         after_engine2 = int((daily.engine2_points if daily else 0) or 0)
         totals = _daily_totals_payload(request.user, local_date, age_exact=age_exact)
-        return Response(
-            {
-                "logged": True,
-                "log_date": str(local_date),
-                "counts_toward_engine": True,
-                "daily_posture_pts_today": totals["daily_posture_pts_today"],
-                "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
-                "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
-                "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
-                "exercises_done": totals["exercises_done"],
-                "engine1_points_delta": max(0, after_engine1 - before_engine1),
-                "engine2_points_delta": max(0, after_engine2 - before_engine2),
-                "entry": WorkoutEntryReadSerializer(entry).data,
-            },
-            status=status.HTTP_200_OK,
-        )
+        payload = {
+            "logged": True,
+            "log_date": str(local_date),
+            "counts_toward_engine": True,
+            "daily_posture_pts_today": totals["daily_posture_pts_today"],
+            "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
+            "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
+            "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
+            "exercises_done": totals["exercises_done"],
+            "engine1_points_delta": max(0, after_engine1 - before_engine1),
+            "engine2_points_delta": max(0, after_engine2 - before_engine2),
+            "entry": WorkoutEntryReadSerializer(entry).data,
+        }
+        live = build_adult_dashboard_live_payload(request.user, local_date)
+        if live:
+            payload.update(live)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class LogFoodAPIView(APIView):
@@ -346,25 +349,26 @@ class LogFoodAPIView(APIView):
         after_engine2 = int((daily.engine2_points if daily else 0) or 0)
         totals = _daily_totals_payload(request.user, local_date, age_exact=age_exact)
         counts_toward_engine = bool(totals["nutrition_counts_toward_engine"])
-        return Response(
-            {
-                "logged": not unlogged,
-                "unlogged": unlogged,
-                "log_date": str(local_date),
-                "counts_toward_engine": counts_toward_engine,
-                "daily_posture_pts_today": totals["daily_posture_pts_today"],
-                "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
-                "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
-                "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
-                "exercises_done": totals["exercises_done"],
-                "cap_reached": totals["cap_reached"],
-                "diary_note": totals["diary_note"],
-                "engine1_points_delta": max(0, after_engine1 - before_engine1),
-                "engine2_points_delta": max(0, after_engine2 - before_engine2),
-                "entry": NutraEntryReadSerializer(entry).data if entry else None,
-            },
-            status=status.HTTP_200_OK,
-        )
+        payload = {
+            "logged": not unlogged,
+            "unlogged": unlogged,
+            "log_date": str(local_date),
+            "counts_toward_engine": counts_toward_engine,
+            "daily_posture_pts_today": totals["daily_posture_pts_today"],
+            "daily_hgh_pts_today": totals["daily_hgh_pts_today"],
+            "daily_nutrition_pts_today": totals["daily_nutrition_pts_today"],
+            "daily_lifestyle_pts_today": totals["daily_lifestyle_pts_today"],
+            "exercises_done": totals["exercises_done"],
+            "cap_reached": totals["cap_reached"],
+            "diary_note": totals["diary_note"],
+            "engine1_points_delta": max(0, after_engine1 - before_engine1),
+            "engine2_points_delta": max(0, after_engine2 - before_engine2),
+            "entry": NutraEntryReadSerializer(entry).data if entry else None,
+        }
+        live = build_adult_dashboard_live_payload(request.user, local_date)
+        if live:
+            payload.update(live)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class LogLifestyleAPIView(APIView):

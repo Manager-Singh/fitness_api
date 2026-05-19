@@ -21,6 +21,7 @@ from users.models import DailyLog
 from utils.user_time import user_localize_dt, user_today
 from workouts.models import UserRoutineExercise
 from users.spec_runtime import rebuild_ledger_from_date
+from utils.adult_dashboard_live import build_adult_dashboard_live_payload
 from workouts.models import WorkoutEntry
 from nutration.models_log import NutraEntry
 
@@ -240,7 +241,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
 
-        return Response({
+        payload = {
             "logged": True,
             "log_date": str(log_date),
             "counts_toward_engine": True,
@@ -250,8 +251,12 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             "daily_lifestyle_pts_today": daily_lifestyle_pts_today,
             "exercises_done": bool(total_workouts_today > 0),
             "entry": WorkoutEntryReadSerializer(entry).data,
-            "total_workouts_today": total_workouts_today
-        }, status=status.HTTP_201_CREATED)
+            "total_workouts_today": total_workouts_today,
+        }
+        live = build_adult_dashboard_live_payload(request.user, log_date)
+        if live:
+            payload.update(live)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):
         """

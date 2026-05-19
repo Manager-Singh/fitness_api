@@ -22,6 +22,7 @@ from users.models import DailyLog
 from users.models import NotificationEventLog
 from utils.user_time import user_localize_dt, user_today
 from users.spec_runtime import rebuild_ledger_from_date
+from utils.adult_dashboard_live import build_adult_dashboard_live_payload
 from utils.adult_nutrition import (
     ADULT_NUTRITION_FOOD_SLOT_MAX,
     dedupe_adult_food_entries_for_session,
@@ -356,6 +357,9 @@ class NutraLogViewSet(viewsets.ViewSet):
             "today_total_food_score_raw": float(raw_food_points),
             "today_logged_nutrition": cleaned_log,
         }
+        live = build_adult_dashboard_live_payload(request.user, log_date)
+        if live:
+            payload.update(live)
 
         return Response(payload, status=status.HTTP_201_CREATED)
 
