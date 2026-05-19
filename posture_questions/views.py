@@ -558,23 +558,30 @@ def get_profile_fields(
 #         status=status.HTTP_200_OK,
 #     )
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_posture_questions(request):
-    user = request.user
-    rescan = request.query_params.get('rescan')
+class DashboardBaseUnavailable(Exception):
+    """Raised when /dashboard base data cannot be built (e.g. subscription expired)."""
+
+    def __init__(self, response):
+        self.response = response
+
+
+def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
+    """
+    Build the /api/dashboard payload in-process (no HTTP, no DRF view dispatch).
+    Used by GET /dashboard, GET /dashboard-new, and workout/nutra log embeds.
+    """
 
     # ── 1. Check subscription ──────────────────────────────
     subscription_status = check_subscription_or_response(user)
 
     if subscription_status.data.get("expired", True):
-        return subscription_status
+        raise DashboardBaseUnavailable(subscription_status)
 
     # ── 2. Fetch profile ──────────────────────────────
     try:
         profile = UserProfile.objects.get(user=user)
     except UserProfile.DoesNotExist:
-        return Response({"error": "User profile not found."}, status=404)
+        raise UserProfile.DoesNotExist("User profile not found.")
 
     profile_dict = model_to_dict(profile)
     _ae_raw = get_user_age_exact(user)
@@ -621,11 +628,10 @@ def get_posture_questions(request):
     today_total_score = get_user_score_summary(user=user,subscription_data=subscription_data, mode="today_total_score")
 
     # ── 6. Date handling ─────────────────────
-    date_str = request.query_params.get("date")
     try:
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
     except ValueError:
-        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+        raise ValueError("Invalid date format. Use YYYY-MM-DD.")
 
     green_dots = calculate_green_dots(user=user, target_date=target_date)
 
@@ -1184,8 +1190,7 @@ def get_posture_questions(request):
         optimized_height_for_ui = None
 
     # ── 14. FINAL RESPONSE ──────────────────────────────
-    return Response(
-        {
+    return {
             "message": "Posture Questions retrieved successfully",
             "user": {
                 "id": user.id,
@@ -1531,9 +1536,25 @@ def get_posture_questions(request):
                     "value_cm": optimized_height_for_ui,
                 },
             },
-        },
-        status=status.HTTP_200_OK,
-    )
+        }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_posture_questions(request):
+    try:
+        payload = build_dashboard_base_payload(
+            request.user,
+            rescan=request.query_params.get("rescan"),
+            date_str=request.query_params.get("date"),
+        )
+    except DashboardBaseUnavailable as exc:
+        return exc.response
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile not found."}, status=404)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=400)
+    return Response(payload, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -1544,19 +1565,17 @@ def get_dashboard_new(request):
     Reuses canonical /dashboard computation, then maps to screen-focused payload.
     """
     user = request.user
-    # `get_posture_questions` is wrapped by @api_view and expects a Django HttpRequest.
-    # Inside DRF APIView, `request` is a DRF Request; use its underlying HttpRequest.
-    http_request = getattr(request, "_request", request)
-    base_response = get_posture_questions(http_request)
-    if int(getattr(base_response, "status_code", 500)) != 200:
-        return base_response
-
     include_debug = str(request.query_params.get("include_debug", "")).lower() in {"1", "true", "yes"}
+    try:
+        base_payload = build_dashboard_base_payload(user)
+    except DashboardBaseUnavailable as exc:
+        return exc.response
+
     from posture_questions.dashboard_new_builder import build_dashboard_new_from_payload
 
     response_payload = build_dashboard_new_from_payload(
         user,
-        dict(base_response.data or {}),
+        base_payload,
         include_debug=include_debug,
     )
     serializer = DashboardNewResponseSerializer(data=response_payload)
