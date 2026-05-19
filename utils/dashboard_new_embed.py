@@ -4,8 +4,6 @@ Embed full GET /api/dashboard-new payload in log POST responses (workout-logs, n
 import logging
 
 from django.test import RequestFactory
-from rest_framework import status
-from rest_framework.request import Request
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +13,16 @@ _SEGMENT_LONG_KEYS = {
     "pelvic": "pelvic_tilt_back",
     "legs": "leg_hamstring",
 }
+
+
+def _embed_unavailable(reason: str, **extra):
+    out = {
+        "message": "Dashboard unavailable",
+        "dashboard": None,
+        "dashboard_embed_error": reason,
+    }
+    out.update(extra)
+    return out
 
 
 def _patch_adult_live_dashboard(dashboard: dict, user, log_date) -> None:
@@ -100,36 +108,53 @@ def _patch_adult_live_dashboard(dashboard: dict, user, log_date) -> None:
 def build_dashboard_new_embed(user, log_date=None, include_debug=False):
     """
     Return the same dict shape as GET /api/dashboard-new (message + dashboard).
-
-    Returns None if the dashboard cannot be built (e.g. subscription expired).
+  Always returns a dict (never None) so clients can rely on the key being present.
     """
     from utils.user_time import user_today
+    from posture_questions.views import get_posture_questions
+    from posture_questions.dashboard_new_builder import build_dashboard_new_from_payload
+    from posture_questions.serializers_dashboard import DashboardNewResponseSerializer
 
     log_date = log_date or user_today(user)
 
-    try:
-        from posture_questions.views import get_dashboard_new
-    except Exception:
-        logger.exception("dashboard_new_embed: import get_dashboard_new failed")
-        return None
-
-    query = {}
-    if include_debug:
-        query["include_debug"] = "1"
-    http_request = RequestFactory().get("/api/dashboard-new", query)
+    http_request = RequestFactory().get("/api/dashboard/")
     http_request.user = user
-    drf_request = Request(http_request)
 
     try:
-        response = get_dashboard_new(drf_request)
+        base_response = get_posture_questions(http_request)
     except Exception:
-        logger.exception("dashboard_new_embed: get_dashboard_new failed", extra={"user_id": getattr(user, "id", None)})
-        return None
+        logger.exception(
+            "dashboard_new_embed: get_posture_questions failed",
+            extra={"user_id": getattr(user, "id", None)},
+        )
+        return _embed_unavailable("posture_questions_exception")
 
-    if int(getattr(response, "status_code", 500)) != status.HTTP_200_OK:
-        return None
+    status_code = int(getattr(base_response, "status_code", 500) or 500)
+    if status_code != 200:
+        detail = getattr(base_response, "data", None)
+        logger.warning(
+            "dashboard_new_embed: base dashboard status %s",
+            status_code,
+            extra={"user_id": getattr(user, "id", None), "detail": detail},
+        )
+        return _embed_unavailable("posture_questions_non_200", status_code=status_code, detail=detail)
 
-    data = dict(response.data or {})
+    try:
+        response_payload = build_dashboard_new_from_payload(
+            user,
+            dict(base_response.data or {}),
+            include_debug=include_debug,
+        )
+        serializer = DashboardNewResponseSerializer(data=response_payload)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+    except Exception:
+        logger.exception(
+            "dashboard_new_embed: build/serialize failed",
+            extra={"user_id": getattr(user, "id", None)},
+        )
+        return _embed_unavailable("dashboard_build_failed")
+
     dashboard = data.get("dashboard")
     if isinstance(dashboard, dict):
         _patch_adult_live_dashboard(dashboard, user, log_date)

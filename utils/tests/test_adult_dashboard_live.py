@@ -175,3 +175,4 @@ class WorkoutLogLiveResponseTests(TestCase):
         self.assertEqual(dash["dashboard"].get("variant"), "adult")
         self.assertIn("live_metrics", dash["dashboard"])
         self.assertIn("posture_optimization", dash["dashboard"])
+        self.assertNotIn("dashboard_embed_error", dash)

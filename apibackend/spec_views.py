@@ -270,9 +270,7 @@ class LogExerciseAPIView(APIView):
             "engine2_points_delta": max(0, after_engine2 - before_engine2),
             "entry": WorkoutEntryReadSerializer(entry).data,
         }
-        dashboard_new = build_dashboard_new_embed(request.user, local_date)
-        if dashboard_new:
-            payload["dashboard_new"] = dashboard_new
+        payload["dashboard_new"] = build_dashboard_new_embed(request.user, local_date)
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -365,9 +363,7 @@ class LogFoodAPIView(APIView):
             "engine2_points_delta": max(0, after_engine2 - before_engine2),
             "entry": NutraEntryReadSerializer(entry).data if entry else None,
         }
-        dashboard_new = build_dashboard_new_embed(request.user, local_date)
-        if dashboard_new:
-            payload["dashboard_new"] = dashboard_new
+        payload["dashboard_new"] = build_dashboard_new_embed(request.user, local_date)
         return Response(payload, status=status.HTTP_200_OK)
 
 
