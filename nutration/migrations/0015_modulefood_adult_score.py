@@ -5,7 +5,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("nutration", "0014_alter_module_options"),
+        ("nutration", "0013_alter_module_options_module_sort_order"),
     ]
 
     operations = [
