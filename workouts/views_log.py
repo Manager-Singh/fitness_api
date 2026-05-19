@@ -21,7 +21,7 @@ from users.models import DailyLog
 from utils.user_time import user_localize_dt, user_today
 from workouts.models import UserRoutineExercise
 from users.spec_runtime import rebuild_ledger_from_date
-from utils.adult_dashboard_live import build_adult_dashboard_live_payload
+from utils.dashboard_new_embed import build_dashboard_new_embed
 from workouts.models import WorkoutEntry
 from nutration.models_log import NutraEntry
 
@@ -253,9 +253,9 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             "entry": WorkoutEntryReadSerializer(entry).data,
             "total_workouts_today": total_workouts_today,
         }
-        live = build_adult_dashboard_live_payload(request.user, log_date)
-        if live:
-            payload.update(live)
+        dashboard_new = build_dashboard_new_embed(request.user, log_date)
+        if dashboard_new:
+            payload["dashboard_new"] = dashboard_new
         return Response(payload, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):

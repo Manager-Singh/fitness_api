@@ -106,15 +106,26 @@ class AdultDashboardLivePayloadTests(TestCase):
         self.assertGreater(after["current_height_cm"], 175.0)
 
 
+@patch("workouts.views_log.build_dashboard_new_embed")
 @patch("workouts.views_log.check_subscription_or_response")
 @patch("utils.adult_dashboard_live.check_subscription_or_response")
 class WorkoutLogLiveResponseTests(TestCase):
     def _mock_paid_adult_sub(self):
         return MagicMock(data={"is_paid": True, "is_trial": False, "trial_day": None})
 
-    def test_post_workout_log_includes_live_fields(self, mock_live_sub, mock_view_sub):
+    def test_post_workout_log_includes_dashboard_new(
+        self, mock_live_sub, mock_view_sub, mock_dashboard_embed
+    ):
         mock_live_sub.side_effect = lambda user: self._mock_paid_adult_sub()
         mock_view_sub.side_effect = lambda user: self._mock_paid_adult_sub()
+        mock_dashboard_embed.return_value = {
+            "message": "Dashboard retrieved successfully",
+            "dashboard": {
+                "variant": "adult",
+                "live_metrics": {"height_cm": 175.007, "total_recovered_cm": 0.007},
+                "posture_optimization": {"bars_percent": {}},
+            },
+        }
 
         user = User.objects.create_user(
             username="wlive",
@@ -157,8 +168,10 @@ class WorkoutLogLiveResponseTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertIn("today_daily_points", resp.data)
-        self.assertIn("segments", resp.data)
-        self.assertIn("current_height_cm", resp.data)
-        self.assertIn("total_recovered_cm", resp.data)
-        self.assertGreaterEqual(resp.data["today_posture_plus_gain_cm"], 0.0)
+        self.assertIn("dashboard_new", resp.data)
+        dash = resp.data["dashboard_new"]
+        self.assertIn("dashboard", dash)
+        self.assertIn("message", dash)
+        self.assertEqual(dash["dashboard"].get("variant"), "adult")
+        self.assertIn("live_metrics", dash["dashboard"])
+        self.assertIn("posture_optimization", dash["dashboard"])

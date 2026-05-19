@@ -15,7 +15,7 @@ from user_profile.models import UserProfile
 from users.models import DailyLog, HeightLedger, PostureState
 from utils.age import get_user_age, get_user_age_exact
 from users.spec_runtime import compute_daily_height_for_user
-from utils.adult_dashboard_live import build_adult_dashboard_live_payload
+from utils.dashboard_new_embed import build_dashboard_new_embed
 from utils.check_payment import check_subscription_or_response
 from utils.monetization_gate import compute_monetization_flags
 from utils.engine_routing import apply_engine_routing
@@ -270,9 +270,9 @@ class LogExerciseAPIView(APIView):
             "engine2_points_delta": max(0, after_engine2 - before_engine2),
             "entry": WorkoutEntryReadSerializer(entry).data,
         }
-        live = build_adult_dashboard_live_payload(request.user, local_date)
-        if live:
-            payload.update(live)
+        dashboard_new = build_dashboard_new_embed(request.user, local_date)
+        if dashboard_new:
+            payload["dashboard_new"] = dashboard_new
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -365,9 +365,9 @@ class LogFoodAPIView(APIView):
             "engine2_points_delta": max(0, after_engine2 - before_engine2),
             "entry": NutraEntryReadSerializer(entry).data if entry else None,
         }
-        live = build_adult_dashboard_live_payload(request.user, local_date)
-        if live:
-            payload.update(live)
+        dashboard_new = build_dashboard_new_embed(request.user, local_date)
+        if dashboard_new:
+            payload["dashboard_new"] = dashboard_new
         return Response(payload, status=status.HTTP_200_OK)
 
 
