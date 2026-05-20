@@ -7,9 +7,14 @@ refresh dashboard widgets without a full GET /dashboard-new round-trip.
 from django.db.models import Sum
 
 from nutration.models_log import NutraEntry
-from user_profile.models import UserProfile
-from users.models import DailyLog, HeightLedger
-from users.spec_runtime import LEDGER_ENTRY_DAILY_COMPUTE, get_user_runtime_state_snapshot
+from users.models import DailyLog
+from utils.adult_dashboard_metrics import (
+    adult_base_height_cm,
+    adult_daily_gains_cm_today,
+    adult_engine1_points_today,
+    live_cumulative_gain_cm,
+    live_height_cm,
+)
 from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
 from utils.age import get_user_age, get_user_age_exact
 from utils.check_payment import check_subscription_or_response
@@ -25,35 +30,6 @@ _SEGMENT_SHORT_KEYS = {
     "pelvic_tilt_back": "pelvic",
     "leg_hamstring": "legs",
 }
-
-
-def _adult_base_height_cm(user):
-    try:
-        prof = UserProfile.objects.filter(user=user).only("base_height_cm", "current_height_cm").first()
-        if prof and prof.base_height_cm not in (None, ""):
-            return float(prof.base_height_cm)
-        if prof and prof.current_height_cm not in (None, ""):
-            return float(prof.current_height_cm)
-    except Exception:
-        pass
-    return 0.0
-
-
-def _live_cumulative_um(user):
-    runtime = get_user_runtime_state_snapshot(user) or {}
-    cum = runtime.get("current_height_um")
-    if cum is not None:
-        return max(0, int(cum))
-    row = (
-        HeightLedger.objects.filter(
-            user=user,
-            entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
-        )
-        .order_by("-log_date", "-created_at")
-        .only("cumulative_um")
-        .first()
-    )
-    return max(0, int(row.cumulative_um)) if row else 0
 
 
 def _today_engine_points(user, log_date):
@@ -106,17 +82,13 @@ def build_adult_dashboard_live_payload(user, log_date=None):
     posture_pts, nutrition_pts = _today_engine_points(user, log_date)
     today_daily_points = int(round(posture_pts + nutrition_pts))
 
-    if conversion_enabled:
-        today_posture_plus_gain_cm = round(posture_pts * POINTS_TO_CM_ENGINE1, 4)
-        today_total_gain_cm = round((posture_pts + nutrition_pts) * POINTS_TO_CM_ENGINE1, 4)
-    else:
-        today_posture_plus_gain_cm = 0.0
-        today_total_gain_cm = 0.0
+    today_total_gain_cm = adult_daily_gains_cm_today(
+        user, log_date, conversion_enabled=conversion_enabled
+    )
+    today_posture_plus_gain_cm = round(posture_pts * POINTS_TO_CM_ENGINE1, 4) if conversion_enabled else 0.0
 
-    base_cm = _adult_base_height_cm(user)
-    cum_um = _live_cumulative_um(user)
-    total_recovered_cm = round(cum_um / 10000.0, 4)
-    current_height_cm = round(base_cm + (cum_um / 10000.0), 4)
+    total_recovered_cm = live_cumulative_gain_cm(user)
+    current_height_cm = live_height_cm(user)
 
     diagnostics = build_posture_optimization_diagnostics(user=user, optimization_breakdown=None)
     segments = {}
@@ -128,10 +100,9 @@ def build_adult_dashboard_live_payload(user, log_date=None):
             "opt_pct": round(float(opt or 0), 2),
         }
 
-    # Keep daily points aligned with engine routing when present.
-    daily = DailyLog.objects.filter(user=user, log_date=log_date).only("engine1_points").first()
-    if daily and int(daily.engine1_points or 0) > 0:
-        today_daily_points = int(daily.engine1_points)
+    today_daily_points = adult_engine1_points_today(user, log_date)
+    if today_daily_points <= 0:
+        today_daily_points = int(round(posture_pts + nutrition_pts))
 
     return {
         "today_daily_points": today_daily_points,

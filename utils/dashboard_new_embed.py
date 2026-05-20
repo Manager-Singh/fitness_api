@@ -165,7 +165,7 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         "posture_exercises_total": assigned_total,
         "exercises_done": completed_total,
         "total_exercises": assigned_total,
-        "habits_logged": int(max(0, min(4, nutrition_pct // 25))),
+        "habits_logged": count_habits_logged(user, log_date),
         "posture_exercises_percent": int(round((completed_total / max(1, assigned_total)) * 100)),
         "nutrition_percent": int(nutrition_pct),
         "teen_nutrition_dots": None,
@@ -197,7 +197,8 @@ def _posture_optimization_from_diagnostics(diagnostics: dict) -> dict:
 
 def _build_dashboard_new_embed_fast(user, log_date):
     """Lightweight dashboard-new snapshot for log POST (no full /dashboard rebuild)."""
-    from utils.adult_dashboard_live import build_adult_dashboard_live_payload, _adult_base_height_cm
+    from utils.adult_dashboard_live import build_adult_dashboard_live_payload
+    from utils.adult_dashboard_metrics import adult_base_height_cm, count_habits_logged
     from utils.age import get_user_age, get_user_age_exact
     from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
     from users.spec_runtime import get_user_runtime_state_snapshot
@@ -252,7 +253,7 @@ def _build_dashboard_new_embed_fast(user, log_date):
     if not live:
         return _embed_unavailable("adult_live_payload_failed")
 
-    base_cm = _adult_base_height_cm(user)
+    base_cm = adult_base_height_cm(user)
     runtime = get_user_runtime_state_snapshot(user) or {}
     target_cm = round(
         base_cm + float(int(runtime.get("total_recoverable_loss_um") or 0)) / 10000.0,

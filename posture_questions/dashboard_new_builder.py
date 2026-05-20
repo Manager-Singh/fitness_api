@@ -3,6 +3,7 @@ import logging
 
 from users.models import HeightLedger
 from utils.graph_age_projection import calculate_height_projection
+from utils.adult_dashboard_metrics import adult_chart_series, count_habits_logged
 from utils.user_time import user_today
 from utils.teen_dashboard_dots import (
     teen_lifestyle_nutrition_combined_percent,
@@ -215,8 +216,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     if is_teen:
         habits_logged_count = int(min(8, teen_nutrition_dots + teen_lifestyle_dots))
     else:
-        ap = int(section4.get("posture_nutrition_percent") or 0)
-        habits_logged_count = int(max(0, min(4, ap // 25)))
+        habits_logged_count = count_habits_logged(user, local_today)
 
     if is_teen:
         top_cards = [
@@ -268,35 +268,8 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         except Exception:
             canonical_chart = payload.get("chart_breakdown")
     else:
-        # Spec (Section 16.2 adult dashboard): days-based recovery chart (current vs target),
-        # not the teen 13–21 genetic projection curve.
         try:
-            days_window = 90
-            # Use ledger history if present; fall back to a flat line at current height.
-            rows = list(
-                HeightLedger.objects.filter(user=user, entry_type="daily_compute")
-                .order_by("-log_date", "-created_at")[:days_window]
-            )
-            rows = list(reversed(rows))
-            series = []
-            for idx, r in enumerate(rows):
-                series.append(
-                    {
-                        "day": idx,
-                        "date": str(r.log_date),
-                        "current_height_cm": round(float(r.cumulative_um or 0) / 10000.0, 4),
-                        "target_height_cm": round(adult_target_height_cm, 4),
-                    }
-                )
-            if not series:
-                series = [
-                    {
-                        "day": 0,
-                        "date": None,
-                        "current_height_cm": round(float(adult_height_live_cm), 4),
-                        "target_height_cm": round(adult_target_height_cm, 4),
-                    }
-                ]
+            series = adult_chart_series(user, adult_target_height_cm)
             max_y = max(
                 max(p["current_height_cm"] for p in series),
                 max(p["target_height_cm"] for p in series),

@@ -850,12 +850,18 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     )
     # Spec naming convention aliases (UI labels vs backend keys).
     # Use runtime ledger first (authoritative); fallback to score-derived conversion.
+    from utils.adult_dashboard_metrics import (
+        adult_daily_gains_cm_today,
+        count_habits_logged,
+        live_cumulative_gain_cm,
+    )
+
     runtime_height_um = runtime_state.get("current_height_um")
     posture_plus_cumulative_cm = round(float(score_summary.get("total_engine1_points", 0)) * 0.001, 4)
-    if is_adult_track and runtime_height_um is not None:
-        posture_plus_cumulative_cm = round(float(runtime_height_um) / 10000.0, 4)
     if is_adult_track:
-        # Section 4.1: Recovered So Far tracks validated posture gains.
+        # Live dashboard: ledger cumulative gain (includes habits/workouts after rebuild_ledger).
+        posture_plus_cumulative_cm = live_cumulative_gain_cm(user)
+        # Spec alias: validated-only sum (streak-validated days) for audits.
         validated_dates = list(
             DailyLog.objects.filter(user=user, validated=True).values_list("log_date", flat=True)
         )
@@ -867,7 +873,6 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                 log_date__in=validated_dates,
             )
             validated_engine1_um = int(q.aggregate(v=Sum("engine1_delta_um")).get("v") or 0)
-            # Backward compatibility: fall back to metadata if older rows weren't backfilled yet.
             if validated_engine1_um == 0 and q.exists():
                 for row in q.only("metadata").iterator(chunk_size=500):
                     try:
@@ -878,7 +883,6 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                             extra={"row_id": getattr(row, "id", None)},
                         )
                         continue
-        posture_plus_cumulative_cm = round(validated_engine1_um / 10000.0, 4)
     genetic_plus_cumulative_cm = round(
         float(score_summary.get("teen_engine2_boost_cm", 0)),
         4,
@@ -1028,9 +1032,11 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     ).select_related("module")
     disc_ids_today, muscle_ids_today = adult_disc_muscle_food_id_sets(today_entries_n)
     adult_nutrition_engine_pts = adult_engine_nutrition_points(posture_pts_today, disc_ids_today, muscle_ids_today)
-    adult_daily_gains_cm = round((posture_pts_today + adult_nutrition_engine_pts) * 0.001, 4)
-    if not monetization["conversion_enabled"]:
-        adult_daily_gains_cm = 0.0
+    adult_daily_gains_cm = adult_daily_gains_cm_today(  # engine1 today (workouts + habits + gated nutrition)
+        user,
+        user_local_today,
+        conversion_enabled=bool(monetization["conversion_enabled"]),
+    )
     teen_daily_posture_plus_cm = round(today_workout_points * 0.001, 4)
     if is_adult_track:
         posture_plus_daily_gain_cm = adult_daily_gains_cm
@@ -1340,7 +1346,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                     "habits_logged": (
                         int(min(8, teen_nutrition_dots + teen_lifestyle_dots))
                         if is_teen_track
-                        else int(max(0, min(4, (adult_nutrition_pct or 0) // 25)))
+                        else count_habits_logged(user, user_local_today)
                     ),
                     "fraction_today": (
                         f"{(completed_posture_total + completed_hgh_total)}/{(assigned_posture_total + assigned_hgh_total) or 0}"
