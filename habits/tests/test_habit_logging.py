@@ -22,11 +22,20 @@ class HabitLoggingTests(TestCase):
     def test_seed_habits_exist(self):
         self.assertEqual(MicroHabit.objects.filter(is_active=True).count(), 4)
 
-    def test_am_pm_upsert_same_slot(self):
+    def test_toggle_same_slot_removes_entry(self):
         log_habit(self.user, self.log_date, "puppet_string_walk", "am")
-        entry, created = log_habit(self.user, self.log_date, "puppet_string_walk", "am")
-        self.assertFalse(created)
+        entry, action = log_habit(self.user, self.log_date, "puppet_string_walk", "am")
+        self.assertIsNone(entry)
+        self.assertEqual(action, "removed")
+        self.assertEqual(total_raw_habit_points(self.user, self.log_date), 0)
+
+    def test_toggle_log_again_after_remove(self):
+        log_habit(self.user, self.log_date, "tech_neck_lift", "once")
+        log_habit(self.user, self.log_date, "tech_neck_lift", "once")
+        entry, action = log_habit(self.user, self.log_date, "tech_neck_lift", "once")
+        self.assertEqual(action, "created")
         self.assertEqual(entry.points, 1)
+        self.assertEqual(total_raw_habit_points(self.user, self.log_date), 1)
 
     def test_am_pm_two_slots_two_points(self):
         log_habit(self.user, self.log_date, "puppet_string_walk", "am")

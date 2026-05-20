@@ -41,7 +41,7 @@ class HabitCatalogView(APIView):
 
 class HabitLogViewSet(viewsets.ViewSet):
     """
-    POST /api/habit-logs — log AM/PM/once micro-habit (Engine 1, cap 6/day).
+    POST /api/habit-logs — toggle AM/PM/once micro-habit log (Engine 1, cap 6/day).
     GET  /api/habit-logs — today's habit state (same shape as habits catalog).
     """
 
@@ -69,12 +69,15 @@ class HabitLogViewSet(viewsets.ViewSet):
         data = ser.validated_data
         log_date = resolve_habit_log_date(request.user, request.data)
 
+        habit_code = data["habit_code"]
+        slot = data["slot"]
+
         try:
-            entry, created = log_habit(
+            entry, action = log_habit(
                 request.user,
                 log_date,
-                data["habit_code"],
-                data["slot"],
+                habit_code,
+                slot,
             )
         except DjangoValidationError as exc:
             if hasattr(exc, "message_dict"):
@@ -88,20 +91,21 @@ class HabitLogViewSet(viewsets.ViewSet):
         rebuild_ledger_from_date(request.user, log_date)
 
         raw_pts = total_raw_habit_points(request.user, log_date)
+        removed = action == "removed"
         return Response(
             {
-                "logged": True,
-                "created": created,
-                "updated": not created,
+                "logged": not removed,
+                "removed": removed,
+                "created": action == "created",
                 "log_date": str(log_date),
-                "habit_code": entry.habit.code,
-                "slot": entry.slot,
-                "points": int(entry.points),
+                "habit_code": entry.habit.code if entry else habit_code,
+                "slot": entry.slot if entry else slot,
+                "points": int(entry.points) if entry else 0,
                 "habit_points_today": raw_pts,
                 "habit_points_capped_for_engine": capped_habit_points_for_engine(
                     request.user, log_date
                 ),
                 "daily_cap": DAILY_HABIT_CAP,
             },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            status=status.HTTP_200_OK if removed else status.HTTP_201_CREATED,
         )

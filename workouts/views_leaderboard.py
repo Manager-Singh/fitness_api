@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import timedelta, timezone as dt_timezone
 from utils.user_time import user_today
 from utils.age import get_user_age
+from utils.country import country_flag_emoji, normalize_country_code
 from utils.leaderboard import (
     _current_validated_streak,
     is_adult_track_user,
@@ -186,10 +187,13 @@ class LeaderboardAPIView(APIView):
             if is_adult_track_user(u, user_age) != current_is_adult:
                 continue
             streak = _current_validated_streak(u, user_today(u))
+            country_code = normalize_country_code(getattr(u, "country_code", None))
             tier_by_user[u.id] = {
                 "user_id": u.id,
                 "display_name": (u.name or u.username or u.email or f"User {u.id}"),
                 "avatar_url": u.profile_image_url or None,
+                "country_code": country_code,
+                "country_flag_emoji": country_flag_emoji(country_code),
                 "points": int(points_scope.get(u.id, 0)),
                 "streak": streak,
             }

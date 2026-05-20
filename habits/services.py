@@ -62,8 +62,10 @@ def _validate_slot(habit: MicroHabit, slot: str) -> str:
 
 def log_habit(user, log_date: date, habit_code: str, slot: str):
     """
-    Upsert one log row per (user, date, habit, slot).
-    Returns (log, created).
+    Toggle one log row per (user, date, habit, slot).
+
+    - If no row exists: create it and return ``(log, "created")``.
+    - If a row already exists: delete it and return ``(None, "removed")``.
     """
     habit = MicroHabit.objects.filter(code=habit_code, is_active=True).first()
     if not habit:
@@ -79,9 +81,8 @@ def log_habit(user, log_date: date, habit_code: str, slot: str):
         slot=slot,
     ).first()
     if existing:
-        existing.points = pts
-        existing.save(update_fields=["points", "logged_at"])
-        return existing, False
+        existing.delete()
+        return None, "removed"
 
     log = MicroHabitLog.objects.create(
         user=user,
@@ -90,7 +91,7 @@ def log_habit(user, log_date: date, habit_code: str, slot: str):
         slot=slot,
         points=pts,
     )
-    return log, True
+    return log, "created"
 
 
 def build_habits_plan_payload(user, log_date: date | None = None) -> dict:
