@@ -49,6 +49,14 @@ from user_profile.models import Payment
 from utils.age import get_user_age, get_user_age_exact
 
 
+def _is_teen_for_paywall(user) -> bool:
+    age_exact = get_user_age_exact(user)
+    try:
+        return bool(age_exact is not None and 13.0 <= float(age_exact) < 21.0)
+    except (TypeError, ValueError):
+        return False
+
+
 def _with_adult_paywall_disabled_is_paid(user, payload: dict) -> dict:
     """
     When ADULT_PAYWALL_DISABLED is True, adults (21+) are reported as paid so
@@ -65,6 +73,39 @@ def _with_adult_paywall_disabled_is_paid(user, payload: dict) -> dict:
     if age < 21:
         return payload
     return {**payload, "is_paid": True}
+
+
+def _with_teen_paywall_disabled_is_paid(user, payload: dict) -> dict:
+    """
+    When TEEN_PAYWALL_DISABLED is True, teens (13–20) are reported as paid so
+    trial-expired UI and engine locks do not block QA testing.
+    """
+    if "is_paid" not in payload:
+        return payload
+    if not bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)):
+        return payload
+    if not _is_teen_for_paywall(user):
+        return payload
+    out = {
+        **payload,
+        "is_paid": True,
+        "is_trial": False,
+        "expired": False,
+    }
+    # Prevent post-day-7 trial lock paths that key off trial_day alone.
+    if out.get("trial_day") is not None:
+        try:
+            out["trial_day"] = min(int(out["trial_day"]), 7)
+        except (TypeError, ValueError):
+            out["trial_day"] = 7
+    return out
+
+
+def _apply_paywall_disabled_flags(user, payload: dict) -> dict:
+    """Apply adult then teen QA bypass flags to subscription payloads."""
+    return _with_teen_paywall_disabled_is_paid(
+        user, _with_adult_paywall_disabled_is_paid(user, payload)
+    )
 
 
 # def check_subscription_or_response(user):
@@ -179,7 +220,7 @@ def check_subscription_or_response(user):
             days_left = (expiry_date - now).days
             if not bool(package.is_free):
                 return Response(
-                    _with_adult_paywall_disabled_is_paid(
+                    _apply_paywall_disabled_flags(
                         user,
                         {
                             "expired": False,
@@ -204,7 +245,7 @@ def check_subscription_or_response(user):
         days_left = (trial_end - now).days
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1
         return Response(
-            _with_adult_paywall_disabled_is_paid(
+            _apply_paywall_disabled_flags(
                 user,
                 {
                     "expired": False,
@@ -227,7 +268,7 @@ def check_subscription_or_response(user):
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None
         # Spec-aligned free continuation after trial: app remains usable.
         return Response(
-            _with_adult_paywall_disabled_is_paid(
+            _apply_paywall_disabled_flags(
                 user,
                 {
                     "expired": False,
@@ -258,7 +299,7 @@ def check_subscription_or_response(user):
     if expiry_date < now:
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None
         return Response(
-            _with_adult_paywall_disabled_is_paid(
+            _apply_paywall_disabled_flags(
                 user,
                 {
                     "expired": False,
@@ -280,7 +321,7 @@ def check_subscription_or_response(user):
     days_left = (expiry_date - now).days
 
     return Response(
-        _with_adult_paywall_disabled_is_paid(
+        _apply_paywall_disabled_flags(
             user,
             {
                 "expired": False,

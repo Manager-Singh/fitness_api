@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.conf import settings
 from django.utils import timezone
 from django.db.models import Sum
 
@@ -547,6 +548,8 @@ def _daily_engine_points(user, log_date, age, subscription_data):
     is_paid = bool(subscription_data.get("is_paid", False))
     is_trial = bool(subscription_data.get("is_trial", False))
     trial_expired_unpaid = bool((not is_paid) and (not is_trial) and trial_day is not None and int(trial_day) > 7)
+    if bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)):
+        trial_expired_unpaid = False
 
     if trial_expired_unpaid:
         return 0.0, 0.0, exercise_points, food_points, lifestyle_points, 0

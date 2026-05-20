@@ -1,3 +1,6 @@
+from django.conf import settings
+
+
 def compute_monetization_flags(age_years, subscription_data, age_exact=None):
     is_paid = bool(subscription_data.get("is_paid", False))
     is_trial = bool(subscription_data.get("is_trial", False))
@@ -14,6 +17,21 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None):
         ae = float(int(age_years or 0))
     is_teen = 13.0 <= ae <= 20.999
     is_adult = ae >= 21.0
+
+    if bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)) and is_teen:
+        return {
+            "is_paid": True,
+            "is_trial": False,
+            "trial_day": trial_day if trial_day is not None else 1,
+            "is_teen": True,
+            "is_adult": False,
+            "teen_full_access": True,
+            "conversion_enabled": True,
+            "full_access_trial_expired": False,
+        }
+
+    if bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)) and is_adult:
+        is_paid = True
     teen_full_access = bool(is_paid or (is_trial and (trial_day is None or trial_day <= 7)))
     # Section 7: adult free is diagnosis-only; conversion/tracking requires paid.
     conversion_enabled = bool(is_paid or (is_teen and teen_full_access))
