@@ -8,6 +8,8 @@ import logging
 
 from django.conf import settings
 
+from utils.adult_dashboard_metrics import count_habits_logged
+
 logger = logging.getLogger(__name__)
 
 _SEGMENT_LONG_KEYS = {
@@ -198,7 +200,7 @@ def _posture_optimization_from_diagnostics(diagnostics: dict) -> dict:
 def _build_dashboard_new_embed_fast(user, log_date):
     """Lightweight dashboard-new snapshot for log POST (no full /dashboard rebuild)."""
     from utils.adult_dashboard_live import build_adult_dashboard_live_payload
-    from utils.adult_dashboard_metrics import adult_base_height_cm, count_habits_logged
+    from utils.adult_dashboard_metrics import adult_base_height_cm
     from utils.age import get_user_age, get_user_age_exact
     from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
     from users.spec_runtime import get_user_runtime_state_snapshot

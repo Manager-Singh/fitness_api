@@ -80,6 +80,11 @@ from utils.teen_dashboard_dots import (
     teen_lifestyle_nutrition_combined_percent,
     teen_nutrition_dots_from_food_points,
 )
+from utils.adult_dashboard_metrics import (
+    adult_daily_gains_cm_today,
+    count_habits_logged,
+    live_cumulative_gain_cm,
+)
 from utils.adult_nutrition import (
     adult_disc_muscle_food_id_sets,
     adult_engine_nutrition_points,
@@ -850,12 +855,6 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     )
     # Spec naming convention aliases (UI labels vs backend keys).
     # Use runtime ledger first (authoritative); fallback to score-derived conversion.
-    from utils.adult_dashboard_metrics import (
-        adult_daily_gains_cm_today,
-        count_habits_logged,
-        live_cumulative_gain_cm,
-    )
-
     runtime_height_um = runtime_state.get("current_height_um")
     posture_plus_cumulative_cm = round(float(score_summary.get("total_engine1_points", 0)) * 0.001, 4)
     if is_adult_track:
