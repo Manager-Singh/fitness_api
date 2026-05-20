@@ -1,6 +1,5 @@
 from datetime import date
 
-from django.conf import settings
 from django.utils import timezone
 from django.db.models import Sum
 
@@ -11,6 +10,7 @@ from workouts.models import WorkoutEntry
 from users.models import DailyLog, HeightLedger, PostureState, User
 from utils.age import get_user_age_exact_on_date, get_user_age_on_date
 from utils.check_payment import check_subscription_or_response
+from utils.paywall_flags import effective_is_paid, teen_paywall_disabled
 from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
@@ -545,10 +545,10 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         )
 
     trial_day = subscription_data.get("trial_day")
-    is_paid = bool(subscription_data.get("is_paid", False))
+    is_paid = effective_is_paid(user, subscription_data)
     is_trial = bool(subscription_data.get("is_trial", False))
     trial_expired_unpaid = bool((not is_paid) and (not is_trial) and trial_day is not None and int(trial_day) > 7)
-    if bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)):
+    if teen_paywall_disabled():
         trial_expired_unpaid = False
 
     if trial_expired_unpaid:

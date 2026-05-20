@@ -1,7 +1,13 @@
-from django.conf import settings
+from utils.paywall_flags import (
+    adult_paywall_disabled,
+    apply_monetization_qa_overlay,
+    is_adult_age,
+    is_teen_age,
+    teen_paywall_disabled,
+)
 
 
-def compute_monetization_flags(age_years, subscription_data, age_exact=None):
+def compute_monetization_flags(age_years, subscription_data, age_exact=None, user=None):
     is_paid = bool(subscription_data.get("is_paid", False))
     is_trial = bool(subscription_data.get("is_trial", False))
     trial_day = subscription_data.get("trial_day")
@@ -10,16 +16,16 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None):
     except (TypeError, ValueError):
         trial_day = None
 
-    # Prefer decimal DOB age when provided (Section 2 / dashboard / trial boundaries).
     try:
         ae = float(age_exact) if age_exact is not None else float(age_years or 0)
     except (TypeError, ValueError):
         ae = float(int(age_years or 0))
-    is_teen = 13.0 <= ae <= 20.999
-    is_adult = ae >= 21.0
 
-    if bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)) and is_teen:
-        return {
+    is_teen = is_teen_age(ae)
+    is_adult = is_adult_age(ae)
+
+    if teen_paywall_disabled() and is_teen:
+        result = {
             "is_paid": True,
             "is_trial": False,
             "trial_day": trial_day if trial_day is not None else 1,
@@ -29,15 +35,18 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None):
             "conversion_enabled": True,
             "full_access_trial_expired": False,
         }
+        return apply_monetization_qa_overlay(user, result, age_exact=ae) if user else result
 
-    if bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)) and is_adult:
+    if adult_paywall_disabled() and is_adult:
         is_paid = True
-    teen_full_access = bool(is_paid or (is_trial and (trial_day is None or trial_day <= 7)))
-    # Section 7: adult free is diagnosis-only; conversion/tracking requires paid.
-    conversion_enabled = bool(is_paid or (is_teen and teen_full_access))
-    full_access_trial_expired = bool(is_teen and (not is_paid) and trial_day is not None and trial_day > 7)
 
-    return {
+    teen_full_access = bool(is_paid or (is_trial and (trial_day is None or trial_day <= 7)))
+    conversion_enabled = bool(is_paid or (is_teen and teen_full_access))
+    full_access_trial_expired = bool(
+        is_teen and (not is_paid) and trial_day is not None and trial_day > 7
+    )
+
+    result = {
         "is_paid": is_paid,
         "is_trial": is_trial,
         "trial_day": trial_day,
@@ -47,3 +56,10 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None):
         "conversion_enabled": conversion_enabled,
         "full_access_trial_expired": full_access_trial_expired,
     }
+    if user is not None:
+        return apply_monetization_qa_overlay(user, result, age_exact=ae)
+    if adult_paywall_disabled() and is_adult:
+        result["is_paid"] = True
+        result["conversion_enabled"] = True
+        result["full_access_trial_expired"] = False
+    return result

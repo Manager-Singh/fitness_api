@@ -99,6 +99,7 @@ def build_adult_dashboard_live_payload(user, log_date=None):
         age,
         subscription_data,
         age_exact=get_user_age_exact(user),
+        user=user,
     )
     conversion_enabled = bool(monetization.get("conversion_enabled"))
 

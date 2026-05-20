@@ -120,11 +120,15 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     profile_gender = str((payload.get("profile") or {}).get("gender") or "male").strip().lower()
     if profile_gender not in {"male", "female"}:
         profile_gender = "male"
-    teen_locked_post_day7 = bool(
-        is_teen
-        and bool((payload.get("subscription") or {}).get("is_paid") is False)
-        and bool(payload.get("full_access_trial_expired"))
+    from utils.paywall_flags import effective_full_access_trial_expired, effective_is_paid
+
+    sub = payload.get("subscription") or {}
+    paid = effective_is_paid(user, sub, age_exact=payload.get("age_exact"))
+    trial_expired = effective_full_access_trial_expired(
+        user, {**sub, "full_access_trial_expired": payload.get("full_access_trial_expired")},
+        age_exact=payload.get("age_exact"),
     )
+    teen_locked_post_day7 = bool(is_teen and not paid and trial_expired)
     # Spec (Sections 5.5 / 7.2 / 11.5): post-day-7 unpaid teen red line (and height card)
     # must flatline at the trial-end snapshot while blue continues to rise.
     if teen_locked_post_day7 and display_lines.get("red_us_optimized_line_cm") is not None:
@@ -135,7 +139,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         except Exception:
             logger.exception("Failed applying teen_locked_post_day7 red-line override")
     # Spec (Section 5.6 / 7.2): True Optimized Height is revealed ONLY when paid (not during trial).
-    can_view_true_optimized = bool(is_teen and bool((payload.get("subscription") or {}).get("is_paid", False)))
+    can_view_true_optimized = bool(is_teen and paid)
     teen_scan_required = bool(scan_access.get("teen_scan_required", False))
     true_optimized_locked = bool(display_lines.get("green_true_optimized_locked", False) or teen_locked_post_day7)
     teen_scan_completed = bool(scan_access.get("scan_completed"))

@@ -465,7 +465,9 @@ class UserStateAPIView(APIView):
         )
         age_exact = get_user_age_exact(user)
         subscription = check_subscription_or_response(user).data
-        monetization = compute_monetization_flags(int(age_exact or 0), subscription)
+        monetization = compute_monetization_flags(
+            int(age_exact or 0), subscription, age_exact=age_exact, user=user
+        )
         points_today = 0
         if daily:
             points_today = (daily.exercise_points + daily.food_points + daily.lifestyle_points)

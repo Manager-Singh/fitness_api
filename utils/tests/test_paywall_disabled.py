@@ -5,6 +5,7 @@ from django.test import TestCase, override_settings
 
 from user_profile.models import UserProfile
 from utils.check_payment import _apply_paywall_disabled_flags, check_subscription_or_response
+from utils.paywall_flags import effective_is_paid, qa_paid_bypass_for_user
 from utils.monetization_gate import compute_monetization_flags
 
 User = get_user_model()
@@ -78,3 +79,12 @@ class PaywallDisabledFlagTests(TestCase):
         out = _apply_paywall_disabled_flags(teen, payload)
         self.assertTrue(out["is_paid"])
         self.assertLessEqual(int(out["trial_day"]), 7)
+
+    @override_settings(TEEN_PAYWALL_DISABLED=True, ADULT_PAYWALL_DISABLED=True)
+    def test_effective_is_paid_bypass_for_both_tiers(self):
+        teen = self._teen_user()
+        adult = self._adult_user()
+        self.assertTrue(qa_paid_bypass_for_user(teen))
+        self.assertTrue(qa_paid_bypass_for_user(adult))
+        self.assertTrue(effective_is_paid(teen, {"is_paid": False}))
+        self.assertTrue(effective_is_paid(adult, {"is_paid": False}))

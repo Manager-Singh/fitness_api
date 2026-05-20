@@ -732,8 +732,10 @@ def get_user_score_summary(user, subscription_data, mode=None):
 
     total_posture_gain = total_score_till_now * 0.001
 
-    is_paid = bool(subscription_data.get("is_paid", False))
-    is_trial = bool(subscription_data.get("is_trial", False))
+    from utils.paywall_flags import effective_is_paid, qa_paid_bypass_for_user
+
+    is_paid = effective_is_paid(user, subscription_data)
+    is_trial = bool(subscription_data.get("is_trial", False)) and not qa_paid_bypass_for_user(user)
     conversion_enabled = is_paid or is_trial
 
     # Engine totals from daily routing rules.

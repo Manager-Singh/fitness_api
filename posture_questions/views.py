@@ -636,7 +636,9 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     green_dots = calculate_green_dots(user=user, target_date=target_date)
 
     
-    monetization = compute_monetization_flags(age_years, subscription_data, age_exact=age_exact)
+    monetization = compute_monetization_flags(
+        age_years, subscription_data, age_exact=age_exact, user=user
+    )
     is_paid = monetization["is_paid"]
     streaks = get_user_streaks(user,subscription_data)
     # ── 8. Posture AI analysis ────────────────────────────
@@ -1054,11 +1056,6 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     trial_day_int = monetization["trial_day"]
     full_access_trial_active = bool(monetization["is_teen"] and monetization["is_trial"] and not monetization["full_access_trial_expired"])
     full_access_trial_expired = monetization["full_access_trial_expired"]
-    if bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)) and is_teen_track:
-        full_access_trial_expired = False
-        is_paid = True
-    if bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)) and is_adult_track:
-        is_paid = True
     # Spec (Section 5.6 / 7.2): True Optimized Height is NEVER revealed until payment,
     # including during the 7-day teen trial.
     can_view_true_optimized = bool(is_teen_track and is_paid)

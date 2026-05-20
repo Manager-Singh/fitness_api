@@ -46,66 +46,13 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework import status
 from user_profile.models import Payment
-from utils.age import get_user_age, get_user_age_exact
-
-
-def _is_teen_for_paywall(user) -> bool:
-    age_exact = get_user_age_exact(user)
-    try:
-        return bool(age_exact is not None and 13.0 <= float(age_exact) < 21.0)
-    except (TypeError, ValueError):
-        return False
-
-
-def _with_adult_paywall_disabled_is_paid(user, payload: dict) -> dict:
-    """
-    When ADULT_PAYWALL_DISABLED is True, adults (21+) are reported as paid so
-    clients and gates see consistent subscription_data without duplicating the flag.
-    """
-    if "is_paid" not in payload:
-        return payload
-    try:
-        if not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
-            return payload
-        age = int(get_user_age(user) or 0)
-    except Exception:
-        return payload
-    if age < 21:
-        return payload
-    return {**payload, "is_paid": True}
-
-
-def _with_teen_paywall_disabled_is_paid(user, payload: dict) -> dict:
-    """
-    When TEEN_PAYWALL_DISABLED is True, teens (13–20) are reported as paid so
-    trial-expired UI and engine locks do not block QA testing.
-    """
-    if "is_paid" not in payload:
-        return payload
-    if not bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False)):
-        return payload
-    if not _is_teen_for_paywall(user):
-        return payload
-    out = {
-        **payload,
-        "is_paid": True,
-        "is_trial": False,
-        "expired": False,
-    }
-    # Prevent post-day-7 trial lock paths that key off trial_day alone.
-    if out.get("trial_day") is not None:
-        try:
-            out["trial_day"] = min(int(out["trial_day"]), 7)
-        except (TypeError, ValueError):
-            out["trial_day"] = 7
-    return out
+from utils.age import get_user_age_exact
+from utils.paywall_flags import apply_subscription_qa_overlay
 
 
 def _apply_paywall_disabled_flags(user, payload: dict) -> dict:
-    """Apply adult then teen QA bypass flags to subscription payloads."""
-    return _with_teen_paywall_disabled_is_paid(
-        user, _with_adult_paywall_disabled_is_paid(user, payload)
-    )
+    """Apply QA paywall bypass flags so subscription_data reflects full paid access."""
+    return apply_subscription_qa_overlay(user, payload)
 
 
 # def check_subscription_or_response(user):
