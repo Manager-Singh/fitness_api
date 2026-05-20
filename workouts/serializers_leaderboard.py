@@ -6,6 +6,8 @@ class LeaderboardEntrySerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
     display_name = serializers.CharField()
     avatar_url = serializers.CharField(allow_blank=True, allow_null=True)
+    country_code = serializers.CharField(allow_null=True, required=False)
+    country_flag_emoji = serializers.CharField(allow_null=True, required=False)
     points = serializers.IntegerField()
     # Backward-compatible alias for older clients that render `score`.
     score = serializers.IntegerField(source="points", read_only=True)

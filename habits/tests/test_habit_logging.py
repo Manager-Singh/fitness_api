@@ -41,3 +41,14 @@ class HabitLoggingTests(TestCase):
         log_habit(self.user, self.log_date, "doorway_posture_reset", "once")
         self.assertEqual(total_raw_habit_points(self.user, self.log_date), 6)
         self.assertEqual(capped_habit_points_for_engine(self.user, self.log_date), DAILY_HABIT_CAP)
+
+    def test_rebuild_ledger_includes_habit_only_day(self):
+        from users.models import DailyLog
+        from users.spec_runtime import rebuild_ledger_from_date
+
+        log_habit(self.user, self.log_date, "tech_neck_lift", "once")
+        rebuild_ledger_from_date(self.user, self.log_date)
+        daily = DailyLog.objects.filter(user=self.user, log_date=self.log_date).first()
+        self.assertIsNotNone(daily)
+        self.assertEqual(daily.habit_points, 1)
+        self.assertGreaterEqual(daily.engine1_points, 1)

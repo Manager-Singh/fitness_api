@@ -2,9 +2,21 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
 from .models import OTP
 from django.utils import timezone
+from utils.country import DEFAULT_COUNTRY_CODE, normalize_country_code, resolve_country_code
 import datetime
 
 User = get_user_model()
+
+
+def _validate_country_code_field(value):
+    if value in (None, ""):
+        return None
+    normalized = normalize_country_code(value)
+    if not normalized:
+        raise serializers.ValidationError(
+            "country_code must be a 2-letter ISO code (e.g. CA, US)."
+        )
+    return normalized
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -16,6 +28,7 @@ class UserSerializer(serializers.ModelSerializer):
             'display_name',
             'avatar_url',
             'timezone',
+            'country_code',
             'device_id',
             'role',
             'verified',
@@ -26,9 +39,16 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
 class RegisterSerializer(serializers.ModelSerializer):
+    country_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=2,
+        default=DEFAULT_COUNTRY_CODE,
+    )
+
     class Meta:
         model = User
-        fields = ('email', 'name', 'password', 'device_id','fcm_token')
+        fields = ('email', 'name', 'password', 'device_id', 'fcm_token', 'country_code')
         extra_kwargs = {
             'password': {'write_only': True, 'required': True},
             'email': {'required': True},
@@ -37,7 +57,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             'fcm_token': {'required': False},  # Make device_id optional
         }
 
+    def validate_country_code(self, value):
+        if value in (None, ""):
+            return DEFAULT_COUNTRY_CODE
+        return _validate_country_code_field(value)
+
     def create(self, validated_data):
+        country_code = validated_data.pop('country_code', DEFAULT_COUNTRY_CODE)
         # Create user with email as both email and username
         user = User.objects.create_user(
             email=validated_data['email'],
@@ -45,6 +71,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             name=validated_data.get('name'),
             device_id=validated_data.get('device_id'),
             fcm_token=validated_data.get('fcm_token'),
+            country_code=country_code,
             username=validated_data['email'],  # Use email as username
         )
         return user
@@ -58,6 +85,17 @@ class SocialLoginSerializer(serializers.Serializer):
     social_type = serializers.ChoiceField(choices=["google", "facebook", "apple"])
     device_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     fcm_token = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    country_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=2,
+        default=DEFAULT_COUNTRY_CODE,
+    )
+
+    def validate_country_code(self, value):
+        if value in (None, ""):
+            return DEFAULT_COUNTRY_CODE
+        return _validate_country_code_field(value)
 
     def create(self, validated_data):
         social_id   = validated_data['social_id']
@@ -67,6 +105,8 @@ class SocialLoginSerializer(serializers.Serializer):
         social_type = validated_data['social_type']
         fcm_token   = validated_data.get('fcm_token')
         device_id   = validated_data.get('device_id')  #  Use .get()
+        country_code = validated_data.get('country_code', DEFAULT_COUNTRY_CODE)
+        raw_cc = (getattr(self, "initial_data", None) or {}).get("country_code")
 
         user = User.objects.filter(social_id=social_id).first()
 
@@ -77,6 +117,8 @@ class SocialLoginSerializer(serializers.Serializer):
             user.social_type = social_type
             user.fcm_token = fcm_token or user.fcm_token
             user.device_id = device_id
+            if raw_cc not in (None, ""):
+                user.country_code = country_code
             user.save()
             return user, False  # Existing user
         else:
@@ -89,6 +131,7 @@ class SocialLoginSerializer(serializers.Serializer):
                 social_type=social_type,
                 fcm_token=fcm_token,
                 device_id=device_id,
+                country_code=country_code,
             )
             user.set_password(social_id)
             user.save()

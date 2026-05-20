@@ -30,6 +30,7 @@ from users.models import DailyLog, HeightLedger
 from users.spec_runtime import get_user_runtime_state_snapshot
 from workouts.models import UserRoutine
 from django.db.models import Sum
+from utils.country import normalize_country_code
 from utils.posture.height_constants import (
     ADULT_AGE_MAX,
     ADULT_MIN_AGE,
@@ -420,6 +421,20 @@ def update_profile_users(request):
         if tz:
             user.timezone = tz
             user_update_fields.append("timezone")
+    if "country_code" in request.data:
+        raw_cc = request.data.get("country_code")
+        if raw_cc in (None, ""):
+            user.country_code = ""
+            user_update_fields.append("country_code")
+        else:
+            cc = normalize_country_code(raw_cc)
+            if not cc:
+                return Response(
+                    {"error": "country_code must be a 2-letter ISO code (e.g. CA, US)."},
+                    status=422,
+                )
+            user.country_code = cc
+            user_update_fields.append("country_code")
     if user_update_fields:
         user.save(update_fields=user_update_fields)
 
@@ -1126,6 +1141,18 @@ def my_profile(request):
             tz = str(request.data.get("timezone") or "").strip()
             if tz:
                 user.timezone = tz
+        if "country_code" in request.data:
+            raw_cc = request.data.get("country_code")
+            if raw_cc in (None, ""):
+                user.country_code = ""
+            else:
+                cc = normalize_country_code(raw_cc)
+                if not cc:
+                    return Response(
+                        {"error": "country_code must be a 2-letter ISO code (e.g. CA, US)."},
+                        status=422,
+                    )
+                user.country_code = cc
 
         # Profile-level onboarding fields (reuse same validation constants as update_profile_users).
         if "gender" in request.data:
@@ -1293,6 +1320,7 @@ def my_profile(request):
                     "timezone": getattr(user, "timezone", None),
                     "display_name": getattr(user, "display_name", None),
                     "avatar_url": getattr(user, "avatar_url", None),
+                    "country_code": normalize_country_code(getattr(user, "country_code", None)),
                 },
                 "profile": {
                     "gender": profile.gender,

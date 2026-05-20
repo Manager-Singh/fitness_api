@@ -42,6 +42,12 @@ class User(AbstractUser):
     last_reset_date = models.DateField(null=True, blank=True)
     display_name = models.CharField(max_length=255, null=True, blank=True)
     avatar_url = models.URLField(null=True, blank=True)
+    country_code = models.CharField(
+        max_length=2,
+        default="CA",
+        blank=True,
+        help_text="ISO 3166-1 alpha-2 (e.g. CA, US). Used for leaderboard flags.",
+    )
 
     
      

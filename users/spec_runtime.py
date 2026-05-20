@@ -423,7 +423,14 @@ def rebuild_ledger_from_date(user, from_date):
         .values_list("session__date", flat=True)
         .distinct()
     )
-    days = sorted({*dailylog_days, *workout_days, *nutra_days})
+    from habits.models import MicroHabitLog
+
+    habit_days = list(
+        MicroHabitLog.objects.filter(user=user, log_date__gte=from_date)
+        .values_list("log_date", flat=True)
+        .distinct()
+    )
+    days = sorted({from_date, *dailylog_days, *workout_days, *nutra_days, *habit_days})
     results = []
     for d in days:
         results.append(compute_daily_height_for_user(user, log_date=d, force_recompute=True))
