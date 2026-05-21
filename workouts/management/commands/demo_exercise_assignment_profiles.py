@@ -47,7 +47,9 @@ class Command(BaseCommand):
         adult_pool = list(adult_scoring_pool_queryset(Exercise))
         teen_pool = list(teen_scoring_pool_queryset(Exercise))
         if not adult_pool:
-            self.stderr.write("No backfilled adult exercises — run migrations first.")
+            self.stderr.write(
+                "No backfilled adult exercises — run: python manage.py backfill_exercise_assignment_spec"
+            )
             return
 
         core_names = TEEN_CORE_6_NAMES

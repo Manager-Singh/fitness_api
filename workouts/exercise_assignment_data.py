@@ -277,6 +277,14 @@ def spec_key_for_name(name: str) -> str | None:
     return EXERCISE_NAME_ALIASES.get(key)
 
 
+def is_teen_only_exercise(exercise) -> bool:
+    """True for HGH teen exclusives (flag or known spec/name)."""
+    if getattr(exercise, "teen_only", False):
+        return True
+    key = spec_key_for_name(getattr(exercise, "name", "") or "")
+    return bool(key and key in TEEN_ONLY_HGH_NAMES)
+
+
 def apply_spec_to_exercise_dict(spec: dict) -> dict:
     """Fields to set on Exercise model from a spec row."""
     return {

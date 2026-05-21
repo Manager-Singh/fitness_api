@@ -15,6 +15,7 @@ from workouts.exercise_assignment_data import (
     TEEN_HGH_POOL_CANONICAL_NAMES,
     TEEN_POSTURE_POOL_CANONICAL_NAMES,
     ADULT_POSTURE_POOL_CANONICAL_NAMES,
+    is_teen_only_exercise,
     normalize_exercise_name,
     spec_key_for_name,
 )
@@ -70,9 +71,7 @@ def audit_variant(variant: RoutineVariant) -> list[str]:
 
     for ve in prescriptions:
         ex = ve.exercise
-        if not teen and (ex.teen_only or normalize_exercise_name(ex.name) in {
-            n.lower() for n in TEEN_HGH_POOL_CANONICAL_NAMES
-        }):
+        if not teen and is_teen_only_exercise(ex):
             issues.append(
                 f"Adult variant has teen-only exercise: {ex.name} (tier={ve.tier}, order={ve.order})"
             )
@@ -128,10 +127,10 @@ def sync_variant_prescriptions(variant: RoutineVariant, *, dry_run: bool = False
     teen = variant_is_teen(variant)
     bracket_min = variant.age_bracket.min_age
 
-    # 1) Remove teen-only from adult variants
+    # 1) Remove teen-only from adult variants (by flag or known HGH names)
     if not teen:
         for ve in variant.prescriptions.select_related("exercise").all():
-            if ve.exercise.teen_only:
+            if is_teen_only_exercise(ve.exercise):
                 stats["removed"] += 1
                 if not dry_run:
                     ve.delete()
@@ -178,7 +177,7 @@ def sync_variant_prescriptions(variant: RoutineVariant, *, dry_run: bool = False
         ex = resolve_exercise_by_canonical_name(canonical)
         if not ex or ex.id in core_exercise_ids:
             continue
-        if not teen and ex.teen_only:
+        if not teen and is_teen_only_exercise(ex):
             continue
         if dry_run:
             stats["pool_upserted"] += 1
