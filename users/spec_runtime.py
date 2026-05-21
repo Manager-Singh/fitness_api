@@ -223,13 +223,12 @@ def set_daily_validated(user, log_date):
         daily.validated = bool(core_posture_done and has_disc and has_muscle)
     else:
         core_posture_done = _core_done(RoutineType.POSTURE)
-        core_hgh_done = _core_done(RoutineType.HGH)
         any_food = NutraEntry.objects.filter(
             session__user=user,
             session__date=log_date,
             food__isnull=False,
         ).exists()
-        daily.validated = bool(core_posture_done and core_hgh_done and any_food)
+        daily.validated = bool(core_posture_done and any_food)
 
     daily.save(update_fields=["validated", "updated_at"])
     return daily

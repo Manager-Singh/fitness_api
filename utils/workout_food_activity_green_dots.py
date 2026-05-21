@@ -94,6 +94,9 @@ def calculate_green_dots(user, target_date=None):
                 and tier in [Tier.CORE, Tier.RECOMMENDED, Tier.BEAST]
             ):
                 posture_dots += 1
+                cat = str(getattr(ex, "category", "") or "").lower()
+                if tier == Tier.CORE and (cat == "hgh" or getattr(ex, "teen_only", False)):
+                    hgh_dots += 1
 
             if (
                 wsession.user_routine.routine_type == "HGH"

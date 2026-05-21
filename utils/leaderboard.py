@@ -217,7 +217,8 @@ def _is_valid_streak_day(user, day, age):
         session__date=day,
         food__isnull=False,
     ).exists()
-    return core_done(RoutineType.POSTURE) and core_done(RoutineType.HGH) and teen_food_ok
+    # Unified teen POSTURE routine (Core 6 includes former Core 2 HGH).
+    return core_done(RoutineType.POSTURE) and teen_food_ok
 
 
 def _current_validated_streak(user, today):

@@ -296,7 +296,11 @@ def upsert_posture_questions(request):
                     )
                 # v3.3: Run exercise assignment pipeline immediately after teen questionnaire unlock.
                 try:
-                    RoutineService.ensure_active_routine(user, section3_contract["optimization_breakdown"])
+                    RoutineService.ensure_active_routine(
+                        user,
+                        section3_contract["optimization_breakdown"],
+                        section3_contract=section3_contract,
+                    )
                 except Exception:
                     logger.exception(
                         "Failed generating teen routine after questionnaire unlock",

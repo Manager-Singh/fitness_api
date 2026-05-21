@@ -89,9 +89,8 @@ class UserRoutineListView(APIView):
                         return True
                 return False
 
-            posture_bad = _has_wrong_category(posture, {"posture", "general"})
-            hgh_bad = _has_wrong_category(hgh, {"hgh", "environment", "general"})
-            if posture_bad or hgh_bad:
+            posture_bad = _has_wrong_category(posture, {"posture", "general", "hgh"})
+            if posture_bad:
                 latest_report = PostureReport.objects.filter(user=request.user).order_by("-created_at").first()
                 breakdown = None
                 if latest_report and isinstance(latest_report.data, dict):
@@ -115,55 +114,49 @@ class UserRoutineListView(APIView):
             serializer = UserRoutineSerializer(routine, context={"request": request})
             return Response(serializer.data)
 
-        # Teen UX: return a single merged routine object (POSTURE + HGH).
-        # This prevents clients from receiving two separate objects for the same day.
+        # Teen UX: unified 10-exercise POSTURE routine (legacy MIXED merge if old HGH row still active).
         if age < 21:
             routines = list(routines_qs)
             posture = next((r for r in routines if str(r.routine_type).lower() == "posture"), None)
             hgh = next((r for r in routines if str(r.routine_type).lower() == "hgh"), None)
-            mixed_routine_id = posture.id if posture else (hgh.id if hgh else None)
-
-            merged_exercises = []
-            merged_created_at = None
-            merged_updated_at = None
-
-            for r in [posture, hgh]:
-                if not r:
-                    continue
-                if merged_created_at is None or r.created_at < merged_created_at:
-                    merged_created_at = r.created_at
-                if merged_updated_at is None or r.updated_at > merged_updated_at:
-                    merged_updated_at = r.updated_at
-
-                r_data = UserRoutineSerializer(r, context={"request": request}).data
-                for ex in r_data.get("exercises", []) or []:
-                    # Add minimal source context so clients can log correctly.
-                    ex["source_routine_type"] = r_data.get("routine_type")
-                    # Expose a single routine id for the whole MIXED routine so clients
-                    # can POST workout logs with one `user_routine` value.
-                    ex["user_routine_id"] = mixed_routine_id
-                    # Keep the true underlying routine id so the server can route logs.
-                    ex["source_user_routine_id"] = r_data.get("id")
-                    # Alias keys (some clients prefer explicit routine_id naming).
-                    ex["routine_id"] = mixed_routine_id
-                    ex["source_routine_id"] = r_data.get("id")
-                    merged_exercises.append(ex)
-
-            # Deterministic ordering: preserve per-routine order, posture first then HGH,
-            # and stable-tie-break on `id` if order values collide.
-            merged_exercises.sort(key=lambda e: (0 if str(e.get("source_routine_type", "")).lower() == "posture" else 1,
-                                                int(e.get("order") or 0),
-                                                int(e.get("id") or 0)))
-
-            merged_payload = {
-                "id": posture.id if posture else (hgh.id if hgh else None),
-                "routine_type": "MIXED",
-                "created_at": (merged_created_at or (posture.created_at if posture else (hgh.created_at if hgh else None))),
-                "updated_at": (merged_updated_at or (posture.updated_at if posture else (hgh.updated_at if hgh else None))),
-                "is_active": True,
-                "exercises": merged_exercises,
-            }
-            return Response(merged_payload)
+            if posture and not hgh:
+                serializer = UserRoutineSerializer(posture, context={"request": request})
+                return Response(serializer.data)
+            if posture or hgh:
+                mixed_routine_id = posture.id if posture else (hgh.id if hgh else None)
+                merged_exercises = []
+                merged_created_at = None
+                merged_updated_at = None
+                for r in [posture, hgh]:
+                    if not r:
+                        continue
+                    if merged_created_at is None or r.created_at < merged_created_at:
+                        merged_created_at = r.created_at
+                    if merged_updated_at is None or r.updated_at > merged_updated_at:
+                        merged_updated_at = r.updated_at
+                    r_data = UserRoutineSerializer(r, context={"request": request}).data
+                    for ex in r_data.get("exercises", []) or []:
+                        ex["source_routine_type"] = r_data.get("routine_type")
+                        ex["user_routine_id"] = mixed_routine_id
+                        ex["source_user_routine_id"] = r_data.get("id")
+                        ex["routine_id"] = mixed_routine_id
+                        ex["source_routine_id"] = r_data.get("id")
+                        merged_exercises.append(ex)
+                merged_exercises.sort(
+                    key=lambda e: (
+                        0 if str(e.get("source_routine_type", "")).lower() == "posture" else 1,
+                        int(e.get("order") or 0),
+                        int(e.get("id") or 0),
+                    )
+                )
+                return Response({
+                    "id": mixed_routine_id,
+                    "routine_type": "MIXED",
+                    "created_at": merged_created_at,
+                    "updated_at": merged_updated_at,
+                    "is_active": True,
+                    "exercises": merged_exercises,
+                })
 
         # Otherwise return all routines as a list
         serializer = UserRoutineSerializer(routines_qs, many=True, context={"request": request})

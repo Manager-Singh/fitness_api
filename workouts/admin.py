@@ -1,5 +1,8 @@
 # workouts/admin.py
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import ValidationError
+from django.forms.models import BaseInlineFormSet
 from django.utils.html import format_html
 from django.contrib import messages
 from django.contrib.admin import helpers
@@ -8,6 +11,7 @@ from django.template.response import TemplateResponse
 from django.utils.translation import gettext_lazy as _
 
 from .forms import ExerciseAdminForm
+from .variant_prescription_sync import audit_variant, sync_variant_prescriptions, variant_is_teen
 from .models import (
     Exercise, AgeBracket,
     RoutineTemplate, RoutineVariant, VariantExercise,
@@ -53,11 +57,21 @@ def _demo_scan_score_from_breakdown(breakdown: dict) -> dict:
 class ExerciseAdmin(admin.ModelAdmin):
     form = ExerciseAdminForm
     exclude = ("instruction_content",)
-    list_display   = ("name","short_name", "category", "points", "thumb")
-    list_filter    = ("category",)
-    list_editable  = ("category", "points")
-    search_fields  = ("name",)
+    search_fields = ("name",)
     readonly_fields = ("thumb",)
+    list_editable = ("category", "points", "teen_only")
+    list_display = (
+        "name",
+        "short_name",
+        "category",
+        "points",
+        "teen_only",
+        "potency",
+        "assignment_ready",
+        "thumb",
+    )
+    list_filter = ("category", "teen_only", "age_group", "adult_only")
+
     fieldsets = (
         (
             None,
@@ -73,6 +87,20 @@ class ExerciseAdmin(admin.ModelAdmin):
             },
         ),
         (
+            _("Exercise Assignment Spec"),
+            {
+                "fields": (
+                    ("age_group", "teen_only", "adult_only"),
+                    ("spinal_pct", "collapse_pct", "pelvic_pct", "legs_pct"),
+                    ("potency", "hgh_score", "beast_bonus"),
+                ),
+                "description": _(
+                    "Segment % must sum to 100. Used for Recommended/Beast scoring. "
+                    "Teen-only HGH exercises must have teen_only checked."
+                ),
+            },
+        ),
+        (
             _("Instructions"),
             {
                 "classes": ("wide",),
@@ -83,6 +111,12 @@ class ExerciseAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    def assignment_ready(self, obj):
+        return obj.assignment_matrix_ready
+
+    assignment_ready.boolean = True
+    assignment_ready.short_description = "Matrix OK"
 
     def thumb(self, obj):
         """Small preview in list & form pages."""
@@ -132,22 +166,50 @@ class RoutineTemplateAdmin(admin.ModelAdmin):
 #         "notes",
 #     )
 
+class VariantExerciseInlineFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        variant = self.instance
+        if not variant or not variant.pk:
+            return
+        teen = variant_is_teen(variant)
+        if teen:
+            return
+        for form in self.forms:
+            if not hasattr(form, "cleaned_data") or form.cleaned_data.get("DELETE"):
+                continue
+            ex = form.cleaned_data.get("exercise")
+            if ex and ex.teen_only:
+                raise ValidationError(
+                    f'"{ex.name}" is teen-only and cannot be on an adult routine variant.'
+                )
+
+
 class VariantExerciseInline(admin.TabularInline):
     model = VariantExercise
+    formset = VariantExerciseInlineFormSet
     extra = 1
     autocomplete_fields = ("exercise",)
     ordering = ("order",)
 
-    readonly_fields = ("male_thumb", "female_thumb")
+    readonly_fields = ("male_thumb", "female_thumb", "exercise_teen_only")
 
     fields = (
         "order", "tier",
-        "exercise", "type", "sets",
+        "exercise", "exercise_teen_only", "type", "sets",
         "quantity_min", "quantity_max", "unit",
         "image_male", "image_female",
         "male_thumb", "female_thumb",
         "notes",
     )
+
+    def exercise_teen_only(self, obj):
+        if obj.exercise_id:
+            return obj.exercise.teen_only
+        return False
+
+    exercise_teen_only.boolean = True
+    exercise_teen_only.short_description = "Teen only"
 
     def male_thumb(self, obj):
         if obj.image_male:
@@ -170,37 +232,92 @@ class VariantExerciseInline(admin.TabularInline):
 
 @admin.register(RoutineVariant)
 class RoutineVariantAdmin(admin.ModelAdmin):
-    list_display  = ("template", "age_bracket", "track", "exercise_count")
+    list_display  = ("template", "age_bracket", "track", "exercise_count", "variant_health")
     list_filter   = ("template", "age_bracket", "track")
     search_fields = ("template__name", "age_bracket__title")
     inlines       = (VariantExerciseInline,)
+    actions       = ["audit_selected_variants", "sync_prescriptions_selected"]
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "exercise":
+            # Inline uses exercise FK on VariantExercise — handled in inline formset.
+            pass
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def variant_health(self, obj):
+        issues = audit_variant(obj)
+        if not issues:
+            return format_html('<span style="color:green">OK</span>')
+        return format_html('<span style="color:red" title="{}">{} issue(s)</span>', issues[0], len(issues))
+
+    variant_health.short_description = "Health"
 
     def exercise_count(self, obj):
         return obj.prescriptions.count()
     exercise_count.short_description = "# Exercises"
 
+    @admin.action(description="Audit variant exercises (teen-only / core 6 checks)")
+    def audit_selected_variants(self, request, queryset):
+        for variant in queryset.select_related("age_bracket", "template"):
+            issues = audit_variant(variant)
+            if issues:
+                self.message_user(
+                    request,
+                    f"{variant}: " + "; ".join(issues[:3]),
+                    level=messages.WARNING,
+                )
+            else:
+                self.message_user(request, f"{variant}: OK", level=messages.SUCCESS)
+
+    @admin.action(description="Sync Core 6 + posture pool from spec (fixes attachments)")
+    def sync_prescriptions_selected(self, request, queryset):
+        total_removed = 0
+        total_core = 0
+        total_pool = 0
+        for variant in queryset.select_related("age_bracket", "template"):
+            stats = sync_variant_prescriptions(variant, dry_run=False)
+            total_removed += stats["removed"]
+            total_core += stats["core_upserted"]
+            total_pool += stats["pool_upserted"]
+            if stats["issues"]:
+                self.message_user(
+                    request,
+                    f"{variant}: " + "; ".join(stats["issues"][:2]),
+                    level=messages.WARNING,
+                )
+        self.message_user(
+            request,
+            f"Synced {queryset.count()} variant(s): removed {total_removed} teen row(s) from adults, "
+            f"upserted {total_core} core + {total_pool} pool attachments.",
+            level=messages.SUCCESS,
+        )
+
 
 # ─────────────────────────  STAND-ALONE  ────────────────────────
-# @admin.register(VariantExercise)
-# class VariantExerciseAdmin(admin.ModelAdmin):
-#     list_display        = (
-#         "variant", "order", "tier",
-#         "exercise","type", "sets",
-#         "quantity_min", "quantity_max", "unit",
-#     )
-#     list_filter         = ("tier", "unit", "variant__template")
-#     autocomplete_fields = ("variant", "exercise")
-#     ordering            = ("variant", "order")
-
+@admin.register(VariantExercise)
 class VariantExerciseAdmin(admin.ModelAdmin):
     list_display = (
-        "variant", "order", "tier",
-        "exercise", "type", "sets",
-        "quantity_min", "quantity_max", "unit",
-        "male_thumb", "female_thumb",
+        "variant",
+        "order",
+        "tier",
+        "exercise",
+        "teen_only_flag",
+        "type",
+        "sets",
+        "quantity_min",
+        "quantity_max",
+        "unit",
+        "male_thumb",
+        "female_thumb",
     )
 
-    list_filter = ("tier", "unit", "variant__template")
+    list_filter = ("tier", "unit", "variant__template", "variant__age_bracket")
+
+    def teen_only_flag(self, obj):
+        return obj.exercise.teen_only if obj.exercise_id else False
+
+    teen_only_flag.boolean = True
+    teen_only_flag.short_description = "Teen only"
     autocomplete_fields = ("variant", "exercise")
     ordering = ("variant", "order")
 

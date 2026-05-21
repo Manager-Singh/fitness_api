@@ -13,7 +13,11 @@ class RoutineService:
     """Service for managing user workout routines"""
 
     @staticmethod
-    def ensure_active_routine(user, optimization_breakdown: Dict[str, Any]) -> bool:
+    def ensure_active_routine(
+        user,
+        optimization_breakdown: Dict[str, Any],
+        section3_contract: Dict[str, Any] | None = None,
+    ) -> bool:
         """Ensure user has an active routine, create if needed
         
         Returns:
@@ -26,7 +30,11 @@ class RoutineService:
         
         if not has_active_routine:
             try:
-                generate_user_routines(user, optimization_breakdown)
+                generate_user_routines(
+                    user,
+                    optimization_breakdown,
+                    section3_contract=section3_contract,
+                )
             except ValidationError as exc:
                 # Missing AgeBracket / RoutineVariant seed data should not block
                 # questionnaire unlock or posture loss persistence.

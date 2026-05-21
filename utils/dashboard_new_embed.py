@@ -76,18 +76,12 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         from nutration.models_log import NutraEntry
         from django.db.models import Sum
 
-        assigned_posture = UserRoutineExercise.objects.filter(
+        assigned_total = UserRoutineExercise.objects.filter(
             routine__user=user,
             routine__is_active=True,
             routine__routine_type=RoutineType.POSTURE,
         ).count()
-        assigned_hgh = UserRoutineExercise.objects.filter(
-            routine__user=user,
-            routine__is_active=True,
-            routine__routine_type=RoutineType.HGH,
-        ).count()
-        assigned_total = assigned_posture + assigned_hgh
-        completed_posture = (
+        completed_total = (
             WorkoutEntry.objects.filter(
                 session__user=user,
                 session__date=log_date,
@@ -98,18 +92,6 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
             .distinct()
             .count()
         )
-        completed_hgh = (
-            WorkoutEntry.objects.filter(
-                session__user=user,
-                session__date=log_date,
-                session__user_routine__routine_type=RoutineType.HGH,
-                user_routine_exercise__isnull=False,
-            )
-            .values("user_routine_exercise_id")
-            .distinct()
-            .count()
-        )
-        completed_total = completed_posture + completed_hgh
         raw_food = float(
             NutraEntry.objects.filter(session__user=user, session__date=log_date, food__isnull=False).aggregate(
                 total=Sum("score")

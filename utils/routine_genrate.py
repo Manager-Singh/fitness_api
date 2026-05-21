@@ -1,5 +1,8 @@
 
-# # workouts/utils/routine_utils.py
+# workouts/utils/routine_utils.py
+
+import json
+import logging
 
 from django.db import transaction
 from django.db.models import Count, Q
@@ -7,26 +10,38 @@ from django.core.exceptions import ValidationError
 from workouts.models import (
     UserRoutine, UserRoutineExercise,
     VariantExercise, RoutineVariant, AgeBracket,
-    Tier, Type, Track, Exercise, ExerciseCategory
+    Tier, Type, Track, Exercise, ExerciseCategory, RoutineType, Unit,
 )
 from utils.age import get_user_age
 from posture_questions.models import PostureQuestion
+from utils.exercise_assignment import (
+    segment_losses_from_breakdown,
+    ranked_segments_from_losses,
+    get_age_multipliers,
+    select_adult_recommended_beast,
+    select_teen_recommended_beast,
+    adult_scoring_pool_queryset,
+    teen_scoring_pool_queryset,
+)
+from utils.exercise_prescriptions import prescription_for_exercise_name
+from workouts.exercise_assignment_data import (
+    TEEN_CORE_6_NAMES,
+    normalize_exercise_name,
+    spec_key_for_name,
+)
+
+logger = logging.getLogger(__name__)
 
 # ----------------- AGE BASED PROGRAM CONFIG -----------------
 AGE_BASED_PROGRAM_TYPES = [
     (13, 17, {
-        # Spec v3.4 (Issue 12): posture routine is always 10 exercises:
-        # 6 Core + 2 Recommended + 2 Beast Mode.
         "POSTURE": {"core": 6, "rec": 2, "beast": 2},
-        "HGH": {"core": 2, "rec": 0, "beast": 1},
     }),
     (18, 20, {
         "POSTURE": {"core": 6, "rec": 2, "beast": 2},
-        "HGH": {"core": 2, "rec": 0, "beast": 1},
     }),
-    (21, None, {  # None = no upper limit
+    (21, None, {
         "POSTURE": {"core": 6, "rec": 2, "beast": 2},
-        # HGH excluded for > 20 years
     }),
 ]
 
@@ -39,13 +54,11 @@ SECTION10_NEED_PRIORITY = [
 
 SEGMENT_TO_EXERCISE_TYPE = {
     "spinal_compression": Type.SPINALCPMPRESSION,
-    # DB enum is postural_collapse; keep spec key posture_collapse mapped here.
     "posture_collapse": Type.POSTURALCOLLAPSE,
     "pelvic_tilt_back": Type.PELCIVTILTBACK,
     "leg_hamstring": Type.LEGHAMSTRING,
 }
 
-# Spec guard: ensure posture routines never include HGH/Environment exercises and vice versa.
 POSTURE_ALLOWED_CATEGORIES = {
     ExerciseCategory.POSTURE,
     ExerciseCategory.GENERAL,
@@ -65,89 +78,15 @@ def _variant_qs(variant, tier, mapped_need=None, allowed_categories=None):
         qs = qs.filter(exercise__category__in=list(allowed_categories))
     return qs
 
-# ----------------- HELPER FUNCTIONS -----------------
+
 def _get_program_config(age):
-    """Return program counts for the given age."""
     for min_age, max_age, config in AGE_BASED_PROGRAM_TYPES:
         if age >= min_age and (max_age is None or age <= max_age):
             return config
     raise ValidationError(f"No program config for age {age}")
 
-def _pick_exercises_for_tier_across_ranked(
-    variant, tier, needs_sorted, total_needed, exclude_exercise_ids=None
-):
-    """
-    Section 10.3 / 10.5: fill Beast/Recommended slots by walking ranked segments
-    (worst first), taking at most one new exercise per segment pass, re-looping
-    until `total_needed` is met. Excludes core (and optional prior picks).
-    """
-    exclude_exercise_ids = set(exclude_exercise_ids or [])
-    if not needs_sorted or total_needed <= 0:
-        return []
-    selected = []
-    seen = set()
-    rounds = 0
-    while len(selected) < total_needed and rounds < max(8, total_needed * 4):
-        rounds += 1
-        progressed = False
-        for seg in needs_sorted:
-            if len(selected) >= total_needed:
-                break
-            batch = _get_exercises_by_need(variant, tier, seg, 8)
-            for ve in batch:
-                if ve.exercise_id in exclude_exercise_ids:
-                    continue
-                if ve.exercise_id in seen:
-                    continue
-                selected.append(ve)
-                seen.add(ve.exercise_id)
-                progressed = True
-                break
-        if not progressed:
-            break
-    return selected
-
-
-def _get_exercises_by_need(variant, tier, need_type, count, allowed_categories=None):
-    """Get exercises for a specific tier & need type, fallback if not enough."""
-    mapped_need = SEGMENT_TO_EXERCISE_TYPE.get(need_type, need_type)
-    filtered = list(_variant_qs(variant, tier, mapped_need=mapped_need, allowed_categories=allowed_categories).order_by("order")[:count])
-
-    if len(filtered) < count:
-        exclude_ids = [ex.id for ex in filtered]
-        remaining = count - len(filtered)
-        fallback = (
-            _variant_qs(variant, tier, allowed_categories=allowed_categories)
-            .exclude(id__in=exclude_ids)
-            .order_by("order")[:remaining]
-        )
-        filtered.extend(fallback)
-
-    return filtered
-
-
-def _topup_variant_tier(variant, tier, picks, need, exclude_exercise_ids):
-    """
-    Section 10.3: if segment-ranked picks exhaust before filling Beast/Recommended
-    slots, promote additional exercises from the same tier (any type) by ``order``.
-    """
-    exclude = set(exclude_exercise_ids or [])
-    for p in picks:
-        exclude.add(p.exercise_id)
-    out = list(picks)
-    if len(out) >= need:
-        return out
-    extra = list(
-        VariantExercise.objects.filter(variant=variant, tier=tier)
-        .exclude(exercise_id__in=list(exclude))
-        .order_by("order")[: max(0, need - len(out))]
-    )
-    out.extend(extra)
-    return out
-
 
 def _sorted_needs(optimization_breakdown):
-    # Section 10 deterministic ordering by lowest optimization first.
     def _sort_key(item):
         seg, payload = item
         pct = payload.get("percent_optimized", 100)
@@ -165,11 +104,8 @@ def _normalize_answer(value):
         return ""
     return str(value).strip().lower()
 
+
 def _parse_options(value):
-    """
-    PostureQuestion options are commonly stored as JSON list strings.
-    Return a list of option labels as strings (best-effort).
-    """
     if value in (None, ""):
         return []
     if isinstance(value, list):
@@ -185,12 +121,6 @@ def _parse_options(value):
 
 
 def _coerce_letter(value, options=None):
-    """
-    Convert stored answer into A/B/C/D/E using its options list.
-    Supports:
-    - "A", "A) ..." etc (already coded)
-    - Full text label (e.g. "Often") matched against options (index -> letter)
-    """
     txt = _normalize_answer(value)
     if txt and txt[0] in {"a", "b", "c", "d", "e"}:
         return txt[0]
@@ -201,7 +131,6 @@ def _coerce_letter(value, options=None):
     if txt in norm_opts:
         idx = norm_opts.index(txt)
     else:
-        # substring fallback for punctuation/quotes differences
         idx = -1
         for i, o in enumerate(norm_opts):
             if txt and (txt in o or o in txt):
@@ -221,14 +150,10 @@ def _choice_score(ans):
 
 
 def _parse_multiselect(ans):
-    """
-    Supports JSON list, comma-separated letters, or plain string.
-    """
     if ans is None:
         return set()
     raw = str(ans).strip()
     selected = set()
-    # crude parser compatible with legacy storage.
     for token in raw.replace("[", "").replace("]", "").replace('"', "").replace("'", "").split(","):
         t = token.strip().lower()
         if not t:
@@ -239,16 +164,10 @@ def _parse_multiselect(ans):
 
 
 def _questionnaire_ranked_segments(user):
-    """
-    Section 10.1 scoring + tie-break:
-    Spinal > Collapse > Pelvic > Legs.
-    """
     pq = PostureQuestion.objects.filter(user=user).first()
     if not pq:
         return []
 
-    # v3.3 / current storage: answers may be stored as full text labels.
-    # Coerce them back to A/B/C via their options arrays.
     q1_l = _coerce_letter(pq.forward_head_posture_answer, pq.forward_head_posture_options)
     q2_l = _coerce_letter(pq.gap_between_your_lower_back_answer, pq.gap_between_your_lower_back_options)
     q4_l = _coerce_letter(pq.slouch_when_standing_or_sitting_answer, pq.slouch_when_standing_or_sitting_options)
@@ -272,7 +191,6 @@ def _questionnaire_ranked_segments(user):
     q7 = _choice_score(q7_l)
     q8 = _choice_score(q8_l)
 
-    # Multi-select: coerce selected labels to letters using options list.
     q3 = set()
     raw_q3 = pq.tightness_or_discomfort_answer
     try:
@@ -285,7 +203,6 @@ def _questionnaire_ranked_segments(user):
             if l:
                 q3.add(l)
     else:
-        # fallback to legacy parser (letters embedded in string)
         q3 = _parse_multiselect(raw_q3)
 
     q3a = 1 if "a" in q3 else 0
@@ -300,141 +217,10 @@ def _questionnaire_ranked_segments(user):
         "leg_hamstring": q7 + q3d + q3c,
     }
     tie_order = {k: i for i, k in enumerate(SECTION10_NEED_PRIORITY)}
-    ranked = sorted(scores.keys(), key=lambda s: (-scores[s], tie_order.get(s, 99)))
-    return ranked
+    return sorted(scores.keys(), key=lambda s: (-scores[s], tie_order.get(s, 99)))
 
-
-def assign_teen_hgh_beast(variant, ranked_segments, age):
-    """
-    Spec v3.3 Section 10.6: choose teen HGH Beast Mode based on ranked segments.
-    This implementation uses VariantExercise.type (segment) + category guards.
-    """
-    if not (13 <= int(age) <= 20):
-        return []
-    if not ranked_segments:
-        ranked_segments = SECTION10_NEED_PRIORITY
-
-    # Core HGH exclusions are already done by selecting core first; exclude their IDs.
-    core = list(_variant_qs(variant, Tier.CORE, allowed_categories=HGH_ALLOWED_CATEGORIES).order_by("order")[:2])
-    core_ids = {ve.exercise_id for ve in core}
-
-    # Walk ranked segments and pick first matching beast.
-    for seg in ranked_segments:
-        mapped_need = SEGMENT_TO_EXERCISE_TYPE.get(seg, seg)
-        cand = list(
-            _variant_qs(
-                variant,
-                Tier.BEAST,
-                mapped_need=mapped_need,
-                allowed_categories=HGH_ALLOWED_CATEGORIES,
-            )
-            .exclude(exercise_id__in=list(core_ids))
-            .order_by("order")[:1]
-        )
-        if cand:
-            return cand
-
-    # Fallback: any beast in HGH variant.
-    cand = list(
-        _variant_qs(variant, Tier.BEAST, allowed_categories=HGH_ALLOWED_CATEGORIES)
-        .exclude(exercise_id__in=list(core_ids))
-        .order_by("order")[:1]
-    )
-    return cand
-
-
-def assign_adult_exercises(variant, optimization_breakdown, ranked_segments=None):
-    """
-    Section 10.3 adult template:
-    - Core 6
-    - Beast Mode 2 (walk ranked segments worst-first; one pick per pass)
-    - Recommended 2 (same pattern; skips exercises already chosen)
-    """
-    needs_sorted = ranked_segments or [seg for seg, _ in _sorted_needs(optimization_breakdown)]
-    selected = []
-    core = list(
-        _variant_qs(variant, Tier.CORE, allowed_categories=POSTURE_ALLOWED_CATEGORIES).order_by("order")[:6]
-    )
-    selected.extend(core)
-    core_ids = {ve.exercise_id for ve in core}
-
-    if needs_sorted:
-        beasts = _pick_exercises_for_tier_across_ranked(
-            variant, Tier.BEAST, needs_sorted, 2, exclude_exercise_ids=core_ids
-        )
-        # Enforce posture-only categories for adult posture routines.
-        beasts = [b for b in beasts if getattr(b.exercise, "category", None) in POSTURE_ALLOWED_CATEGORIES]
-        beasts = _topup_variant_tier(
-            variant,
-            Tier.BEAST,
-            beasts,
-            2,
-            core_ids,
-        )
-        selected.extend(beasts)
-        recs = _pick_exercises_for_tier_across_ranked(
-            variant,
-            Tier.RECOMMENDED,
-            needs_sorted,
-            2,
-            exclude_exercise_ids=core_ids | {ve.exercise_id for ve in beasts},
-        )
-        recs = [r for r in recs if getattr(r.exercise, "category", None) in POSTURE_ALLOWED_CATEGORIES]
-        recs = _topup_variant_tier(
-            variant,
-            Tier.RECOMMENDED,
-            recs,
-            2,
-            core_ids | {ve.exercise_id for ve in beasts},
-        )
-        selected.extend(recs)
-    return selected
-
-
-def assign_teen_posture_exercises(variant, optimization_breakdown, age, ranked_segments=None):
-    """
-    Section 10 teen posture assignment:
-    - Ages 13-20: Core 6 + Recommended 2 + Beast 2 (10 total)
-    """
-    core_count = 6
-    rec_count = 2
-    beast_count = 2
-    needs_sorted = ranked_segments or [seg for seg, _ in _sorted_needs(optimization_breakdown)]
-    selected = []
-    selected.extend(
-        list(
-            _variant_qs(variant, Tier.CORE, allowed_categories=POSTURE_ALLOWED_CATEGORIES).order_by("order")[:core_count]
-        )
-    )
-
-    core_ids = {ve.exercise_id for ve in selected}
-    if needs_sorted:
-        beasts = _pick_exercises_for_tier_across_ranked(
-            variant, Tier.BEAST, needs_sorted, beast_count, exclude_exercise_ids=core_ids
-        )
-        beasts = [b for b in beasts if getattr(b.exercise, "category", None) in POSTURE_ALLOWED_CATEGORIES]
-        beasts = _topup_variant_tier(variant, Tier.BEAST, beasts, beast_count, core_ids)
-        selected.extend(beasts)
-        recs = _pick_exercises_for_tier_across_ranked(
-            variant,
-            Tier.RECOMMENDED,
-            needs_sorted,
-            rec_count,
-            exclude_exercise_ids=core_ids | {ve.exercise_id for ve in beasts},
-        )
-        recs = [r for r in recs if getattr(r.exercise, "category", None) in POSTURE_ALLOWED_CATEGORIES]
-        recs = _topup_variant_tier(
-            variant,
-            Tier.RECOMMENDED,
-            recs,
-            rec_count,
-            core_ids | {ve.exercise_id for ve in beasts},
-        )
-        selected.extend(recs)
-    return selected
 
 def _get_valid_variant(age, routine_type):
-    """Return RoutineVariant for given age & type, preferring more core exercises."""
     track_map = {
         "POSTURE": [Track.ESSENTIALS, Track.POSTURE],
         "HGH": [Track.HGH],
@@ -456,7 +242,7 @@ def _get_valid_variant(age, routine_type):
         .annotate(
             core_ex_count=Count(
                 "prescriptions",
-                filter=Q(prescriptions__tier=Tier.CORE)
+                filter=Q(prescriptions__tier=Tier.CORE),
             )
         )
         .order_by("template__name", "-core_ex_count")
@@ -467,113 +253,226 @@ def _get_valid_variant(age, routine_type):
 
     return variants.first()
 
-# ----------------- MAIN UTILITY -----------------
+
+def _find_variant_exercise(variant, exercise, tier=None):
+    if tier:
+        ve = (
+            VariantExercise.objects.filter(variant=variant, exercise=exercise, tier=tier)
+            .order_by("order")
+            .first()
+        )
+        if ve:
+            return ve
+    return VariantExercise.objects.filter(variant=variant, exercise=exercise).order_by("order").first()
+
+
+def _core_from_variant(variant, *, teen: bool, allowed_categories=None):
+    """Core 6 from VariantExercise; teen fallback fills fixed core names."""
+    cats = allowed_categories or POSTURE_ALLOWED_CATEGORIES
+    core = list(
+        _variant_qs(variant, Tier.CORE, allowed_categories=cats)
+        .select_related("exercise")
+        .order_by("order")[:6]
+    )
+    if len(core) >= 6:
+        return core[:6]
+
+    if not teen:
+        return core
+
+    seen_ids = {ve.exercise_id for ve in core}
+    for name in TEEN_CORE_6_NAMES:
+        if len(core) >= 6:
+            break
+        ex = Exercise.objects.filter(name__iexact=name).first()
+        if not ex or ex.id in seen_ids:
+            for candidate in Exercise.objects.filter(spinal_pct__isnull=False):
+                if spec_key_for_name(candidate.name) == spec_key_for_name(name):
+                    ex = candidate
+                    break
+        if not ex or ex.id in seen_ids:
+            continue
+        ve = _find_variant_exercise(variant, ex, tier=Tier.CORE)
+        if ve:
+            core.append(ve)
+            seen_ids.add(ex.id)
+        else:
+            pres = prescription_for_exercise_name(ex.name)
+            core.append(
+                _SyntheticVariantExercise(
+                    variant=variant,
+                    exercise=ex,
+                    tier=Tier.CORE,
+                    order=len(core) + 1,
+                    **pres,
+                )
+            )
+            seen_ids.add(ex.id)
+    return core[:6]
+
+
+class _SyntheticVariantExercise:
+    """Minimal stand-in when no VariantExercise row exists for core fallback."""
+
+    def __init__(self, variant, exercise, tier, order, sets, quantity_min, quantity_max=None, unit=Unit.REPS):
+        self.variant = variant
+        self.exercise = exercise
+        self.tier = tier
+        self.order = order
+        self.sets = sets
+        self.quantity_min = quantity_min
+        self.quantity_max = quantity_max
+        self.unit = unit
+        self.id = None
+        self.notes = ""
+        self.type = Type.MAIN
+
+    def get_type_display(self):
+        return "Main"
+
+
+def _variant_exercises_for_picks(variant, exercises, tier):
+    """Map scored Exercise picks to VariantExercise on variant (prefer matching tier)."""
+    out = []
+    for ex in exercises:
+        ve = _find_variant_exercise(variant, ex, tier=tier)
+        if ve:
+            out.append((ve, tier))
+        else:
+            pres = prescription_for_exercise_name(ex.name)
+            out.append((
+                _SyntheticVariantExercise(
+                    variant=variant,
+                    exercise=ex,
+                    tier=tier,
+                    order=len(out) + 1,
+                    **pres,
+                ),
+                tier,
+            ))
+            logger.warning(
+                "No VariantExercise for %s on variant %s; using prescription fallback",
+                ex.name,
+                variant,
+            )
+    return out
+
+
+def build_posture_routine_slots(
+    variant,
+    age: int,
+    optimization_breakdown: dict,
+    section3_contract: dict | None = None,
+):
+    """
+    Returns list of (variant_exercise_or_synthetic, tier) in order: 6 core, 2 rec, 2 beast.
+    """
+    losses = segment_losses_from_breakdown(optimization_breakdown, section3_contract)
+    is_teen = 13 <= int(age) <= 20
+
+    if is_teen:
+        core = _core_from_variant(variant, teen=True)
+        pool = list(teen_scoring_pool_queryset(Exercise))
+        recommended, beast = select_teen_recommended_beast(pool, losses, age, [ve.exercise for ve in core])
+    else:
+        core = _core_from_variant(variant, teen=False, allowed_categories=POSTURE_ALLOWED_CATEGORIES)
+        pool = list(adult_scoring_pool_queryset(Exercise))
+        recommended, beast = select_adult_recommended_beast(pool, losses, [ve.exercise for ve in core])
+
+    slots = []
+    for ve in core:
+        slots.append((ve, Tier.CORE))
+    for ve, tier in _variant_exercises_for_picks(variant, recommended, Tier.RECOMMENDED):
+        slots.append((ve, Tier.RECOMMENDED))
+    for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
+        slots.append((ve, Tier.BEAST))
+
+    meta = {
+        "assignment_spec": "v1",
+        "losses_cm": losses,
+        "ranked_segments": ranked_segments_from_losses(losses),
+    }
+    if is_teen:
+        hgh_m, post_m = get_age_multipliers(age)
+        meta["hgh_multiplier_applied"] = hgh_m
+        meta["posture_multiplier_applied"] = post_m
+        meta["age_used"] = age
+    return slots, meta
+
+
+# Legacy exports for tests that import old helpers
+def assign_adult_exercises(variant, optimization_breakdown, ranked_segments=None):
+    age = 25
+    slots, _ = build_posture_routine_slots(variant, age, optimization_breakdown)
+    return [s[0] for s in slots]
+
+
+def assign_teen_posture_exercises(variant, optimization_breakdown, age, ranked_segments=None):
+    slots, _ = build_posture_routine_slots(variant, age, optimization_breakdown)
+    return [s[0] for s in slots]
+
+
+def assign_teen_hgh_beast(variant, ranked_segments, age):
+    return []
+
+
 @transaction.atomic
-def generate_user_routines(user, optimization_breakdown):
-    """Generate personalized routines for a user based on age & optimization needs."""
+def generate_user_routines(user, optimization_breakdown, section3_contract=None):
+    """Generate personalized POSTURE routine (10 exercises) using Exercise Assignment Spec."""
     age = get_user_age(user)
     if age is None:
         raise ValidationError("User age not found.")
 
-    program_config = _get_program_config(age)
+    _get_program_config(age)
 
-    # Deactivate existing routines (do NOT delete).
-    #
-    # Rationale:
-    # - `WorkoutSession.user_routine` is `on_delete=PROTECT`, so deleting routines will
-    #   crash once any session exists (history must remain intact).
-    # - We removed the uniqueness constraint that previously forced delete-based regen.
-    #
-    # Invariant enforced in code: at most one active routine per user+type.
     UserRoutine.objects.filter(user=user, is_active=True).update(is_active=False)
 
-    created_routines = []
-    ranked_segments = _questionnaire_ranked_segments(user)
+    variant = _get_valid_variant(age, "POSTURE")
+    slots, assignment_meta = build_posture_routine_slots(
+        variant, age, optimization_breakdown, section3_contract
+    )
 
-    for routine_type, counts in program_config.items():
-        variant = _get_valid_variant(age, routine_type)
-        selected = []
-        if routine_type == "POSTURE" and age >= 21:
-            selected = assign_adult_exercises(variant, optimization_breakdown, ranked_segments=ranked_segments)
-        elif routine_type == "POSTURE" and 13 <= age <= 20:
-            selected = assign_teen_posture_exercises(
-                variant,
-                optimization_breakdown,
-                age,
-                ranked_segments=ranked_segments,
-            )
-        else:
-            # v3.3: teen HGH beast selection should follow ranked segments.
-            selected.extend(
-                list(
-                    _variant_qs(variant, Tier.CORE, allowed_categories=HGH_ALLOWED_CATEGORIES)
-                    .order_by("order")[:counts["core"]]
-                )
-            )
-            if counts["rec"] > 0:
-                selected.extend(
-                    list(
-                        _variant_qs(variant, Tier.RECOMMENDED, allowed_categories=HGH_ALLOWED_CATEGORIES)
-                        .order_by("order")[:counts["rec"]]
-                    )
-                )
-            if counts.get("beast", 0) > 0:
-                if 13 <= age <= 20:
-                    selected.extend(assign_teen_hgh_beast(variant, ranked_segments, age))
-                else:
-                    selected.extend(
-                        list(
-                            _variant_qs(variant, Tier.BEAST, allowed_categories=HGH_ALLOWED_CATEGORIES)
-                            .order_by("order")[:counts["beast"]]
-                        )
-                    )
+    scan_score = dict(optimization_breakdown or {})
+    if isinstance(scan_score, dict):
+        scan_score = {**scan_score, **assignment_meta}
+    else:
+        scan_score = assignment_meta
 
-        # Deduplicate exercises
-        unique_exercises = []
-        seen_ex_ids = set()
-        for ve in selected:
-            if ve.exercise_id not in seen_ex_ids:
-                unique_exercises.append(ve)
-                seen_ex_ids.add(ve.exercise_id)
+    routine = UserRoutine.objects.create(
+        user=user,
+        routine_type=RoutineType.POSTURE,
+        is_active=True,
+        scan_score=scan_score,
+        optimization_breakdown=optimization_breakdown or {},
+    )
 
-        if not unique_exercises:
+    seen_exercise_ids = set()
+    order = 0
+    for variant_ex, tier in slots:
+        ex = variant_ex.exercise
+        if ex.id in seen_exercise_ids:
             continue
-
-        # Create UserRoutine
-        routine = UserRoutine.objects.create(
-            user=user,
-            routine_type=routine_type,
-            is_active=True,
-            scan_score=optimization_breakdown,
-            optimization_breakdown=optimization_breakdown,
+        seen_exercise_ids.add(ex.id)
+        order += 1
+        ve_id = variant_ex.id if getattr(variant_ex, "id", None) else None
+        UserRoutineExercise.objects.create(
+            routine=routine,
+            variant_exercise_id=ve_id,
+            exercise=ex,
+            tier=tier,
+            order=order,
+            sets=variant_ex.sets,
+            qty_min=variant_ex.quantity_min,
+            qty_max=getattr(variant_ex, "quantity_max", None),
+            unit=variant_ex.unit,
+            notes=f"{tier.upper()} - posture assignment spec",
         )
 
-        # Add exercises to UserRoutine
-        for idx, variant_ex in enumerate(unique_exercises, start=1):
-            # UserRoutineExercise.objects.create(
-            #     routine=routine,
-            #     exercise=variant_ex.exercise,
-            #     tier=variant_ex.tier,
-            #     order=idx,
-            #     sets=variant_ex.sets,
-            #     qty_min=variant_ex.quantity_min,
-            #     qty_max=variant_ex.quantity_max,
-            #     unit=variant_ex.unit,
-            #     notes=f"{variant_ex.tier.upper()} - {variant_ex.get_type_display()}",
-            # )
-            UserRoutineExercise.objects.create(
-                routine=routine,
-                variant_exercise=variant_ex,   # ✅ STORE SOURCE
-                exercise=variant_ex.exercise,
-                tier=variant_ex.tier,
-                order=idx,
-                sets=variant_ex.sets,
-                qty_min=variant_ex.quantity_min,
-                qty_max=variant_ex.quantity_max,
-                unit=variant_ex.unit,
-                notes=f"{variant_ex.tier.upper()} - {variant_ex.get_type_display()}",
-            )
+    if order < 10:
+        logger.warning(
+            "User %s posture routine has %s exercises (expected 10)",
+            user.id,
+            order,
+        )
 
-        created_routines.append(routine)
-
-    return created_routines
+    return [routine]

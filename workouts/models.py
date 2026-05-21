@@ -61,6 +61,12 @@ class ExerciseCategory(models.TextChoices):
     GENERAL      = "general",      "General"
 
 
+class ExerciseAgeGroup(models.TextChoices):
+    ADULT = "adult", "Adult"
+    TEEN = "teen", "Teen"
+    BOTH = "both", "Both"
+
+
 class Exercise(models.Model):
     name        = models.CharField(max_length=120, unique=True)
     short_name       = models.CharField(blank=True, max_length=160)
@@ -106,11 +112,43 @@ class Exercise(models.Model):
     )
     photo       = models.ImageField(upload_to="exercises/", blank=True, null=True)
 
+    # Exercise Assignment Spec (Parts 1–3)
+    age_group = models.CharField(
+        max_length=8,
+        choices=ExerciseAgeGroup.choices,
+        default=ExerciseAgeGroup.BOTH,
+        blank=True,
+    )
+    spinal_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+    collapse_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+    pelvic_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+    legs_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+    potency = models.PositiveSmallIntegerField(null=True, blank=True)
+    hgh_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    beast_bonus = models.PositiveSmallIntegerField(default=0)
+    teen_only = models.BooleanField(default=False)
+    adult_only = models.BooleanField(default=False)
+
     class Meta:
         ordering = ["name"]
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        pcts = [self.spinal_pct, self.collapse_pct, self.pelvic_pct, self.legs_pct]
+        if all(p is not None for p in pcts):
+            total = sum(pcts)
+            if total != 100:
+                raise ValidationError(
+                    f"Segment percentages must sum to 100 (got {total})."
+                )
+
+    @property
+    def assignment_matrix_ready(self) -> bool:
+        pcts = [self.spinal_pct, self.collapse_pct, self.pelvic_pct, self.legs_pct]
+        return self.potency is not None and all(p is not None for p in pcts)
 
     def get_instruction_lines(self):
         """

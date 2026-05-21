@@ -44,7 +44,8 @@ def apply_engine_routing(user, log_date, age_exact, points=0, routine_type=None,
         raw_hgh_points = WorkoutEntry.objects.filter(
             session__user=user,
             session__date=log_date,
-            session__user_routine__routine_type__iexact="hgh",
+        ).filter(
+            Q(exercise__category__iexact="hgh") | Q(exercise__teen_only=True)
         ).aggregate(total=Sum("points"))["total"] or 0
 
         life_qs = NutraEntry.objects.filter(

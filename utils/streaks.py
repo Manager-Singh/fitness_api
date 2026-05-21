@@ -85,9 +85,9 @@ def _is_valid_streak_day(user, day, age):
     if age >= 21:
         return _core_exercises_done(user, day, RoutineType.POSTURE) and _adult_food_requirement_met(user, day)
 
+    # Unified teen POSTURE routine: Core 6 includes Jump Rope + Bodyweight Squats.
     return (
         _core_exercises_done(user, day, RoutineType.POSTURE)
-        and _core_exercises_done(user, day, RoutineType.HGH)
         and _teen_food_requirement_met(user, day)
     )
 
