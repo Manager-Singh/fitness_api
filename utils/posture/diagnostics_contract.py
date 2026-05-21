@@ -37,9 +37,21 @@ def build_posture_optimization_diagnostics(
         "leg_hamstring": round(float(runtime.get("legs_current_loss_um", 0)) / 10000.0, 2),
     }
 
+    # Section 4.3: after unlock, bars must reflect live Engine-1 recovery (PostureState),
+    # not a frozen scan/questionnaire snapshot. Log embed already passed breakdown=None;
+    # GET /dashboard-new passed scan breakdown and was overriding runtime (bars stuck at 72/54/…).
+    unlocked = bool(runtime.get("scan_completed") or runtime.get("questionnaire_completed"))
+    has_live_loss_state = (
+        float(runtime.get("total_recoverable_loss_um", 0) or 0) > 0
+        or sum(runtime_segments.values()) > 0
+    )
+    use_live_segment_loss = unlocked and has_live_loss_state
+
     segments = {}
     for seg, max_loss in POSTURE_SEGMENT_MAX_LOSS_CM.items():
-        if optimization_breakdown and seg in optimization_breakdown:
+        if use_live_segment_loss:
+            seg_current = runtime_segments[seg]
+        elif optimization_breakdown and seg in optimization_breakdown:
             seg_current = optimization_breakdown[seg].get("current_loss_cm", runtime_segments[seg])
         else:
             seg_current = runtime_segments[seg]
