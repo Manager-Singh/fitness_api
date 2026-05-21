@@ -263,7 +263,20 @@ def _find_variant_exercise(variant, exercise, tier=None):
         )
         if ve:
             return ve
-    return VariantExercise.objects.filter(variant=variant, exercise=exercise).order_by("order").first()
+    ve = VariantExercise.objects.filter(variant=variant, exercise=exercise).order_by("order").first()
+    if ve:
+        return ve
+    # DB may use alias name on VariantExercise (e.g. "Doorways Chest Stretch") vs canonical Exercise row.
+    key = spec_key_for_name(exercise.name)
+    if not key:
+        return None
+    qs = VariantExercise.objects.filter(variant=variant).select_related("exercise")
+    if tier:
+        qs = qs.filter(tier=tier)
+    for ve in qs.order_by("order"):
+        if spec_key_for_name(ve.exercise.name) == key:
+            return ve
+    return None
 
 
 def _core_from_variant(variant, *, teen: bool, allowed_categories=None):
