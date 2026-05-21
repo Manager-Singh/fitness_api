@@ -7,7 +7,8 @@ from __future__ import annotations
 import logging
 from typing import Iterable
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 
 from workouts.exercise_assignment_data import (
     ADULT_CORE_6_BY_MIN_AGE,
@@ -95,6 +96,59 @@ def audit_variant(variant: RoutineVariant) -> list[str]:
     return issues
 
 
+def _pick_adult_swap_exercise(variant: RoutineVariant, *, exclude_exercise_id: int) -> Exercise | None:
+    """Adult posture exercise not already on this variant (for protected-row swap)."""
+    attached = set(variant.prescriptions.values_list("exercise_id", flat=True))
+    for name in ADULT_POSTURE_POOL_CANONICAL_NAMES:
+        ex = resolve_exercise_by_canonical_name(name)
+        if not ex or is_teen_only_exercise(ex):
+            continue
+        if ex.id == exclude_exercise_id or ex.id in attached:
+            continue
+        return ex
+    return None
+
+
+def _detach_teen_only_row(
+    ve: VariantExercise, variant: RoutineVariant, stats: dict, *, dry_run: bool
+) -> None:
+    """Remove teen-only VariantExercise from an adult variant; swap if PROTECT blocks delete."""
+    if dry_run:
+        stats["removed"] += 1
+        return
+    try:
+        ve.delete()
+        stats["removed"] += 1
+        return
+    except ProtectedError:
+        pass
+
+    replacement = _pick_adult_swap_exercise(variant, exclude_exercise_id=ve.exercise_id)
+    if not replacement:
+        stats["skipped_protected"] += 1
+        stats["issues"].append(
+            f"Could not remove teen-only {ve.exercise.name} (tier={ve.tier}): "
+            f"referenced by user routines — regenerate affected users"
+        )
+        return
+
+    old_name = ve.exercise.name
+    try:
+        ve.exercise = replacement
+        ve.save(update_fields=["exercise"])
+        stats["reassigned"] += 1
+        stats["issues"].append(
+            f"Replaced {old_name} → {replacement.name} on protected row (tier={ve.tier}); "
+            f"regenerate user routines to refresh live assignments"
+        )
+    except IntegrityError:
+        stats["skipped_protected"] += 1
+        stats["issues"].append(
+            f"Could not replace {old_name}: {replacement.name} already on variant — "
+            f"regenerate user routines"
+        )
+
+
 def _default_prescription_fields(exercise: Exercise) -> dict:
     pres = prescription_for_exercise_name(exercise.name)
     return {
@@ -115,6 +169,8 @@ def sync_variant_prescriptions(variant: RoutineVariant, *, dry_run: bool = False
     """
     stats = {
         "removed": 0,
+        "reassigned": 0,
+        "skipped_protected": 0,
         "core_upserted": 0,
         "pool_upserted": 0,
         "issues": [],
@@ -131,9 +187,7 @@ def sync_variant_prescriptions(variant: RoutineVariant, *, dry_run: bool = False
     if not teen:
         for ve in variant.prescriptions.select_related("exercise").all():
             if is_teen_only_exercise(ve.exercise):
-                stats["removed"] += 1
-                if not dry_run:
-                    ve.delete()
+                _detach_teen_only_row(ve, variant, stats, dry_run=dry_run)
 
     # 2) Core 6
     core_names = TEEN_CORE_6_NAMES if teen else adult_core_names_for_bracket(bracket_min)

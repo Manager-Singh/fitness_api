@@ -191,6 +191,8 @@ EXERCISE_NAME_ALIASES = {
     "tadasana / mountain": "tadasana (mountain pose)",
     "tadasana (mountain pose)": "tadasana (mountain pose)",
     "cat-cow": "cat-cow stretch",
+    "doorways chest stretch": "doorway chest stretch",
+    "mountain climber": "mountain climbers",
 }
 
 TEEN_CORE_6_NAMES = [

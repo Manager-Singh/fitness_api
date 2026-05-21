@@ -31,6 +31,8 @@ class Command(BaseCommand):
         for stats in results:
             self.stdout.write(
                 f"{stats.get('variant')}: removed={stats['removed']} "
+                f"reassigned={stats.get('reassigned', 0)} "
+                f"skipped_protected={stats.get('skipped_protected', 0)} "
                 f"core={stats['core_upserted']} pool={stats['pool_upserted']}"
             )
             for issue in stats.get("issues", []):
