@@ -110,9 +110,9 @@ class PostureStateInline(admin.StackedInline):
     def segments_summary(self, obj):
         if not obj:
             return "—"
-        from users.admin_ui import _segment_bars
+        from users.admin_ui import _segment_bars_from_diagnostics
 
-        return _segment_bars(obj)
+        return _segment_bars_from_diagnostics(obj.user)
 
 
 class DailyLogInline(admin.TabularInline):
