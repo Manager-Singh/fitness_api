@@ -125,6 +125,17 @@ class FriendInvite(models.Model):
 
 
 class PostureState(models.Model):
+    ASSESSMENT_SOURCES_QUESTIONNAIRE_ONLY = "questionnaire_only"
+    ASSESSMENT_SOURCES_SCAN_ONLY = "scan_only"
+    ASSESSMENT_SOURCES_BOTH_QUESTIONNAIRE_PRIMARY = "both_questionnaire_primary"
+    ASSESSMENT_SOURCES_BOTH_SCAN_PRIMARY = "both_scan_primary"
+    ASSESSMENT_SOURCES_CHOICES = [
+        (ASSESSMENT_SOURCES_QUESTIONNAIRE_ONLY, "Questionnaire only"),
+        (ASSESSMENT_SOURCES_SCAN_ONLY, "Scan only"),
+        (ASSESSMENT_SOURCES_BOTH_QUESTIONNAIRE_PRIMARY, "Both (questionnaire primary)"),
+        (ASSESSMENT_SOURCES_BOTH_SCAN_PRIMARY, "Both (scan primary)"),
+    ]
+
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -139,6 +150,13 @@ class PostureState(models.Model):
     legs_current_loss_um = models.BigIntegerField(default=0)
     last_scan_at = models.DateTimeField(null=True, blank=True)
     questionnaire_completed_at = models.DateTimeField(null=True, blank=True)
+    last_recalculated_at = models.DateTimeField(null=True, blank=True)
+    assessment_sources_used = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        choices=ASSESSMENT_SOURCES_CHOICES,
+    )
     algorithm_version = models.CharField(max_length=30, default="v1")
     updated_at = models.DateTimeField(auto_now=True)
 

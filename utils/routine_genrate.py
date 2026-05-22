@@ -429,38 +429,20 @@ def assign_teen_hgh_beast(variant, ranked_segments, age):
     return []
 
 
-@transaction.atomic
-def generate_user_routines(user, optimization_breakdown, section3_contract=None):
-    """Generate personalized POSTURE routine (10 exercises) using Exercise Assignment Spec."""
-    age = get_user_age(user)
-    if age is None:
-        raise ValidationError("User age not found.")
+def _attach_posture_snapshot(routine, user) -> None:
+    from users.models import PostureState
+    from utils.posture.state_to_breakdown import posture_state_snapshot
 
-    _get_program_config(age)
+    state = PostureState.objects.filter(user=user).first()
+    routine.posture_snapshot_at_generation = posture_state_snapshot(state)
+    routine.save(update_fields=["posture_snapshot_at_generation", "updated_at"])
 
-    UserRoutine.objects.filter(user=user, is_active=True).update(is_active=False)
 
-    variant = _get_valid_variant(age, "POSTURE")
-    slots, assignment_meta = build_posture_routine_slots(
-        variant, age, optimization_breakdown, section3_contract
+def _persist_routine_exercises(routine, slots, *, start_order: int = 0) -> int:
+    seen_exercise_ids = set(
+        UserRoutineExercise.objects.filter(routine=routine).values_list("exercise_id", flat=True)
     )
-
-    scan_score = dict(optimization_breakdown or {})
-    if isinstance(scan_score, dict):
-        scan_score = {**scan_score, **assignment_meta}
-    else:
-        scan_score = assignment_meta
-
-    routine = UserRoutine.objects.create(
-        user=user,
-        routine_type=RoutineType.POSTURE,
-        is_active=True,
-        scan_score=scan_score,
-        optimization_breakdown=optimization_breakdown or {},
-    )
-
-    seen_exercise_ids = set()
-    order = 0
+    order = start_order
     for variant_ex, tier in slots:
         ex = variant_ex.exercise
         if ex.id in seen_exercise_ids:
@@ -480,7 +462,57 @@ def generate_user_routines(user, optimization_breakdown, section3_contract=None)
             unit=variant_ex.unit,
             notes=f"{tier.upper()} - posture assignment spec",
         )
+    return order
 
+
+@transaction.atomic
+def generate_user_routines(
+    user,
+    optimization_breakdown,
+    section3_contract=None,
+    *,
+    regen_rec_beast_only: bool = False,
+    existing_routine=None,
+):
+    """Generate personalized POSTURE routine (10 exercises) using Exercise Assignment Spec."""
+    age = get_user_age(user)
+    if age is None:
+        raise ValidationError("User age not found.")
+
+    _get_program_config(age)
+    variant = _get_valid_variant(age, "POSTURE")
+
+    if regen_rec_beast_only and existing_routine is not None:
+        return _regen_rec_beast_only(
+            user,
+            existing_routine,
+            variant,
+            age,
+            optimization_breakdown,
+            section3_contract,
+        )
+
+    UserRoutine.objects.filter(user=user, is_active=True).update(is_active=False)
+
+    slots, assignment_meta = build_posture_routine_slots(
+        variant, age, optimization_breakdown, section3_contract
+    )
+
+    scan_score = dict(optimization_breakdown or {})
+    if isinstance(scan_score, dict):
+        scan_score = {**scan_score, **assignment_meta}
+    else:
+        scan_score = assignment_meta
+
+    routine = UserRoutine.objects.create(
+        user=user,
+        routine_type=RoutineType.POSTURE,
+        is_active=True,
+        scan_score=scan_score,
+        optimization_breakdown=optimization_breakdown or {},
+    )
+
+    order = _persist_routine_exercises(routine, slots)
     if order < 10:
         logger.warning(
             "User %s posture routine has %s exercises (expected 10)",
@@ -488,4 +520,94 @@ def generate_user_routines(user, optimization_breakdown, section3_contract=None)
             order,
         )
 
+    _attach_posture_snapshot(routine, user)
+    return [routine]
+
+
+def _regen_rec_beast_only(
+    user,
+    routine,
+    variant,
+    age: int,
+    optimization_breakdown: dict,
+    section3_contract: dict | None,
+):
+    """Replace only Recommended + Beast slots; keep Core 6 on existing routine."""
+    losses = segment_losses_from_breakdown(optimization_breakdown, section3_contract)
+    is_teen = 13 <= int(age) <= 20
+
+    core_exercises = list(
+        UserRoutineExercise.objects.filter(routine=routine, tier=Tier.CORE)
+        .select_related("exercise")
+        .order_by("order")
+    )
+    core_ve_list = []
+    for ure in core_exercises:
+        if ure.variant_exercise_id:
+            ve = VariantExercise.objects.filter(id=ure.variant_exercise_id).select_related("exercise").first()
+            if ve:
+                core_ve_list.append(ve)
+                continue
+        core_ve_list.append(
+            _SyntheticVariantExercise(
+                variant=variant,
+                exercise=ure.exercise,
+                tier=Tier.CORE,
+                order=ure.order,
+                sets=ure.sets,
+                quantity_min=ure.qty_min,
+                quantity_max=ure.qty_max,
+                unit=ure.unit,
+            )
+        )
+
+    core_ex_objs = [ve.exercise for ve in core_ve_list]
+    if is_teen:
+        pool = list(teen_scoring_pool_queryset(Exercise))
+        recommended, beast = select_teen_recommended_beast(pool, losses, age, core_ex_objs)
+    else:
+        pool = list(adult_scoring_pool_queryset(Exercise))
+        recommended, beast = select_adult_recommended_beast(pool, losses, core_ex_objs)
+
+    UserRoutineExercise.objects.filter(
+        routine=routine,
+        tier__in=[Tier.RECOMMENDED, Tier.BEAST],
+    ).delete()
+
+    rec_beast_slots = []
+    for ve, tier in _variant_exercises_for_picks(variant, recommended, Tier.RECOMMENDED):
+        rec_beast_slots.append((ve, tier))
+    for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
+        rec_beast_slots.append((ve, tier))
+
+    core_count = len(core_exercises)
+    order = _persist_routine_exercises(routine, rec_beast_slots, start_order=core_count)
+
+    assignment_meta = {
+        "assignment_spec": "v1",
+        "losses_cm": losses,
+        "ranked_segments": ranked_segments_from_losses(losses),
+        "partial_regen": True,
+    }
+    if is_teen:
+        hgh_m, post_m = get_age_multipliers(age)
+        assignment_meta["hgh_multiplier_applied"] = hgh_m
+        assignment_meta["posture_multiplier_applied"] = post_m
+        assignment_meta["age_used"] = age
+
+    scan_score = dict(routine.scan_score or {})
+    scan_score.update(assignment_meta)
+    scan_score["routine_regenerated"] = True
+    routine.scan_score = scan_score
+    routine.optimization_breakdown = optimization_breakdown or {}
+    routine.save(update_fields=["scan_score", "optimization_breakdown", "updated_at"])
+
+    if order < 10:
+        logger.warning(
+            "User %s partial regen has %s exercises (expected 10)",
+            user.id,
+            order,
+        )
+
+    _attach_posture_snapshot(routine, user)
     return [routine]

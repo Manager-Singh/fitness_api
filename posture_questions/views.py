@@ -143,6 +143,7 @@ def upsert_posture_questions(request):
 
     # Section 3 (v3.3): compute and persist manual questionnaire state (adults + teens).
     section3_contract = None
+    assessment = None
     posture_q = PostureQuestionService.get_posture_questions(user)
     if posture_q:
         state, _ = PostureState.objects.get_or_create(user=user)
@@ -249,11 +250,6 @@ def upsert_posture_questions(request):
                     "target_height_formula": "Base_Height + Total_Recoverable_Loss",
                 }
 
-                state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
-                state.spinal_current_loss_um = int(round(float(segs["spinal"]["loss_cm"]) * 10000))
-                state.collapse_current_loss_um = int(round(float(segs["collapse"]["loss_cm"]) * 10000))
-                state.pelvic_current_loss_um = int(round(float(segs["pelvic"]["loss_cm"]) * 10000))
-                state.legs_current_loss_um = int(round(float(segs["legs"]["loss_cm"]) * 10000))
             else:
                 clamp_min = 1.0 if is_adult else 0.0
                 manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
@@ -268,21 +264,22 @@ def upsert_posture_questions(request):
                     "target_height_cm": target_height,
                     "target_height_formula": "Base_Height + Total_Recoverable_Loss",
                 }
-                state.total_recoverable_loss_um = int(round(total_recoverable * 10000))
-                seg = manual["optimization_breakdown"]
-                state.spinal_current_loss_um = int(round(float(seg["spinal_compression"]["current_loss_cm"]) * 10000))
-                state.collapse_current_loss_um = int(round(float(seg["posture_collapse"]["current_loss_cm"]) * 10000))
-                state.pelvic_current_loss_um = int(round(float(seg["pelvic_tilt_back"]["current_loss_cm"]) * 10000))
-                state.legs_current_loss_um = int(round(float(seg["leg_hamstring"]["current_loss_cm"]) * 10000))
+            from utils.posture.assessment_service import save_questionnaire_assessment
+
+            assessment = save_questionnaire_assessment(
+                user,
+                section3_contract["optimization_breakdown"],
+                raw_data={
+                    "mode": section3_contract.get("mode"),
+                    "answers": section3_contract.get("answers"),
+                    "section3_contract": section3_contract,
+                },
+            )
+            state.refresh_from_db()
             state.save(update_fields=[
                 "scan_completed",
                 "questionnaire_completed",
                 "questionnaire_completed_at",
-                "total_recoverable_loss_um",
-                "spinal_current_loss_um",
-                "collapse_current_loss_um",
-                "pelvic_current_loss_um",
-                "legs_current_loss_um",
                 "last_scan_at",
             ])
             if (not is_adult):
@@ -298,7 +295,9 @@ def upsert_posture_questions(request):
                 try:
                     RoutineService.ensure_active_routine(
                         user,
-                        section3_contract["optimization_breakdown"],
+                        RoutineService.reconciled_optimization_breakdown(
+                            user, section3_contract["optimization_breakdown"]
+                        ),
                         section3_contract=section3_contract,
                     )
                 except Exception:
@@ -318,8 +317,24 @@ def upsert_posture_questions(request):
     status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
 
     state = PostureState.objects.filter(user=user).first()
+    from utils.posture.assessment_service import assessment_response_meta
+
+    reconciliation = assessment_response_meta(user, assessment)
     return Response({
         'message': message,
+        'success': True,
+        'posture_state': {
+            'scan_completed': bool(state.scan_completed) if state else False,
+            'questionnaire_completed': bool(state.questionnaire_completed) if state else False,
+            'total_recoverable_loss_um': int(state.total_recoverable_loss_um or 0) if state else 0,
+            'spinal_current_loss_um': int(state.spinal_current_loss_um or 0) if state else 0,
+            'collapse_current_loss_um': int(state.collapse_current_loss_um or 0) if state else 0,
+            'pelvic_current_loss_um': int(state.pelvic_current_loss_um or 0) if state else 0,
+            'legs_current_loss_um': int(state.legs_current_loss_um or 0) if state else 0,
+            'assessment_sources_used': getattr(state, 'assessment_sources_used', '') or '',
+            'last_recalculated_at': state.last_recalculated_at.isoformat() if (state and state.last_recalculated_at) else None,
+        },
+        **reconciliation,
         'user': {
             'id': user.id,
             'username': user.username,

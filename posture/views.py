@@ -1337,9 +1337,10 @@ Return JSON ONLY:
             metrics["leg_hamstring"],
             metrics["spinal_compression"],
         )
-        _apply_scan_to_posture_state(request.user, posture_bars)
+        assessment = _apply_scan_to_posture_state(request.user, posture_bars)
         user_data = save_ai_analysis_full_scan(request.user, final_response_safe)
         _mark_scan_completed(request.user)
+        final_response_safe.update(_scan_reconciliation_payload(request.user, assessment))
 
         return Response(final_response_safe, status=status.HTTP_200_OK)
 
@@ -1400,60 +1401,51 @@ def _mark_scan_completed(user):
         logger.exception("Failed applying pending_pre_scan engine1 gains after scan completion")
 
 
-def _apply_scan_to_posture_state(user, posture_bars):
+def _scan_reconciliation_payload(user, assessment):
+    from utils.posture.assessment_service import assessment_response_meta
+    from users.models import PostureState
+
+    state = PostureState.objects.filter(user=user).first()
+    meta = assessment_response_meta(user, assessment)
+    return {
+        "success": True,
+        "posture_state": {
+            "scan_completed": bool(state.scan_completed) if state else False,
+            "questionnaire_completed": bool(state.questionnaire_completed) if state else False,
+            "total_recoverable_loss_um": int(state.total_recoverable_loss_um or 0) if state else 0,
+            "spinal_current_loss_um": int(state.spinal_current_loss_um or 0) if state else 0,
+            "collapse_current_loss_um": int(state.collapse_current_loss_um or 0) if state else 0,
+            "pelvic_current_loss_um": int(state.pelvic_current_loss_um or 0) if state else 0,
+            "legs_current_loss_um": int(state.legs_current_loss_um or 0) if state else 0,
+            "assessment_sources_used": getattr(state, "assessment_sources_used", "") or "",
+            "last_recalculated_at": state.last_recalculated_at.isoformat()
+            if (state and state.last_recalculated_at)
+            else None,
+        },
+        **meta,
+    }
+
+
+def _apply_scan_to_posture_state(user, posture_bars, *, source="scan", confidence_score=0.85):
     """
-    Section 4.3 re-scan overwrite + regression guard.
-    - Always overwrite Current_Loss per segment.
-    - First scan can set Total_Recoverable_Loss from scan value.
-    - Repeat scans keep total unless regression requires expansion.
+    Persist scan assessment, reconcile PostureState (70/30 blend), apply total regression guard.
     """
+    from posture.models import PostureAssessment
+    from utils.posture.assessment_service import save_scan_assessment
+
+    scan_source = PostureAssessment.SOURCE_MOCK_SCAN if source == "mock_scan" else PostureAssessment.SOURCE_SCAN
+    assessment = save_scan_assessment(
+        user,
+        posture_bars,
+        source=scan_source,
+        confidence_score=confidence_score,
+        raw_data={"posture_bars": posture_bars, "source": source},
+    )
     state, _ = PostureState.objects.get_or_create(user=user)
-    prev_scan_completed = bool(state.scan_completed)
-
-    spinal_um = int(round(float(posture_bars["spinal"]["current_loss_cm"]) * 10000))
-    collapse_um = int(round(float(posture_bars["collapse"]["current_loss_cm"]) * 10000))
-    pelvic_um = int(round(float(posture_bars["pelvic"]["current_loss_cm"]) * 10000))
-    legs_um = int(round(float(posture_bars["legs"]["current_loss_cm"]) * 10000))
-    new_deficit_um = spinal_um + collapse_um + pelvic_um + legs_um
-
-    historical_posture_um = 0
-    for row in HeightLedger.objects.filter(user=user, entry_type="daily_compute"):
-        try:
-            historical_posture_um += int((row.metadata or {}).get("engine1_delta_um", 0))
-        except Exception:
-            logger.exception(
-                "Failed reading engine1_delta_um from HeightLedger.metadata",
-                extra={"row_id": getattr(row, "id", None)},
-            )
-            continue
-
-    if not prev_scan_completed or int(state.total_recoverable_loss_um or 0) <= 0:
-        # First scan establishes canonical recoverable ceiling from scan.
-        state.total_recoverable_loss_um = new_deficit_um
-    else:
-        remaining_ceiling_um = int(state.total_recoverable_loss_um or 0) - historical_posture_um
-        if new_deficit_um > max(0, remaining_ceiling_um):
-            # Regression guard: expand only upward; never decrease.
-            state.total_recoverable_loss_um = historical_posture_um + new_deficit_um
-
-    state.spinal_current_loss_um = spinal_um
-    state.collapse_current_loss_um = collapse_um
-    state.pelvic_current_loss_um = pelvic_um
-    state.legs_current_loss_um = legs_um
     state.scan_completed = True
     state.last_scan_at = timezone.now()
-    state.save(
-        update_fields=[
-            "total_recoverable_loss_um",
-            "spinal_current_loss_um",
-            "collapse_current_loss_um",
-            "pelvic_current_loss_um",
-            "legs_current_loss_um",
-            "scan_completed",
-            "last_scan_at",
-            "updated_at",
-        ]
-    )
+    state.save(update_fields=["scan_completed", "last_scan_at", "updated_at"])
+    return assessment
 
 
 def _score_from_inches(loss_inches, max_inches=2.0):
@@ -1585,8 +1577,11 @@ class MockScanAPIView(APIView):
             data={"mock_scan": payload},
             raw_request_data=extract_json_request_data(request),
         )
-        _apply_scan_to_posture_state(request.user, posture_bars)
+        assessment = _apply_scan_to_posture_state(
+            request.user, posture_bars, source="mock_scan", confidence_score=1.0
+        )
         _mark_scan_completed(request.user)
+        payload.update(_scan_reconciliation_payload(request.user, assessment))
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -1697,6 +1692,12 @@ class ScanAPIView(APIView):
             },
             raw_request_data=extract_json_request_data(request),
         )
-        _apply_scan_to_posture_state(request.user, posture_bars)
+        conf = 0.85
+        if confidence is not None:
+            conf = float(confidence)
+        assessment = _apply_scan_to_posture_state(
+            request.user, posture_bars, source="scan", confidence_score=conf
+        )
         _mark_scan_completed(request.user)
+        payload.update(_scan_reconciliation_payload(request.user, assessment))
         return Response(payload, status=status.HTTP_200_OK)

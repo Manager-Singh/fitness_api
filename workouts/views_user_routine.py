@@ -8,6 +8,7 @@ from .serializers_user_routine import UserRoutineSerializer
 from posture.models import PostureReport
 from utils.routine_genrate import generate_user_routines
 from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
+from posture_questions.services.routine_service import RoutineService
 from utils.check_payment import check_subscription_or_response
 from utils.age import get_user_age
 
@@ -60,6 +61,9 @@ class UserRoutineListView(APIView):
                 breakdown = latest_report.data.get("optimization_breakdown")
             if not breakdown:
                 breakdown = _default_breakdown()
+            breakdown = RoutineService.reconciled_optimization_breakdown(
+                request.user, breakdown
+            )
             generate_user_routines(request.user, breakdown)
             routines_qs = UserRoutine.objects.filter(
                 user=request.user,
@@ -97,6 +101,9 @@ class UserRoutineListView(APIView):
                     breakdown = latest_report.data.get("optimization_breakdown")
                 if not breakdown:
                     breakdown = _default_breakdown()
+                breakdown = RoutineService.reconciled_optimization_breakdown(
+                    request.user, breakdown
+                )
                 generate_user_routines(request.user, breakdown)
                 routines_qs = UserRoutine.objects.filter(
                     user=request.user,

@@ -39,3 +39,44 @@ class PostureReport(models.Model):
     side_data = models.JSONField(null=True, blank=True)  # Stores the full JSON (Tpose)
     back_data = models.JSONField(null=True, blank=True)  # Stores the full JSON (Tpose)
     max_height_gain_inches = models.TextField(null=True, blank=True)
+
+
+class PostureAssessment(models.Model):
+    """Per-assessment event row; latest per source is is_active=True."""
+
+    SOURCE_QUESTIONNAIRE = "questionnaire"
+    SOURCE_SCAN = "scan"
+    SOURCE_MOCK_SCAN = "mock_scan"
+    SOURCE_CHOICES = [
+        (SOURCE_QUESTIONNAIRE, "Questionnaire"),
+        (SOURCE_SCAN, "Scan"),
+        (SOURCE_MOCK_SCAN, "Mock Scan"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="posture_assessments",
+    )
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    spinal_loss_um = models.BigIntegerField()
+    collapse_loss_um = models.BigIntegerField()
+    pelvic_loss_um = models.BigIntegerField()
+    legs_loss_um = models.BigIntegerField()
+    total_loss_um = models.BigIntegerField()
+    confidence_score = models.DecimalField(max_digits=3, decimal_places=2, default=1.00)
+    is_active = models.BooleanField(default=True)
+    completed_at = models.DateTimeField()
+    raw_data = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "source", "is_active"]),
+            models.Index(fields=["user", "-completed_at"]),
+        ]
+        verbose_name = "Posture Assessment"
+        verbose_name_plural = "Posture Assessments"
+
+    def __str__(self):
+        return f"{self.user_id} {self.source} ({self.completed_at:%Y-%m-%d})"

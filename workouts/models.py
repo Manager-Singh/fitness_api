@@ -389,6 +389,9 @@ class UserRoutine(models.Model):
     # Store optimization breakdown directly in the routine
     optimization_breakdown = models.JSONField(default=dict)
 
+    # Segment loss um snapshot at generation/regen for 15% drift check
+    posture_snapshot_at_generation = models.JSONField(default=dict, blank=True)
+
     class Meta:
         verbose_name = "User Routine"
         verbose_name_plural = "User Routines"
