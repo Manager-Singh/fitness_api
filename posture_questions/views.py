@@ -41,6 +41,17 @@ from utils.streaks import get_user_streaks
 
 logger = logging.getLogger(__name__)
 
+
+def _profile_float(value, *, default=0.0):
+    """Coerce UserProfile CharField / nullable values to float without raising on None."""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 from utils.posture.height_access_utility import get_height_view
 from utils.teen_optimized_height import compute_optimized_height
 from utils.posture.teen_profile_mapper import map_userprofile_to_teenprofile
@@ -105,13 +116,20 @@ def upsert_posture_questions(request):
     # Convert and extract safely
     try:
         age_exact = float(get_user_age_exact(user) or 0.0)
-        current_age = int(age_exact) if age_exact > 0 else int(float(profile_dict.get("age") or 0))
+        current_age = int(age_exact) if age_exact > 0 else int(_profile_float(profile_dict.get("age"), default=0))
         gender = profile_dict.get("gender")
-        base_height = float(profile_dict.get("base_height_cm") or profile_dict.get("current_height_cm") or 0.0)
+        base_height = _profile_float(
+            profile_dict.get("base_height_cm") or profile_dict.get("current_height_cm"),
+            default=0.0,
+        )
         current_height = base_height
 
-        father_height = float(profile_dict.get("father_height_cm")) if current_age < 21 else None
-        mother_height = float(profile_dict.get("mother_height_cm")) if current_age < 21 else None
+        if current_age < 21:
+            father_height = _profile_float(profile_dict.get("father_height_cm"), default=None)
+            mother_height = _profile_float(profile_dict.get("mother_height_cm"), default=None)
+        else:
+            father_height = None
+            mother_height = None
 
     except (TypeError, ValueError, KeyError) as e:
         return Response({'error': f'Invalid profile data: {e}'}, status=status.HTTP_400_BAD_REQUEST)
