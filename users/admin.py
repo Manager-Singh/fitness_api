@@ -140,7 +140,11 @@ class DailyLogInline(admin.TabularInline):
     verbose_name_plural = "Daily progress — points per day (last 30)"
 
     def get_queryset(self, request):
-        return super().get_queryset(request)[:30]
+        qs = super().get_queryset(request).order_by("-log_date")
+        pks = list(qs.values_list("pk", flat=True)[:30])
+        if not pks:
+            return qs.none()
+        return qs.filter(pk__in=pks).order_by("-log_date")
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -182,7 +186,13 @@ class HeightLedgerInline(admin.TabularInline):
     verbose_name_plural = "Height ledger — daily_compute (last 30)"
 
     def get_queryset(self, request):
-        return super().get_queryset(request).filter(entry_type="daily_compute")[:30]
+        qs = super().get_queryset(request).filter(entry_type="daily_compute").order_by(
+            "-log_date", "-created_at"
+        )
+        pks = list(qs.values_list("pk", flat=True)[:30])
+        if not pks:
+            return qs.none()
+        return qs.filter(pk__in=pks).order_by("-log_date", "-created_at")
 
     def has_add_permission(self, request, obj=None):
         return False
