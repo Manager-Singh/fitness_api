@@ -31,6 +31,10 @@ from users.spec_runtime import get_user_runtime_state_snapshot
 from workouts.models import UserRoutine
 from django.db.models import Sum
 from utils.country import normalize_country_code
+from utils.profile_onboarding_ai import (
+    has_onboarding_answers,
+    run_onboarding_profile_analysis,
+)
 from utils.posture.height_constants import (
     ADULT_AGE_MAX,
     ADULT_MIN_AGE,
@@ -478,6 +482,19 @@ def update_profile_users(request):
     if confirm_outlier:
         onboarding_extra["outlier_confirmation_used"] = True
 
+    onboarding_ai = None
+    onboarding_keys = {k for k in request.data if k.startswith("onboarding_")}
+    if onboarding_keys and has_onboarding_answers(profile_data):
+        try:
+            onboarding_ai = run_onboarding_profile_analysis(user, profile_data)
+        except Exception as exc:
+            logger.warning(
+                "onboarding AI analysis failed for user %s: %s",
+                user.id,
+                exc,
+            )
+            onboarding_ai = {"error": str(exc)}
+
     return Response({
         'message': 'Profile updated successfully',
         'user': {
@@ -491,7 +508,8 @@ def update_profile_users(request):
             'timezone': getattr(user, "timezone", None),
             'profile': profile_data,
             **onboarding_extra,
-        }
+        },
+        'onboarding_analysis': onboarding_ai,
     }, status=status.HTTP_200_OK)
 
 

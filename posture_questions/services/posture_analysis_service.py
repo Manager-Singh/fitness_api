@@ -7,6 +7,7 @@ from posture_analysis.models import UserPosturalOptimizationData
 from posture_analysis.serializers import UserPosturalOptimizationDataSerializer
 from utils.chatgpt_service import generate_chatgpt_response
 from utils.ai_analysis import save_ai_text_analysis
+from utils.profile_onboarding_ai import build_onboarding_prompt_section
 from utils.posture_optimizer import calculate_optimization_breakdown
 from utils.posture.height_constants import (
     POINT_TO_CM,
@@ -325,6 +326,7 @@ class PostureAnalysisService:
 
         shoe_size_display = profile_dict.get("shoe_size", "not provided")
         posture_points_today = profile_dict.get("posture_points_today", 0)
+        onboarding_section = build_onboarding_prompt_section(profile_dict)
 
         # posture section control
         posture_section = ""
@@ -353,12 +355,14 @@ class PostureAnalysisService:
             TASK 1 — Posture Summary
 
             • Write a short summary of the user's posture condition.
-            • Provide 5 recommendations.
+            • If ONBOARDING MOTIVATION Q&A is present below, weave those answers into the summary
+              (peer height comparison, desire to grow, desk/phone time, emotional goal).
+            • Provide 5 recommendations (at least 2 should reference onboarding answers when present).
             • Estimate possible height gain from posture correction (0–1.5 inches).
             • Mention that genetics and age influence results.
 
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+            {onboarding_section}
             PROFILE DATA
 
             Age: {profile_dict.get("age")}

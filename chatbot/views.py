@@ -47,10 +47,15 @@ def ai_chat(request):
     # User Profile Context
     try:
         profile = UserProfile.objects.get(user=user)
+        from utils.profile_onboarding_ai import onboarding_context_line
+
+        onboarding_line = onboarding_context_line(profile)
         profile_context = (
             f"Age: {p(profile.age)}, Gender: {p(profile.gender)}, Height: {p(profile.current_height_cm)} cm, "
             f"Goal: {p(profile.main_goal_with_heightmax_answer)}, Activity: {p(profile.activity_level_answer)}"
         )
+        if onboarding_line:
+            profile_context += f". Onboarding: {onboarding_line}"
     except:
         profile_context = "Profile data not available."
 
