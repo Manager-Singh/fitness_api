@@ -1,0 +1,213 @@
+/* Height API — user progress dashboard in Django admin */
+
+.hm-progress-dashboard {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  max-width: 100%;
+}
+
+.hm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.hm-stat-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.hm-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.hm-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.hm-stat-sub {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.hm-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.hm-meta-gap {
+  width: 8px;
+}
+
+.hm-segments {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+}
+
+.hm-seg-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 44px 80px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.hm-seg-row:last-child {
+  margin-bottom: 0;
+}
+
+.hm-seg-name {
+  font-weight: 600;
+  color: #334155;
+}
+
+.hm-seg-track {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.hm-seg-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  border-radius: 4px;
+}
+
+.hm-seg-pct {
+  font-weight: 700;
+  color: #166534;
+  text-align: right;
+}
+
+.hm-seg-loss {
+  color: #64748b;
+  text-align: right;
+  font-size: 11px;
+}
+
+.hm-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+  margin: 12px 0 8px;
+}
+
+.hm-mini-table {
+  width: 100%;
+  max-width: 520px;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.hm-mini-table th,
+.hm-mini-table td {
+  padding: 8px 12px;
+  text-align: center;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.hm-mini-table th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.hm-ledger-line {
+  font-size: 13px;
+  color: #334155;
+  margin: 0 0 12px;
+}
+
+.hm-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.hm-link-btn {
+  display: inline-block;
+  padding: 6px 14px;
+  background: #0ea5e9;
+  color: #fff !important;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none !important;
+}
+
+.hm-link-btn:hover {
+  background: #0284c7;
+}
+
+.hm-footnote {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Collapse lower-priority inlines by default */
+.inline-group[id*="posturequestion"],
+.inline-group[id*="userprofile"] {
+  /* keep profile visible — only collapse posture questions if noisy */
+}
+
+/* Highlight today's row in tabular inlines */
+.hm-row-today td {
+  background: #ecfdf5 !important;
+}
+
+.hm-row-today td:first-child::before {
+  content: "● ";
+  color: #16a34a;
+}
+
+/* Progress fieldset full width */
+fieldset.wide.module {
+  width: 100%;
+}
+
+fieldset.module.hm-progress-fieldset {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+fieldset.module.hm-progress-fieldset > h2 {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 8px 8px 0 0;
+}
