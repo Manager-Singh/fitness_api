@@ -211,3 +211,201 @@ fieldset.module.hm-progress-fieldset > h2 {
   color: #f8fafc;
   border-radius: 8px 8px 0 0;
 }
+
+/* Exercise routine panel (user change page) */
+fieldset.module.hm-routine-fieldset {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin-top: 0;
+}
+
+fieldset.module.hm-routine-fieldset > h2 {
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  color: #fff;
+  border-radius: 8px 8px 0 0;
+}
+
+.hm-routine-fieldset-body {
+  padding: 0;
+}
+
+.hm-routine-panel {
+  margin: 0;
+  padding: 1rem 1.25rem 1.25rem;
+  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 50%, #f8fafc 100%);
+  border: 1px solid #e9d5ff;
+  border-radius: 0 0 10px 10px;
+}
+
+.hm-routine-panel-head {
+  margin-bottom: 14px;
+}
+
+.hm-routine-panel-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #312e81;
+}
+
+.hm-routine-panel-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.hm-routine-empty {
+  background: #fff;
+  border: 1px dashed #c4b5fd;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.hm-routine-empty p {
+  margin: 0 0 6px;
+  color: #475569;
+}
+
+.hm-routine-empty-hint {
+  font-size: 12px;
+  color: #94a3b8 !important;
+}
+
+.hm-routine-block {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.08);
+}
+
+.hm-routine-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.hm-routine-date {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.hm-routine-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f46e5;
+}
+
+.hm-ex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.hm-ex-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.hm-ex-card:hover {
+  border-color: #a5b4fc;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+
+.hm-ex-order {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #4f46e5;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+.hm-ex-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.hm-ex-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.hm-ex-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hm-routine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid #e9d5ff;
+}
+
+.hm-generate-form {
+  margin: 0;
+}
+
+.hm-btn-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+
+.hm-btn-generate:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.45);
+}
+
+.hm-btn-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.hm-link-btn-secondary {
+  background: #fff !important;
+  color: #4f46e5 !important;
+  border: 1px solid #c4b5fd !important;
+}
+
+.hm-link-btn-secondary:hover {
+  background: #f5f3ff !important;
+}

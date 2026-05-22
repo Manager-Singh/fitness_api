@@ -4,7 +4,10 @@ from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import get_deleted_objects
 from django.db import transaction
+from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
 
 from posture.models import PostureReport
@@ -19,6 +22,9 @@ from chatbot.models import ChatMessage
 from height_analysis.models import GeneticHeightEstimate, HeightGrowthProjection
 from posture_analysis.models import UserPosturalOptimizationData, PosturalRecommendation
 
+from posture_questions.services.routine_service import RoutineService
+from utils.posture.state_to_breakdown import posture_state_to_optimization_breakdown
+
 from .admin_ui import (
     badge,
     badge_bool,
@@ -26,6 +32,7 @@ from .admin_ui import (
     badge_tier,
     fmt_cm,
     progress_dashboard_html,
+    routine_section_html,
     um_to_cm,
 )
 from .models import DailyLog, FriendInvite, Friendship, HeightLedger, NotificationEventLog, OTP, PostureState, User
@@ -68,6 +75,23 @@ class ScanCompletedFilter(admin.SimpleListFilter):
         if self.value() == "no":
             return queryset.exclude(posture_state__scan_completed=True)
         return queryset
+
+
+def _optimization_breakdown_for_user(user):
+    """Breakdown for routine generation: reconciled PostureState → report → default."""
+    latest_report = PostureReport.objects.filter(user=user).order_by("-created_at").first()
+    fallback = None
+    if latest_report and isinstance(latest_report.data, dict):
+        fallback = latest_report.data.get("optimization_breakdown")
+    breakdown = RoutineService.reconciled_optimization_breakdown(user, fallback)
+    if breakdown:
+        return breakdown
+    state = PostureState.objects.filter(user=user).first()
+    if state:
+        breakdown = posture_state_to_optimization_breakdown(state)
+        if breakdown:
+            return breakdown
+    return _default_breakdown()
 
 
 def _default_breakdown():
@@ -262,6 +286,47 @@ class UserAdmin(admin.ModelAdmin):
 
     change_form_template = "admin/users/change_form.html"
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<id>/generate-routine/",
+                self.admin_site.admin_view(self.generate_routine_view),
+                name="users_user_generate_routine",
+            ),
+        ]
+        return custom + urls
+
+    def generate_routine_view(self, request, object_id):
+        user = get_object_or_404(self.model, pk=object_id)
+        if not self.has_change_permission(request, user):
+            return HttpResponseForbidden()
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        try:
+            breakdown = _optimization_breakdown_for_user(user)
+            routines = generate_user_routines(user, breakdown)
+            n_ex = sum(r.exercises.count() for r in routines)
+            self.message_user(
+                request,
+                f"Generated POSTURE routine for {user.email} ({n_ex} exercises).",
+                level=messages.SUCCESS,
+            )
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Routine generation failed for {user.email}: {e}",
+                level=messages.ERROR,
+            )
+        return HttpResponseRedirect(reverse("admin:users_user_change", args=[user.pk]))
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        user = self.get_object(request, object_id)
+        if user is not None:
+            extra_context["hm_routine_section"] = routine_section_html(user, request)
+        return super().change_view(request, object_id, form_url, extra_context=extra_context)
+
     class UserProfileInline(admin.StackedInline):
         model = UserProfile
         can_delete = False
@@ -401,12 +466,7 @@ class UserAdmin(admin.ModelAdmin):
         failed = 0
         for user in queryset:
             try:
-                latest_report = PostureReport.objects.filter(user=user).order_by("-created_at").first()
-                breakdown = None
-                if latest_report and isinstance(latest_report.data, dict):
-                    breakdown = latest_report.data.get("optimization_breakdown")
-                if not breakdown:
-                    breakdown = _default_breakdown()
+                breakdown = _optimization_breakdown_for_user(user)
                 generate_user_routines(user, breakdown)
                 ok += 1
             except Exception as e:

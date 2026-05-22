@@ -63,6 +63,16 @@ from utils.posture.height_constants import (
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
+def _coerce_profile_field_value(key: str, value):
+    """Serialize list/dict option payloads to JSON text for TextField columns."""
+    if value is None:
+        return value
+    if key.endswith("_options") or key.endswith("_all_option"):
+        if isinstance(value, (list, dict)):
+            return json.dumps(value)
+    return value
+
+
 def _round_cm_3(value):
     """
     Return a float rounded to 3 decimals (cm precision).
@@ -180,6 +190,8 @@ def update_profile_users(request):
     POST /api/update-profile — JSON body merges into ``UserProfile`` (except ``base_height_cm`` in the generic merge).
     When ``current_height_cm`` is sent and differs from ``base_height_cm``, base is re-synced to match (within allowed cm range).
     Also accepts ``display_name``, ``avatar_url``, ``timezone``, ``profile_step`` on the user.
+    Onboarding pain/goal fields: ``onboarding_pain_{1,2,3}_{question,options,answer}``,
+    ``onboarding_goal_{question,options,answer}`` (``*_options`` may be a JSON array).
     """
     # Debug visibility for client integration (prints only in DEBUG mode).
     if getattr(settings, "DEBUG", False):
@@ -373,7 +385,7 @@ def update_profile_users(request):
         if key == "birth_date" and birth_date_parsed is not None:
             value = birth_date_parsed
         if key in allowed_fields:
-            setattr(profile, key, value)
+            setattr(profile, key, _coerce_profile_field_value(key, value))
 
     profile.save()
 

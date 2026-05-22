@@ -5,3 +5,15 @@
 {{ block.super }}
 <link rel="stylesheet" href="{% static 'admin/css/user_progress.css' %}">
 {% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+{% if hm_routine_section %}
+<fieldset class="module hm-routine-fieldset wide">
+  <h2>Exercise routine</h2>
+  <div class="hm-routine-fieldset-body">
+    {{ hm_routine_section|safe }}
+  </div>
+</fieldset>
+{% endif %}
+{% endblock %}

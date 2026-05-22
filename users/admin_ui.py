@@ -4,6 +4,8 @@ from __future__ import annotations
 from django.urls import reverse
 from django.utils.html import format_html
 
+from django.middleware.csrf import get_token
+
 from users.models import DailyLog, HeightLedger
 from users.spec_runtime import get_user_runtime_state_snapshot
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
@@ -98,6 +100,144 @@ def _segment_bars_from_diagnostics(user) -> str:
             )
         )
     return format_html('<div class="hm-segments">{}</div>', format_html("".join(rows)))
+
+
+_TIER_STYLES = {
+    "core": ("#1e40af", "#dbeafe", "Core"),
+    "rec": ("#6b21a8", "#f3e8ff", "Rec"),
+    "beast": ("#9a3412", "#ffedd5", "Beast"),
+}
+
+
+def _tier_badge(tier: str | None) -> str:
+    key = (tier or "").lower()
+    color, bg, label = _TIER_STYLES.get(key, ("#64748b", "#f1f5f9", tier or "—"))
+    return badge(label, color=color, bg=bg)
+
+
+def _qty_label(ure) -> str:
+    unit = (ure.unit or "reps").lower()
+    lo = ure.qty_min
+    hi = ure.qty_max
+    if hi and hi != lo:
+        qty = f"{lo}–{hi}"
+    else:
+        qty = str(lo)
+    if unit == "reps":
+        return f"{ure.sets}×{qty} reps"
+    if unit == "sec":
+        return f"{ure.sets}×{qty}s"
+    return f"{ure.sets}×{qty} {unit}"
+
+
+def routine_section_html(user, request) -> str:
+    """Active posture/HGH routines + generate button (admin change page)."""
+    if not user or not user.pk:
+        return ""
+
+    from django.db.models import Prefetch
+    from django.urls import reverse
+
+    from workouts.models import UserRoutine, UserRoutineExercise
+
+    generate_url = reverse("admin:users_user_generate_routine", args=[user.pk])
+    routines_url = (
+        reverse("admin:workouts_userroutine_changelist") + f"?user__id__exact={user.pk}"
+    )
+    csrf = get_token(request)
+
+    routines = list(
+        UserRoutine.objects.filter(user=user, is_active=True)
+        .prefetch_related(
+            Prefetch(
+                "exercises",
+                queryset=UserRoutineExercise.objects.select_related("exercise")
+                .order_by("order"),
+            )
+        )
+        .order_by("routine_type", "-created_at")
+    )
+
+    routine_blocks = []
+    if not routines:
+        routine_blocks.append(
+            format_html(
+                '<div class="hm-routine-empty">'
+                "<p>No active routine yet.</p>"
+                '<p class="hm-routine-empty-hint">'
+                "Generate a personalized POSTURE routine (10 exercises) from this user’s posture state."
+                "</p></div>"
+            )
+        )
+    else:
+        for routine in routines:
+            exercises = list(routine.exercises.all())
+            cards = []
+            for ure in exercises:
+                ex = ure.exercise
+                name = ex.short_name or ex.name
+                cards.append(
+                    format_html(
+                        '<div class="hm-ex-card">'
+                        '<span class="hm-ex-order">#{}</span>'
+                        '<div class="hm-ex-body">'
+                        '<div class="hm-ex-title">{}</div>'
+                        '<div class="hm-ex-meta">{} {}</div>'
+                        "</div></div>",
+                        ure.order,
+                        name,
+                        _tier_badge(ure.tier),
+                        badge(_qty_label(ure), color="#334155", bg="#e2e8f0"),
+                    )
+                )
+            routine_blocks.append(
+                format_html(
+                    '<div class="hm-routine-block">'
+                    '<div class="hm-routine-head">'
+                    '{} {} <span class="hm-routine-date">{}</span>'
+                    '<span class="hm-routine-count">{} exercises</span>'
+                    "</div>"
+                    '<div class="hm-ex-grid">{}</div>'
+                    "</div>",
+                    badge(
+                        routine.get_routine_type_display(),
+                        color="#0f766e",
+                        bg="#ccfbf1",
+                    ),
+                    badge_bool(routine.is_active, "Active", "Inactive"),
+                    routine.created_at.strftime("%Y-%m-%d %H:%M"),
+                    len(exercises),
+                    format_html("".join(cards)) if cards else "—",
+                )
+            )
+
+    actions = format_html(
+        '<div class="hm-routine-actions">'
+        '<form method="post" action="{}" class="hm-generate-form" '
+        'onsubmit="return confirm(\'Generate a new POSTURE routine? The current active routine will be deactivated.\');">'
+        '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
+        '<button type="submit" class="hm-btn-generate">'
+        '<span class="hm-btn-icon">↻</span> Generate routine</button>'
+        "</form>"
+        '<a class="hm-link-btn hm-link-btn-secondary" href="{}">All routines</a>'
+        "</div>",
+        generate_url,
+        csrf,
+        routines_url,
+    )
+
+    return format_html(
+        '<div class="hm-routine-panel">'
+        '<div class="hm-routine-panel-head">'
+        '<h3 class="hm-routine-panel-title">Exercise routine</h3>'
+        '<p class="hm-routine-panel-sub">Active assignments from <code>generate_user_routines</code></p>'
+        "</div>"
+        "{}"
+        "{}"
+        "</div>",
+        format_html("".join(routine_blocks)),
+        actions,
+    )
 
 
 def progress_dashboard_html(user) -> str:

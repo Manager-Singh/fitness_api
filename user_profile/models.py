@@ -89,6 +89,21 @@ class UserProfile(models.Model):
     main_goal_with_heightmax_question = models.TextField(null=True, blank=True)
     main_goal_with_heightmax_options = models.TextField(null=True, blank=True)
     main_goal_with_heightmax_answer = models.TextField(null=True, blank=True)
+
+    # Onboarding pain + goal (teen onboarding flow)
+    onboarding_pain_1_question = models.TextField(null=True, blank=True)
+    onboarding_pain_1_options = models.TextField(null=True, blank=True)  # JSON array
+    onboarding_pain_1_answer = models.TextField(null=True, blank=True)
+    onboarding_pain_2_question = models.TextField(null=True, blank=True)
+    onboarding_pain_2_options = models.TextField(null=True, blank=True)
+    onboarding_pain_2_answer = models.TextField(null=True, blank=True)
+    onboarding_pain_3_question = models.TextField(null=True, blank=True)
+    onboarding_pain_3_options = models.TextField(null=True, blank=True)
+    onboarding_pain_3_answer = models.TextField(null=True, blank=True)
+    onboarding_goal_question = models.TextField(null=True, blank=True)
+    onboarding_goal_options = models.TextField(null=True, blank=True)
+    onboarding_goal_answer = models.TextField(null=True, blank=True)
+
     last_scan = models.DateTimeField(null=True, blank=True)
     g_p_height_change = models.TextField(null=True, blank=True)
     g_p_shoe_pant_growth = models.TextField(null=True, blank=True)
