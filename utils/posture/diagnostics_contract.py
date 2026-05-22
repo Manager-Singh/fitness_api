@@ -37,10 +37,14 @@ def build_posture_optimization_diagnostics(
         "leg_hamstring": round(float(runtime.get("legs_current_loss_um", 0)) / 10000.0, 2),
     }
 
-    # Section 4.3: after unlock, bars must reflect live Engine-1 recovery (PostureState),
-    # not a frozen scan/questionnaire snapshot. Log embed already passed breakdown=None;
-    # GET /dashboard-new passed scan breakdown and was overriding runtime (bars stuck at 72/54/…).
-    unlocked = bool(runtime.get("scan_completed") or runtime.get("questionnaire_completed"))
+    # Section 4.3: after unlock, bars must reflect live PostureState (Engine-1 recovery),
+    # not a frozen AI/pending_scan snapshot. Treat reconciliation assessment as unlock too.
+    has_assessment = bool(str(runtime.get("assessment_sources_used") or "").strip())
+    unlocked = bool(
+        runtime.get("scan_completed")
+        or runtime.get("questionnaire_completed")
+        or has_assessment
+    )
     has_live_loss_state = (
         float(runtime.get("total_recoverable_loss_um", 0) or 0) > 0
         or sum(runtime_segments.values()) > 0
@@ -49,12 +53,18 @@ def build_posture_optimization_diagnostics(
 
     segments = {}
     for seg, max_loss in POSTURE_SEGMENT_MAX_LOSS_CM.items():
+        live_loss = float(runtime_segments[seg])
         if use_live_segment_loss:
-            seg_current = runtime_segments[seg]
+            seg_current = live_loss
         elif optimization_breakdown and seg in optimization_breakdown:
-            seg_current = optimization_breakdown[seg].get("current_loss_cm", runtime_segments[seg])
+            bd_loss = float(optimization_breakdown[seg].get("current_loss_cm", live_loss) or 0)
+            # Do not let all-zero stale breakdown override real PostureState losses.
+            if live_loss > 0 and bd_loss <= 0:
+                seg_current = live_loss
+            else:
+                seg_current = bd_loss
         else:
-            seg_current = runtime_segments[seg]
+            seg_current = live_loss
         segments[seg] = _segment_payload(seg_current, max_loss)
 
     total_current_loss_cm = round(sum(v["current_loss_cm"] for v in segments.values()), 2)

@@ -798,6 +798,7 @@ def get_user_runtime_state_snapshot(user):
     return {
         "scan_completed": bool(state.scan_completed),
         "questionnaire_completed": bool(state.questionnaire_completed),
+        "assessment_sources_used": getattr(state, "assessment_sources_used", "") or "",
         "total_recoverable_loss_um": int(state.total_recoverable_loss_um or 0),
         "spinal_current_loss_um": int(state.spinal_current_loss_um or 0),
         "collapse_current_loss_um": int(state.collapse_current_loss_um or 0),

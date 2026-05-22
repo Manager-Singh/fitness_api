@@ -872,6 +872,18 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         else:
             max_height_cm = teen_profile.current_height_cm
 
+    # Prefer reconciled PostureState breakdown for dashboard bars when assessments exist.
+    from utils.posture.state_to_breakdown import posture_state_to_optimization_breakdown
+
+    posture_state = PostureState.objects.filter(user=user).first()
+    state_breakdown = posture_state_to_optimization_breakdown(posture_state)
+    runtime_for_bars = get_user_runtime_state_snapshot(user)
+    if (
+        state_breakdown
+        and str(runtime_for_bars.get("assessment_sources_used") or "").strip()
+    ):
+        optimization_breakdown = state_breakdown
+
     # Build canonical diagnostics first and use it as single display source.
     posture_optimization_diagnostics = build_posture_optimization_diagnostics(
         user=user,

@@ -6,7 +6,7 @@ from django.utils.html import format_html
 
 from users.models import DailyLog, HeightLedger
 from users.spec_runtime import get_user_runtime_state_snapshot
-from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct
+from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.user_time import user_today
 
 
@@ -67,21 +67,23 @@ def _stat_card(title: str, value: str, subtitle: str = "", *, accent: str = "#0e
     )
 
 
-def _segment_bars(state) -> str:
-    if not state:
+def _segment_bars_from_diagnostics(user) -> str:
+    """Same segment math as GET /api/dashboard-new."""
+    if not user or not user.pk:
         return ""
-    mapping = [
-        ("Spinal", "spinal_current_loss_um", "spinal_compression"),
-        ("Collapse", "collapse_current_loss_um", "posture_collapse"),
-        ("Pelvic", "pelvic_current_loss_um", "pelvic_tilt_back"),
-        ("Legs", "legs_current_loss_um", "leg_hamstring"),
-    ]
+    diag = build_posture_optimization_diagnostics(user=user, optimization_breakdown=None)
+    label_map = {
+        "spinal_compression": "Spinal",
+        "posture_collapse": "Collapse",
+        "pelvic_tilt_back": "Pelvic",
+        "leg_hamstring": "Legs",
+    }
     rows = []
-    for label, attr, key in mapping:
-        max_cm = float(POSTURE_SEGMENT_MAX_LOSS_CM.get(key, 1))
-        loss_cm = um_to_cm(getattr(state, attr, 0))
-        pct = posture_segment_opt_pct(loss_cm, max_cm)
-        width = max(4, min(100, int(pct)))
+    for key, label in label_map.items():
+        seg = (diag.get("segments") or {}).get(key) or {}
+        loss_cm = float(seg.get("current_loss_cm", 0) or 0)
+        pct = float(seg.get("percent_optimized_precise", seg.get("percent_optimized", 0)) or 0)
+        width = max(4, min(100, int(round(pct))))
         rows.append(
             format_html(
                 '<div class="hm-seg-row">'
@@ -91,7 +93,7 @@ def _segment_bars(state) -> str:
                 '<span class="hm-seg-loss">{} cm loss</span></div>',
                 label,
                 width,
-                pct,
+                int(round(pct)),
                 f"{loss_cm:.2f}",
             )
         )
@@ -134,11 +136,13 @@ def progress_dashboard_html(user) -> str:
         _stat_card("Local today", str(today), pipeline_sub, accent="#f59e0b"),
     )
 
+    has_assessment = bool(str(snap.get("assessment_sources_used") or "").strip())
+    q_done = bool(snap.get("questionnaire_completed")) or has_assessment
     unlock_row = format_html(
         '<div class="hm-meta-row">{} {} <span class="hm-meta-gap"></span> Sources: <code>{}</code></div>',
         badge_bool(snap.get("scan_completed"), "Scan done", "No scan"),
-        badge_bool(snap.get("questionnaire_completed"), "Questionnaire", "No questionnaire"),
-        state.assessment_sources_used if state and state.assessment_sources_used else "—",
+        badge_bool(q_done, "Questionnaire", "No questionnaire"),
+        snap.get("assessment_sources_used") or "—",
     )
 
     today_detail = ""
@@ -193,7 +197,7 @@ def progress_dashboard_html(user) -> str:
         "</div>",
         cards,
         unlock_row,
-        _segment_bars(state),
+        _segment_bars_from_diagnostics(user),
         format_html('<div class="hm-section-title">Today breakdown</div>{}', today_detail or "—"),
         ledger_detail,
         links,

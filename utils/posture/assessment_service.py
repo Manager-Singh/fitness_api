@@ -45,6 +45,19 @@ def save_questionnaire_assessment(
         raw_data=raw_data,
     )
     recalculate_posture_state(user)
+    from users.models import PostureState
+
+    state, _ = PostureState.objects.get_or_create(user=user)
+    state.questionnaire_completed = True
+    if state.questionnaire_completed_at is None:
+        state.questionnaire_completed_at = timezone.now()
+    state.save(
+        update_fields=[
+            "questionnaire_completed",
+            "questionnaire_completed_at",
+            "updated_at",
+        ]
+    )
     return assessment
 
 

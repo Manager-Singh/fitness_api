@@ -40,3 +40,38 @@ class PostureDiagnosticsLiveBarsTests(TestCase):
         spinal = diag["segments"]["spinal_compression"]
         self.assertAlmostEqual(spinal["current_loss_cm"], 0.10, places=2)
         self.assertGreater(spinal["percent_optimized_precise"], 90.0)
+
+    def test_assessment_sources_unlock_without_completed_flags(self):
+        user = get_user_model().objects.create_user(
+            username="assess_unlock_user",
+            email="assess_unlock@example.com",
+            password="testpass123",
+        )
+        state, _ = PostureState.objects.get_or_create(user=user)
+        state.scan_completed = False
+        state.questionnaire_completed = False
+        state.assessment_sources_used = "questionnaire_only"
+        state.total_recoverable_loss_um = int(5.03 * 10000)
+        state.spinal_current_loss_um = int(0.85 * 10000)
+        state.collapse_current_loss_um = int(1.61 * 10000)
+        state.pelvic_current_loss_um = int(1.59 * 10000)
+        state.legs_current_loss_um = int(0.98 * 10000)
+        state.save()
+
+        stale_zeros = {
+            seg: {
+                "current_loss_cm": 0.0,
+                "max_loss_cm": max_loss,
+                "percent_optimized": 100,
+            }
+            for seg, max_loss in POSTURE_SEGMENT_MAX_LOSS_CM.items()
+        }
+
+        diag = build_posture_optimization_diagnostics(
+            user=user,
+            optimization_breakdown=stale_zeros,
+            source="questionnaire_only",
+        )
+        spinal = diag["segments"]["spinal_compression"]
+        self.assertAlmostEqual(spinal["current_loss_cm"], 0.85, places=2)
+        self.assertLess(spinal["percent_optimized_precise"], 80.0)
