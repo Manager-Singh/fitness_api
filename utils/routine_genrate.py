@@ -22,6 +22,11 @@ from utils.exercise_assignment import (
     select_teen_recommended_beast,
     adult_scoring_pool_queryset,
     teen_scoring_pool_queryset,
+    pick_top_scored,
+    score_adult_exercise,
+    score_teen_beast,
+    score_teen_recommended,
+    _beast_candidates,
 )
 from utils.exercise_prescriptions import prescription_for_exercise_name
 from workouts.exercise_assignment_data import (
@@ -463,6 +468,99 @@ class _SyntheticVariantExercise:
         return "Main"
 
 
+def _synthetic_for_pick(variant, exercise, tier, order):
+    pres = prescription_for_exercise_name(exercise.name)
+    return _SyntheticVariantExercise(
+        variant=variant,
+        exercise=exercise,
+        tier=tier,
+        order=order,
+        **pres,
+    )
+
+
+def _backfill_posture_slots(
+    slots,
+    seen_names: set[str],
+    used_exercise_ids: set[int],
+    *,
+    variant,
+    pool,
+    losses,
+    is_teen: bool,
+    age: int,
+) -> None:
+    """Fill missing core/rec/beast slots after trim/dedupe (target 6+2+2)."""
+    from collections import Counter
+
+    counts = Counter(tier for _, tier in slots)
+    need_core = 6 - counts.get(Tier.CORE, 0)
+    need_rec = 2 - counts.get(Tier.RECOMMENDED, 0)
+    need_beast = 2 - counts.get(Tier.BEAST, 0)
+    if need_core <= 0 and need_rec <= 0 and need_beast <= 0:
+        return
+
+    exclude = [ve.exercise for ve, _ in slots]
+
+    def _add(ex, tier) -> bool:
+        if ex.id in used_exercise_ids:
+            return False
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if not key or key in seen_names:
+            return False
+        ve = _find_variant_exercise(variant, ex, tier=tier) or _synthetic_for_pick(
+            variant, ex, tier, len(slots) + 1
+        )
+        slots.append((ve, tier))
+        used_exercise_ids.add(ex.id)
+        seen_names.add(key)
+        exclude.append(ex)
+        return True
+
+    if is_teen:
+        hgh_m, post_m = get_age_multipliers(age)
+        score_rec = lambda ex: score_teen_recommended(ex, losses, hgh_m, post_m)
+        score_beast = lambda ex: score_teen_beast(ex, losses, hgh_m, post_m)
+    else:
+        score_rec = lambda ex: score_adult_exercise(ex, losses, is_beast=False)
+        score_beast = lambda ex: score_adult_exercise(ex, losses, is_beast=True)
+
+    if need_beast > 0:
+        for ex in pick_top_scored(_beast_candidates(pool), score_beast, need_beast + 4, exclude=exclude):
+            if _add(ex, Tier.BEAST):
+                need_beast -= 1
+            if need_beast <= 0:
+                break
+
+    if need_rec > 0:
+        rec_pool = [ex for ex in pool if not getattr(ex, "teen_only", False)]
+        for ex in pick_top_scored(rec_pool, score_rec, need_rec + 6, exclude=exclude):
+            if _add(ex, Tier.RECOMMENDED):
+                need_rec -= 1
+            if need_rec <= 0:
+                break
+
+    if need_core > 0:
+        name_list = (
+            TEEN_CORE_6_NAMES if is_teen else _adult_core_names_for_age(age)
+        )
+        non_beast = [
+            n
+            for n in name_list
+            if (spec_key_for_name(n) or "") not in BEAST_MODE_CANONICAL_KEYS
+        ]
+        tmp_core = []
+        seen = set(used_exercise_ids)
+        _append_core_slots_by_names(
+            variant, tmp_core, non_beast, seen, allowed_categories=POSTURE_ALLOWED_CATEGORIES
+        )
+        for ve in tmp_core:
+            if _add(ve.exercise, Tier.CORE):
+                need_core -= 1
+            if need_core <= 0:
+                break
+
+
 def _variant_exercises_for_picks(variant, exercises, tier):
     """Map scored Exercise picks to VariantExercise on variant (prefer matching tier)."""
     out = []
@@ -578,6 +676,18 @@ def build_posture_routine_slots(
         _append_slot(ve, tier)
     for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
         _append_slot(ve, tier)
+
+    if len(slots) < 10:
+        _backfill_posture_slots(
+            slots,
+            seen_names,
+            used_exercise_ids,
+            variant=variant,
+            pool=pool,
+            losses=losses,
+            is_teen=is_teen,
+            age=age,
+        )
 
     meta = {
         "assignment_spec": "v1",
@@ -716,6 +826,10 @@ def generate_user_routines(
             sum(1 for _, t in slots if t == Tier.CORE),
             sum(1 for _, t in slots if t == Tier.RECOMMENDED),
             beast_count,
+        )
+        raise ValidationError(
+            f"Posture routine incomplete ({order}/10 exercises persisted). "
+            "Pull latest api code and regenerate; check logs for duplicate skips."
         )
 
     _attach_posture_snapshot(routine, user)

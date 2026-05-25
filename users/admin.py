@@ -307,11 +307,19 @@ class UserAdmin(admin.ModelAdmin):
             breakdown = _optimization_breakdown_for_user(user)
             routines = generate_user_routines(user, breakdown)
             n_ex = sum(r.exercises.count() for r in routines)
-            self.message_user(
-                request,
-                f"Generated POSTURE routine for {user.email} ({n_ex} exercises).",
-                level=messages.SUCCESS,
-            )
+            if n_ex < 10:
+                self.message_user(
+                    request,
+                    f"Routine incomplete for {user.email}: only {n_ex}/10 exercises. "
+                    "Deploy latest routine_genrate.py and try again.",
+                    level=messages.ERROR,
+                )
+            else:
+                self.message_user(
+                    request,
+                    f"Generated POSTURE routine for {user.email} ({n_ex} exercises).",
+                    level=messages.SUCCESS,
+                )
         except Exception as e:
             self.message_user(
                 request,
