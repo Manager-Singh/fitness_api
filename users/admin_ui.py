@@ -6,9 +6,14 @@ from django.utils.html import format_html
 
 from django.middleware.csrf import get_token
 
-from users.models import DailyLog, HeightLedger
-from users.spec_runtime import get_user_runtime_state_snapshot
+from users.models import DailyLog, HeightLedger, PostureState
+from users.spec_runtime import (
+    LEDGER_ENTRY_DAILY_COMPUTE,
+    compute_engine1_gain_shares,
+    get_user_runtime_state_snapshot,
+)
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
+from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct_precise
 from utils.user_time import user_today
 
 
@@ -78,38 +83,119 @@ def _stat_card(title: str, value: str, subtitle: str = "", *, accent: str = "#0e
     )
 
 
+_SEGMENT_BAR_DEFS = (
+    ("spinal_compression", "Spinal", "spinal_current_loss_um"),
+    ("posture_collapse", "Collapse", "collapse_current_loss_um"),
+    ("pelvic_tilt_back", "Pelvic", "pelvic_current_loss_um"),
+    ("leg_hamstring", "Legs", "legs_current_loss_um"),
+)
+
+
+def _today_engine1_segment_shares(user) -> tuple[int, dict[str, int]]:
+    """Today's Engine-1 μm total and per-field share from ledger metadata or recompute."""
+    if not user or not user.pk:
+        return 0, {}
+    today = user_today(user)
+    ledger = (
+        HeightLedger.objects.filter(
+            user=user,
+            log_date=today,
+            entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    engine1_um = int(getattr(ledger, "engine1_delta_um", 0) or 0) if ledger else 0
+    if engine1_um <= 0:
+        return 0, {}
+
+    meta = (ledger.metadata or {}).get("engine1_segment_shares_um") if ledger else None
+    if isinstance(meta, dict) and meta:
+        return engine1_um, {k: int(v or 0) for k, v in meta.items()}
+
+    state = PostureState.objects.filter(user=user).first()
+    if not state:
+        return engine1_um, {}
+
+    # Reconstruct pre-gain losses: current + today's share (one refinement pass).
+    class _Snap:
+        pass
+
+    snap = _Snap()
+    for _, _, field in _SEGMENT_BAR_DEFS:
+        setattr(snap, field, int(getattr(state, field, 0) or 0))
+    shares = compute_engine1_gain_shares(snap, engine1_um)
+    for field, share in shares.items():
+        setattr(snap, field, int(getattr(snap, field, 0) or 0) + int(share or 0))
+    shares = compute_engine1_gain_shares(snap, engine1_um)
+    return engine1_um, shares
+
+
+def _opt_pct_from_loss_um(loss_um: int, seg_key: str) -> float:
+    max_cm = float(POSTURE_SEGMENT_MAX_LOSS_CM.get(seg_key, 0))
+    loss_cm = int(loss_um or 0) / 10000.0
+    return float(posture_segment_opt_pct_precise(loss_cm, max_cm, decimals=2))
+
+
 def _segment_bars_from_diagnostics(user) -> str:
-    """Same segment math as GET /api/dashboard-new."""
+    """Segment bars: green = prior opt %, amber = today's Engine-1 gain split."""
     if not user or not user.pk:
         return ""
-    diag = build_posture_optimization_diagnostics(user=user, optimization_breakdown=None)
-    label_map = {
-        "spinal_compression": "Spinal",
-        "posture_collapse": "Collapse",
-        "pelvic_tilt_back": "Pelvic",
-        "leg_hamstring": "Legs",
-    }
+    engine1_today_um, shares_by_field = _today_engine1_segment_shares(user)
+    state = PostureState.objects.filter(user=user).first()
+
     rows = []
-    for key, label in label_map.items():
-        seg = (diag.get("segments") or {}).get(key) or {}
-        loss_cm = float(seg.get("current_loss_cm", 0) or 0)
-        pct = float(seg.get("percent_optimized_precise", seg.get("percent_optimized", 0)) or 0)
-        width = max(4, min(100, int(round(pct))))
+    for seg_key, label, field in _SEGMENT_BAR_DEFS:
+        loss_after_um = int(getattr(state, field, 0) or 0) if state else 0
+        share_um = int(shares_by_field.get(field, 0) or 0)
+        loss_before_um = loss_after_um + share_um
+
+        pct_after = _opt_pct_from_loss_um(loss_after_um, seg_key)
+        pct_before = _opt_pct_from_loss_um(loss_before_um, seg_key)
+        pct_today = max(0.0, pct_after - pct_before)
+
+        w_before = max(0, min(100, int(round(pct_before))))
+        w_today = max(0, min(100 - w_before, int(round(pct_today))))
+
         rows.append(
             format_html(
                 '<div class="hm-seg-row">'
                 '<span class="hm-seg-name">{}</span>'
-                '<div class="hm-seg-track"><div class="hm-seg-fill" style="width:{}%;"></div></div>'
-                '<span class="hm-seg-pct">{}%</span>'
-                '<span class="hm-seg-loss">{} · {:.2f} cm</span></div>',
+                '<div class="hm-seg-track hm-seg-track-split">'
+                '<div class="hm-seg-fill-base" style="width:{}%;"></div>'
+                '<div class="hm-seg-fill-today" style="width:{}%;"></div>'
+                "</div>"
+                '<span class="hm-seg-pct">{}%'
+                '<span class="hm-seg-pct-today">+{}%</span></span>'
+                '<span class="hm-seg-loss">{} · {:.2f} cm'
+                '<span class="hm-seg-today-gain"> · today <strong>+{}</strong></span></span>'
+                "</div>",
                 label,
-                width,
-                int(round(pct)),
-                fmt_um_line(int(round(loss_cm * 10000))),
-                loss_cm,
+                w_before,
+                w_today,
+                int(round(pct_after)),
+                f"{pct_today:.2f}" if pct_today else "0",
+                fmt_um_line(loss_after_um),
+                loss_after_um / 10000.0,
+                fmt_um_line(share_um) if share_um else "0 μm",
             )
         )
-    return format_html('<div class="hm-segments">{}</div>', format_html("".join(rows)))
+
+    legend = ""
+    if engine1_today_um > 0:
+        legend = format_html(
+            '<p class="hm-seg-legend">'
+            '<span class="hm-legend-swatch hm-legend-base"></span> Prior optimization '
+            '<span class="hm-legend-swatch hm-legend-today"></span> '
+            "Today Engine-1 gain split ({} total)</p>",
+            fmt_um_line(engine1_today_um),
+        )
+
+    return format_html(
+        '<div class="hm-segments">{}{}</div>',
+        legend,
+        format_html("".join(rows)),
+    )
 
 
 _TIER_STYLES = {

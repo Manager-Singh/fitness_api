@@ -242,37 +242,34 @@ def _posture_unlocked_for_segment_redistribution(state) -> bool:
     return bool(str(getattr(state, "assessment_sources_used", "") or "").strip())
 
 
-def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
+def compute_engine1_gain_shares(state, engine1_gain_um) -> dict[str, int]:
     """
-    Section 4.3 — apply today's Engine-1 height gain (μm) to segment Current_Loss.
-
-    Initial questionnaire/scan losses use fixed 30/35/25/10 (POSTURE_SEGMENT_DISTRIBUTION_RATIO).
-    Daily gain is split across *active* segments proportional to each segment's Current_Loss_um
-    so bars do not jump too fast on segments that already have little loss remaining
-    (fixed 30% to spinal would over-credit spinal vs its share of total deficit).
+    Section 4.3 — preview/applied share of today's Engine-1 gain (μm) per segment field.
+    Weights = Current_Loss_um on each active segment before today's reduction is applied.
     """
     gain_um = max(0, int(engine1_gain_um or 0))
-    if gain_um <= 0:
-        return
-
     seg_defs = [
         "spinal_current_loss_um",
         "collapse_current_loss_um",
         "pelvic_current_loss_um",
         "legs_current_loss_um",
     ]
+    if gain_um <= 0 or not state:
+        return {f: 0 for f in seg_defs}
+
     active = []
     for field in seg_defs:
         cur = max(0, int(getattr(state, field, 0) or 0))
         if cur > 0:
             active.append((field, cur))
     if not active:
-        return
+        return {f: 0 for f in seg_defs}
 
     total_weight = sum(cur for _, cur in active)
     if total_weight <= 0:
-        return
+        return {f: 0 for f in seg_defs}
 
+    shares = {f: 0 for f in seg_defs}
     consumed = 0
     for idx, (field, cur) in enumerate(active):
         if idx == len(active) - 1:
@@ -280,7 +277,25 @@ def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
         else:
             share = int(round(gain_um * (cur / total_weight)))
             consumed += share
-        share = min(share, cur)
+        shares[field] = min(share, cur)
+    return shares
+
+
+def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
+    """
+    Section 4.3 — apply today's Engine-1 height gain (μm) to segment Current_Loss.
+
+    Daily gain is split across active segments proportional to each segment's Current_Loss_um.
+    """
+    gain_um = max(0, int(engine1_gain_um or 0))
+    if gain_um <= 0:
+        return {}
+
+    shares = compute_engine1_gain_shares(state, gain_um)
+    for field, share in shares.items():
+        if share <= 0:
+            continue
+        cur = max(0, int(getattr(state, field, 0) or 0))
         setattr(state, field, max(0, cur - share))
 
     state.save(
@@ -292,6 +307,7 @@ def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
             "updated_at",
         ]
     )
+    return shares
 
 
 def _reset_adult_posture_segments_from_latest_scan(user):
@@ -738,6 +754,15 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         + int(round(max(0, int(engine2_delta_dm)) / 10.0))
     )
 
+    engine1_segment_shares_um = {}
+    if (
+        state
+        and int(engine1_delta_um or 0) > 0
+        and (age >= 21 or _posture_unlocked_for_segment_redistribution(state))
+    ):
+        engine1_segment_shares_um = compute_engine1_gain_shares(state, engine1_delta_um)
+        _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
+
     HeightLedger.objects.create(
         user=user,
         log_date=log_date,
@@ -757,6 +782,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             "engine2_delta_um": int(engine2_delta_um),
             "bio_delta_um": int(bio_delta_um),
             "scan_completed": bool(state and state.scan_completed),
+            "engine1_segment_shares_um": engine1_segment_shares_um,
         },
     )
     if 13 <= age <= 20 and pending_engine1_um > 0:
@@ -778,10 +804,6 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
                 "reason": "teen_pre_scan",
             },
         )
-    # Update posture optimization bars as Engine 1 posture gain is earned.
-    if state and int(engine1_delta_um or 0) > 0:
-        if age >= 21 or _posture_unlocked_for_segment_redistribution(state):
-            _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
     return {
         "user_id": user.id,
         "delta_um": max(0, delta_um),

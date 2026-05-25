@@ -42,6 +42,12 @@ def _formula_table(headers: list[str], rows: list, *, caption: str = "") -> str:
     )
 
 
+def _today_engine1_segment_shares_from_panel(user):
+    from users.admin_ui import _today_engine1_segment_shares
+
+    return _today_engine1_segment_shares(user)
+
+
 def posture_segment_formula_html(user) -> str:
     """Segment losses from PostureState (μm) with spec formulas."""
     if not user or not user.pk:
@@ -56,10 +62,12 @@ def posture_segment_formula_html(user) -> str:
         ("pelvic_tilt_back", "Pelvic", "pelvic_current_loss_um"),
         ("leg_hamstring", "Legs", "legs_current_loss_um"),
     ]
+    _, shares_by_field = _today_engine1_segment_shares_from_panel(user)
     rows = []
     sum_loss_um = 0
     for seg_key, label, field in seg_defs:
         loss_um = int(getattr(state, field, 0) or 0)
+        share_um = int(shares_by_field.get(field, 0) or 0)
         sum_loss_um += loss_um
         max_cm = float(POSTURE_SEGMENT_MAX_LOSS_CM.get(seg_key, 0))
         max_um = int(round(max_cm * 10000))
@@ -71,6 +79,7 @@ def posture_segment_formula_html(user) -> str:
             f"{ratio * 100:.0f}%",
             fmt_um_line(max_um),
             fmt_um_line(loss_um),
+            fmt_um_line(share_um) if share_um else "—",
             mark_safe(
                 f'<code>(1 − {cur_cm:.4f}/{max_cm:.2f})×100</code> → <strong>{pct}%</strong>'
             ),
@@ -106,7 +115,7 @@ def posture_segment_formula_html(user) -> str:
         "</p>"
         "</div>",
         _formula_table(
-            ["Segment", "Init ratio", "Max loss", "Current loss", "Opt % formula"],
+            ["Segment", "Init ratio", "Max loss", "Current loss", "Today E1 share", "Opt % formula"],
             rows,
             caption="Per-segment μm storage",
         ),
@@ -117,36 +126,9 @@ def posture_segment_formula_html(user) -> str:
 
 
 def _segment_bars_html(user) -> str:
-    diag = build_posture_optimization_diagnostics(user=user, optimization_breakdown=None)
-    label_map = {
-        "spinal_compression": "Spinal",
-        "posture_collapse": "Collapse",
-        "pelvic_tilt_back": "Pelvic",
-        "leg_hamstring": "Legs",
-    }
-    rows = []
-    for key, label in label_map.items():
-        seg = (diag.get("segments") or {}).get(key) or {}
-        loss_um = int(round(float(seg.get("current_loss_cm", 0) or 0) * 10000))
-        pct = float(seg.get("percent_optimized_precise", seg.get("percent_optimized", 0)) or 0)
-        width = max(4, min(100, int(round(pct))))
-        rows.append(
-            format_html(
-                '<div class="hm-seg-row">'
-                '<span class="hm-seg-name">{}</span>'
-                '<div class="hm-seg-track"><div class="hm-seg-fill" style="width:{}%;"></div></div>'
-                '<span class="hm-seg-pct">{}%</span>'
-                '<span class="hm-seg-loss">{} · {}</span></div>',
-                label,
-                width,
-                pct,
-                fmt_um_line(loss_um),
-                f"{float(seg.get('current_loss_cm', 0) or 0):.2f} cm",
-            )
-        )
-    if not rows:
-        return ""
-    return format_html('<div class="hm-segments">{}</div>', mark_safe("".join(str(r) for r in rows)))
+    from users.admin_ui import _segment_bars_from_diagnostics
+
+    return _segment_bars_from_diagnostics(user)
 
 
 def daily_points_formula_html(user, log_date=None) -> str:
