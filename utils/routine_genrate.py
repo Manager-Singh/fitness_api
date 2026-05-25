@@ -385,8 +385,9 @@ def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None, ag
                 drop_wl.append(ve)
         else:
             other.append(ve)
+    # ≤2 whitelist in core: no trim needed. >2: reserve extras for beast (never backfill whitelist into core).
     if not drop_wl:
-        return core, []
+        return core[:6], []
 
     seen_ids = {ve.exercise_id for ve in other + keep_wl}
     fillers = []
@@ -417,18 +418,27 @@ def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None, ag
             for n in name_list
             if (spec_key_for_name(n) or "") not in BEAST_MODE_CANONICAL_KEYS
         ]
-        beast_names = [
-            n
-            for n in name_list
-            if (spec_key_for_name(n) or "") in BEAST_MODE_CANONICAL_KEYS
-        ]
         _append_core_slots_by_names(
             variant, new_core, non_beast_names, seen_ids, allowed_categories=cats
         )
         if len(new_core) < 6:
-            _append_core_slots_by_names(
-                variant, new_core, beast_names, seen_ids, allowed_categories=cats
-            )
+            for ex in adult_scoring_pool_queryset(Exercise):
+                if len(new_core) >= 6:
+                    break
+                key = spec_key_for_name(ex.name)
+                if key in BEAST_MODE_CANONICAL_KEYS or ex.id in seen_ids:
+                    continue
+                pres = prescription_for_exercise_name(ex.name)
+                new_core.append(
+                    _SyntheticVariantExercise(
+                        variant=variant,
+                        exercise=ex,
+                        tier=Tier.CORE,
+                        order=len(new_core) + 1,
+                        **pres,
+                    )
+                )
+                seen_ids.add(ex.id)
     reserved = [ve.exercise for ve in drop_wl]
     return new_core[:6], reserved
 
@@ -520,6 +530,17 @@ def build_posture_routine_slots(
         recommended, beast = select_adult_recommended_beast(
             pool, losses, [ve.exercise for ve in core], reserved_beast=reserved_beast
         )
+
+    core_ids = {ve.exercise.id for ve in core}
+    if len(beast) < 2 and reserved_beast:
+        have = {e.id for e in beast}
+        for ex in reserved_beast:
+            if ex.id in core_ids or ex.id in have:
+                continue
+            beast.append(ex)
+            have.add(ex.id)
+            if len(beast) >= 2:
+                break
 
     from workouts.exercise_assignment_data import dedupe_name_key
 
