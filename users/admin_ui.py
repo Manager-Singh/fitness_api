@@ -23,6 +23,15 @@ def fmt_cm(um) -> str:
     return f"{um_to_cm(um):.3f}"
 
 
+def fmt_um_line(um: int | float | None, *, decimals_cm: int = 4) -> str:
+    try:
+        u = int(um or 0)
+    except (TypeError, ValueError):
+        u = 0
+    cm = u / 10000.0
+    return f"{u:,} μm ({cm:.{decimals_cm}f} cm)"
+
+
 def badge(text: str, *, color: str = "#64748b", bg: str = "#f1f5f9") -> str:
     return format_html(
         '<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
