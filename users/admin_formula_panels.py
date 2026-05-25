@@ -97,12 +97,13 @@ def posture_segment_formula_html(user) -> str:
         '<div class="hm-formula-subtitle">Visual bars (same as dashboard API)</div>'
         "{}"
         '<div class="hm-formula-subtitle">Engine-1 daily redistribution (§4.3)</div>'
-        '<p class="hm-formula-note">When height is gained today (e.g. 79 pts → 790 μm = 0.079 cm), '
-        "each <strong>active</strong> segment (loss &gt; 0) receives "
-        "<code>share = gain × (segment_ratio / sum_ratios_active)</code> "
-        "with fixed ratios Spinal <strong>30%</strong> · Collapse <strong>35%</strong> · "
-        "Pelvic <strong>25%</strong> · Legs <strong>10%</strong>. "
-        "Example: 0.079 cm → 0.0237 / 0.0277 / 0.0198 / 0.0079 cm.</p>"
+        '<p class="hm-formula-note">'
+        "<strong>Initial</strong> losses use fixed 30/35/25/10 of total recoverable. "
+        "<strong>Daily gain</strong> (e.g. 79 pts → 790 μm) is split only across active segments, "
+        "weighted by each segment&apos;s <code>Current_Loss_um</code>: "
+        "<code>share = round(gain_um × loss_um / sum_active_loss_um)</code>. "
+        "This avoids bars rising too fast on segments that already have little loss left."
+        "</p>"
         "</div>",
         _formula_table(
             ["Segment", "Init ratio", "Max loss", "Current loss", "Opt % formula"],

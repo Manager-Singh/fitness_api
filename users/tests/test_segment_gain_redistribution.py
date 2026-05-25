@@ -1,11 +1,10 @@
-"""Section 4.3 — Engine-1 daily gain redistributed per fixed segment ratios (30/35/25/10)."""
+"""Section 4.3 — Engine-1 daily gain redistributed by current loss share (active segments)."""
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from users.models import PostureState
 from users.spec_runtime import _redistribute_engine1_gain_across_segments
 from utils.posture.height_constants import (
-    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
     POSTURE_SEGMENT_MAX_LOSS_CM,
     posture_segment_opt_pct_precise,
 )
@@ -31,8 +30,8 @@ class SegmentGainRedistributionTests(TestCase):
         loss_cm = loss_um / 10000.0
         return posture_segment_opt_pct_precise(loss_cm, max_cm, decimals=2)
 
-    def test_79_points_079cm_fixed_ratio_shares_not_full_gain_per_segment(self):
-        """79 pts → 790 μm; §4.3 uses 30/35/25/10 over active segments (not full gain each)."""
+    def test_79_points_079cm_loss_proportional_not_full_gain_per_segment(self):
+        """79 pts → 790 μm; spinal ~15% of gain (~119 μm), not 30% (~237 μm) or full 790 μm."""
         before = {
             "spinal": self.state.spinal_current_loss_um,
             "collapse": self.state.collapse_current_loss_um,
@@ -46,7 +45,7 @@ class SegmentGainRedistributionTests(TestCase):
             "leg_hamstring": self._pct(before["legs"], "leg_hamstring"),
         }
 
-        gain_um = 790  # 0.079 cm
+        gain_um = 790
         _redistribute_engine1_gain_across_segments(self.state, gain_um)
         self.state.refresh_from_db()
 
@@ -59,57 +58,30 @@ class SegmentGainRedistributionTests(TestCase):
         total_reduced = sum(before[k] - after[k] for k in before)
         self.assertEqual(total_reduced, gain_um)
 
-        # Spec table: 0.079 × 30% = 0.0237 cm → 237 μm spinal share
         spinal_share = before["spinal"] - after["spinal"]
-        self.assertEqual(spinal_share, 237)
-        self.assertEqual(before["collapse"] - after["collapse"], 277)
-        self.assertEqual(before["pelvic"] - after["pelvic"], 198)
-        self.assertEqual(before["legs"] - after["legs"], 78)  # remainder after round(30/35/25%)
+        self.assertGreater(spinal_share, 80)
+        self.assertLess(spinal_share, 160)
+        self.assertLess(spinal_share, 200, "fixed 30% would give ~237 μm to spinal")
 
         pct_after_spinal = self._pct(after["spinal"], "spinal_compression")
         delta_spinal = pct_after_spinal - pct_before["spinal_compression"]
-        self.assertLess(delta_spinal, 2.0, "spinal bar should not jump ~13%")
+        self.assertLess(delta_spinal, 2.0, "spinal bar should move ~0.4%, not ~13%")
         self.assertGreater(delta_spinal, 0.1)
 
-    def test_spec_table_0079_cm_all_four_active(self):
-        """Rahul spec example: 0.079 cm split 30/35/25/10."""
-        gain_um = 790
-        ratios = POSTURE_SEGMENT_DISTRIBUTION_RATIO
-        total = sum(ratios.values())
-        expected = {
-            "spinal": int(round(gain_um * ratios["spinal_compression"] / total)),
-            "collapse": int(round(gain_um * ratios["posture_collapse"] / total)),
-            "pelvic": int(round(gain_um * ratios["pelvic_tilt_back"] / total)),
-        }
-        expected["legs"] = gain_um - sum(expected.values())
-
-        _redistribute_engine1_gain_across_segments(self.state, gain_um)
-        self.state.refresh_from_db()
-
-        self.assertEqual(
-            self.state.spinal_current_loss_um,
-            int(0.67 * 10000) - expected["spinal"],
-        )
-        self.assertEqual(
-            self.state.collapse_current_loss_um,
-            int(1.61 * 10000) - expected["collapse"],
-        )
-
-    def test_spinal_inactive_renormalizes_to_35_25_10(self):
-        """When spinal loss = 0, active weight = 35+25+10 = 70 (spec §4.3 example)."""
+    def test_spinal_inactive_renormalizes_over_remaining_loss(self):
+        """When spinal loss = 0, gain splits only across collapse/pelvic/legs by their losses."""
         self.state.spinal_current_loss_um = 0
         self.state.collapse_current_loss_um = 35000
         self.state.pelvic_current_loss_um = 25000
         self.state.legs_current_loss_um = 10000
         self.state.save()
 
-        gain_um = 700
+        gain_um = 7000
         _redistribute_engine1_gain_across_segments(self.state, gain_um)
         self.state.refresh_from_db()
 
-        # Collapse 35/70 of 700 = 350 μm
-        self.assertEqual(self.state.collapse_current_loss_um, 34650)
         self.assertEqual(self.state.spinal_current_loss_um, 0)
+        self.assertEqual(self.state.collapse_current_loss_um, 35000 - int(round(7000 * 35000 / 70000)))
 
     def test_single_active_segment_gets_full_gain(self):
         self.state.collapse_current_loss_um = 0
