@@ -10,7 +10,12 @@ from utils.exercise_assignment import (
 from workouts.exercise_assignment_data import dedupe_name_key, normalize_exercise_name
 
 
+_ex_id = 0
+
+
 def _ex(name, **kwargs):
+    global _ex_id
+    _ex_id += 1
     defaults = {
         "teen_only": False,
         "spinal_pct": 50,
@@ -23,7 +28,7 @@ def _ex(name, **kwargs):
         "assignment_matrix_ready": True,
     }
     defaults.update(kwargs)
-    return SimpleNamespace(id=hash(name) % 100000, name=name, **defaults)
+    return SimpleNamespace(id=kwargs.pop("id", _ex_id), name=name, **defaults)
 
 
 class BeastWhitelistTests(SimpleTestCase):
@@ -53,26 +58,23 @@ class BeastWhitelistTests(SimpleTestCase):
             )
             self.assertNotEqual(key, "doorway chest stretch")
 
-    def test_beast_filled_when_all_whitelist_in_core(self):
-        """Adult core 6 often includes all four beast whitelist moves; still assign 2 beast."""
+    def test_beast_filled_from_reserved_when_whitelist_only_on_core(self):
+        """After core trim, reserved whitelist rows must fill beast without duplicate exercise ids."""
         core = [
             _ex("Decompression Hang"),
             _ex("Cobra Stretch"),
-            _ex("Glute Bridges"),
-            _ex("Hip Flexor Stretch"),
             _ex("Pelvic Tilts"),
             _ex("Wall Angels"),
         ]
-        pool = core + [
-            _ex("Hamstring Stretch"),
-            _ex("Butterfly Stretch"),
-            _ex("Doorway Chest Stretch"),
-        ]
+        reserved = [_ex("Glute Bridges"), _ex("Hip Flexor Stretch")]
+        pool = core + reserved + [_ex("Hamstring Stretch"), _ex("Butterfly Stretch")]
         losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
-        rec, beast = select_adult_recommended_beast(pool, losses, core)
+        rec, beast = select_adult_recommended_beast(pool, losses, core, reserved_beast=reserved)
         self.assertEqual(len(beast), 2)
+        core_ids = {e.id for e in core}
         for ex in beast:
             self.assertTrue(_is_beast_mode_eligible(ex))
+            self.assertNotIn(ex.id, core_ids)
 
     def test_dedupe_logic_normalized_names(self):
         seen: set[str] = set()

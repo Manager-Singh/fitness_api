@@ -25,6 +25,7 @@ from utils.exercise_assignment import (
 )
 from utils.exercise_prescriptions import prescription_for_exercise_name
 from workouts.exercise_assignment_data import (
+    BEAST_MODE_CANONICAL_KEYS,
     TEEN_CORE_6_NAMES,
     normalize_exercise_name,
     spec_key_for_name,
@@ -324,6 +325,50 @@ def _core_from_variant(variant, *, teen: bool, allowed_categories=None):
     return core[:6]
 
 
+def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None):
+    """
+    UserRoutineExercise enforces unique (routine, exercise). Core 6 often includes
+    all four Section 10.2 beast-whitelist moves; keep at most two in core and
+    reserve the rest for beast tier only.
+    """
+    cats = allowed_categories or POSTURE_ALLOWED_CATEGORIES
+    keep_wl = []
+    drop_wl = []
+    other = []
+    for ve in core:
+        key = spec_key_for_name(getattr(ve.exercise, "name", "") or "")
+        if key in BEAST_MODE_CANONICAL_KEYS:
+            if len(keep_wl) < 2:
+                keep_wl.append(ve)
+            else:
+                drop_wl.append(ve)
+        else:
+            other.append(ve)
+    if not drop_wl:
+        return core, []
+
+    seen_ids = {ve.exercise_id for ve in other + keep_wl}
+    fillers = []
+    extra_core = (
+        _variant_qs(variant, Tier.CORE, allowed_categories=cats)
+        .select_related("exercise")
+        .order_by("order")
+    )
+    for ve in extra_core:
+        if ve.exercise_id in seen_ids:
+            continue
+        key = spec_key_for_name(ve.exercise.name)
+        if key in BEAST_MODE_CANONICAL_KEYS:
+            continue
+        fillers.append(ve)
+        seen_ids.add(ve.exercise_id)
+        if len(other) + len(keep_wl) + len(fillers) >= 6:
+            break
+    new_core = (other + keep_wl + fillers)[:6]
+    reserved = [ve.exercise for ve in drop_wl]
+    return new_core, reserved
+
+
 class _SyntheticVariantExercise:
     """Minimal stand-in when no VariantExercise row exists for core fallback."""
 
@@ -387,43 +432,38 @@ def build_posture_routine_slots(
 
     if is_teen:
         core = _core_from_variant(variant, teen=True)
+        core, reserved_beast = _trim_core_whitelist_for_beast(core, variant)
         pool = list(teen_scoring_pool_queryset(Exercise))
         pool_ids = {ex.id for ex in pool}
         for ex in beast_whitelist_exercises_from_db(Exercise):
             if ex.id not in pool_ids:
                 pool.append(ex)
                 pool_ids.add(ex.id)
-        recommended, beast = select_teen_recommended_beast(pool, losses, age, [ve.exercise for ve in core])
+        recommended, beast = select_teen_recommended_beast(
+            pool, losses, age, [ve.exercise for ve in core], reserved_beast=reserved_beast
+        )
     else:
         core = _core_from_variant(variant, teen=False, allowed_categories=POSTURE_ALLOWED_CATEGORIES)
+        core, reserved_beast = _trim_core_whitelist_for_beast(
+            core, variant, allowed_categories=POSTURE_ALLOWED_CATEGORIES
+        )
         pool = list(adult_scoring_pool_queryset(Exercise))
         pool_ids = {ex.id for ex in pool}
         for ex in beast_whitelist_exercises_from_db(Exercise):
             if ex.id not in pool_ids:
                 pool.append(ex)
                 pool_ids.add(ex.id)
-        recommended, beast = select_adult_recommended_beast(pool, losses, [ve.exercise for ve in core])
+        recommended, beast = select_adult_recommended_beast(
+            pool, losses, [ve.exercise for ve in core], reserved_beast=reserved_beast
+        )
 
     from workouts.exercise_assignment_data import dedupe_name_key
 
     slots = []
     seen_names: set[str] = set()
-    seen_beast_keys: set[str] = set()
 
     def _append_slot(ve, tier):
         key = dedupe_name_key(getattr(ve.exercise, "name", "") or "")
-        if tier == Tier.BEAST:
-            # Beast whitelist may overlap core (Section 10.2); allow beast tier slots.
-            if not key or key in seen_beast_keys:
-                if key:
-                    logger.warning(
-                        "Skipping duplicate beast exercise %r",
-                        ve.exercise.name,
-                    )
-                return
-            seen_beast_keys.add(key)
-            slots.append((ve, tier))
-            return
         if not key or key in seen_names:
             if key:
                 logger.warning(
@@ -487,23 +527,15 @@ def _persist_routine_exercises(routine, slots, *, start_order: int = 0) -> int:
         UserRoutineExercise.objects.filter(routine=routine).values_list("exercise_id", flat=True)
     )
     seen_normalized_names: set[str] = set()
-    seen_beast_names: set[str] = set()
     order = start_order
     for variant_ex, tier in slots:
         ex = variant_ex.exercise
         norm = dedupe_name_key(ex.name)
-        if tier == Tier.BEAST:
-            # Same Exercise row may appear as core + beast (Section 10.2 whitelist overlap).
-            if norm and norm in seen_beast_names:
-                continue
-            if norm:
-                seen_beast_names.add(norm)
-        elif ex.id in seen_exercise_ids or (norm and norm in seen_normalized_names):
+        if ex.id in seen_exercise_ids or (norm and norm in seen_normalized_names):
             continue
-        else:
-            seen_exercise_ids.add(ex.id)
-            if norm:
-                seen_normalized_names.add(norm)
+        seen_exercise_ids.add(ex.id)
+        if norm:
+            seen_normalized_names.add(norm)
         order += 1
         ve_id = variant_ex.id if getattr(variant_ex, "id", None) else None
         UserRoutineExercise.objects.create(

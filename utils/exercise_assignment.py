@@ -193,27 +193,37 @@ def _select_beast_exercises(
     *,
     core_exercises: Sequence[Any],
     exclude: Sequence[Any] = (),
+    reserved_beast: Sequence[Any] = (),
 ) -> list[Any]:
     """
     Section 10.2: pick ``count`` beast-tier exercises from the whitelist.
 
-    Prefer whitelist exercises not already in core (by canonical name). Adult/teen
-    core programs include most whitelist moves; if none remain, still assign the top
-    scored whitelist picks so Beast slots are never empty.
+    Must use exercise IDs not already on core (UserRoutineExercise unique_together
+    is routine+exercise, not per-tier).
     """
     exclude_ids = {e.id for e in exclude}
-    core_keys = _core_dedupe_keys(core_exercises)
+    core_ids = {e.id for e in core_exercises}
     whitelist = [ex for ex in _beast_candidates(pool) if ex.id not in exclude_ids]
 
-    non_core = [ex for ex in whitelist if dedupe_name_key(ex.name) not in core_keys]
+    non_core = [ex for ex in whitelist if ex.id not in core_ids]
     beast = pick_top_scored(non_core, score_fn, count)
     if len(beast) >= count:
         return beast
 
-    already = {e.id for e in beast}
-    fallback_pool = [ex for ex in whitelist if ex.id not in already]
-    extra = pick_top_scored(fallback_pool, score_fn, count - len(beast))
-    return beast + extra
+    already_ids = {e.id for e in beast}
+    reserved_scored = sorted(
+        [ex for ex in reserved_beast if ex.id not in core_ids and ex.id not in already_ids],
+        key=lambda ex: score_fn(ex),
+        reverse=True,
+    )
+    for ex in reserved_scored:
+        if not _is_beast_mode_eligible(ex):
+            continue
+        beast.append(ex)
+        already_ids.add(ex.id)
+        if len(beast) >= count:
+            break
+    return beast
 
 
 def pick_top_scored(
@@ -237,6 +247,8 @@ def select_adult_recommended_beast(
     pool: Iterable[Any],
     losses: SegmentLosses,
     core_exercises: Sequence[Any],
+    *,
+    reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
     """Returns (recommended[2], beast[2]) from Exercise queryset/list."""
     remaining = _exclude_core(pool, core_exercises)
@@ -254,6 +266,7 @@ def select_adult_recommended_beast(
         2,
         core_exercises=core_exercises,
         exclude=recommended,
+        reserved_beast=reserved_beast,
     )
     _assert_no_teen_only(recommended + beast, "adult")
     for ex in beast:
@@ -267,6 +280,8 @@ def select_teen_recommended_beast(
     losses: SegmentLosses,
     age: int,
     core_exercises: Sequence[Any],
+    *,
+    reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
     hgh_mult, posture_mult = get_age_multipliers(age)
     remaining = _exclude_core(pool, core_exercises)
@@ -283,6 +298,7 @@ def select_teen_recommended_beast(
         2,
         core_exercises=core_exercises,
         exclude=recommended,
+        reserved_beast=reserved_beast,
     )
     for ex in beast:
         if not _is_beast_mode_eligible(ex):
