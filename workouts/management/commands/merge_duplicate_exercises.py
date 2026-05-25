@@ -74,34 +74,55 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Merged {merged} duplicate exercise row(s)."))
 
     @staticmethod
+    def _merge_ure(canonical: Exercise, ure: UserRoutineExercise) -> None:
+        """Point ure at canonical exercise or drop if routine already has canonical."""
+        clash = (
+            UserRoutineExercise.objects.filter(routine=ure.routine, exercise=canonical)
+            .exclude(pk=ure.pk)
+            .first()
+        )
+        if clash:
+            if ure.variant_exercise_id and clash.variant_exercise_id is None:
+                clash.variant_exercise = ure.variant_exercise
+                clash.save(update_fields=["variant_exercise"])
+            ure.delete()
+            return
+        ure.exercise = canonical
+        ure.save(update_fields=["exercise"])
+
+    @staticmethod
     def _repoint_and_delete(canonical: Exercise, dup: Exercise) -> None:
-        # 1) VariantExercise + UserRoutineExercise.variant_exercise (PROTECT) first.
-        for ve_dup in VariantExercise.objects.filter(exercise=dup):
+        # 1) VariantExercise rows + linked UserRoutineExercise (variant_exercise PROTECT).
+        for ve_dup in list(VariantExercise.objects.filter(exercise=dup)):
             ve_canon = VariantExercise.objects.filter(
                 variant=ve_dup.variant, exercise=canonical
             ).first()
-            ure_qs = UserRoutineExercise.objects.filter(variant_exercise=ve_dup)
+            for ure in list(UserRoutineExercise.objects.filter(variant_exercise=ve_dup)):
+                if ve_canon:
+                    clash = (
+                        UserRoutineExercise.objects.filter(
+                            routine=ure.routine, exercise=canonical
+                        )
+                        .exclude(pk=ure.pk)
+                        .first()
+                    )
+                    if clash:
+                        ure.delete()
+                    else:
+                        ure.variant_exercise = ve_canon
+                        ure.exercise = canonical
+                        ure.save(update_fields=["variant_exercise", "exercise"])
+                else:
+                    Command._merge_ure(canonical, ure)
             if ve_canon:
-                ure_qs.update(variant_exercise=ve_canon, exercise=canonical)
                 ve_dup.delete()
             else:
-                ure_qs.update(exercise=canonical)
                 ve_dup.exercise = canonical
                 ve_dup.save(update_fields=["exercise"])
 
-        # 2) Routine assignments by duplicate exercise id (unique routine+exercise).
-        for ure in UserRoutineExercise.objects.filter(exercise=dup).select_related("routine"):
-            clash = UserRoutineExercise.objects.filter(
-                routine=ure.routine, exercise=canonical
-            ).first()
-            if clash:
-                if ure.variant_exercise_id and clash.variant_exercise_id is None:
-                    clash.variant_exercise = ure.variant_exercise
-                    clash.save(update_fields=["variant_exercise"])
-                ure.delete()
-            else:
-                ure.exercise = canonical
-                ure.save(update_fields=["exercise"])
+        # 2) Any remaining routine rows still pointing at duplicate exercise id.
+        for ure in list(UserRoutineExercise.objects.filter(exercise=dup)):
+            Command._merge_ure(canonical, ure)
 
         WorkoutEntry.objects.filter(exercise=dup).update(exercise=canonical)
         dup.delete()
