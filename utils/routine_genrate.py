@@ -547,8 +547,7 @@ def build_posture_routine_slots(
 
     slots = []
     seen_names: set[str] = set()
-
-    used_exercise_ids = core_ids | rec_ids
+    used_exercise_ids: set[int] = set()
 
     def _append_slot(ve, tier):
         ex_id = ve.exercise_id if hasattr(ve, "exercise_id") else ve.exercise.id
