@@ -396,9 +396,22 @@ def build_posture_routine_slots(
 
     slots = []
     seen_names: set[str] = set()
+    seen_beast_keys: set[str] = set()
 
     def _append_slot(ve, tier):
         key = dedupe_name_key(getattr(ve.exercise, "name", "") or "")
+        if tier == Tier.BEAST:
+            # Beast whitelist may overlap core (Section 10.2); allow beast tier slots.
+            if not key or key in seen_beast_keys:
+                if key:
+                    logger.warning(
+                        "Skipping duplicate beast exercise %r",
+                        ve.exercise.name,
+                    )
+                return
+            seen_beast_keys.add(key)
+            slots.append((ve, tier))
+            return
         if not key or key in seen_names:
             if key:
                 logger.warning(
@@ -462,15 +475,23 @@ def _persist_routine_exercises(routine, slots, *, start_order: int = 0) -> int:
         UserRoutineExercise.objects.filter(routine=routine).values_list("exercise_id", flat=True)
     )
     seen_normalized_names: set[str] = set()
+    seen_beast_names: set[str] = set()
     order = start_order
     for variant_ex, tier in slots:
         ex = variant_ex.exercise
         norm = dedupe_name_key(ex.name)
-        if ex.id in seen_exercise_ids or (norm and norm in seen_normalized_names):
+        if tier == Tier.BEAST:
+            # Same Exercise row may appear as core + beast (Section 10.2 whitelist overlap).
+            if norm and norm in seen_beast_names:
+                continue
+            if norm:
+                seen_beast_names.add(norm)
+        elif ex.id in seen_exercise_ids or (norm and norm in seen_normalized_names):
             continue
-        seen_exercise_ids.add(ex.id)
-        if norm:
-            seen_normalized_names.add(norm)
+        else:
+            seen_exercise_ids.add(ex.id)
+            if norm:
+                seen_normalized_names.add(norm)
         order += 1
         ve_id = variant_ex.id if getattr(variant_ex, "id", None) else None
         UserRoutineExercise.objects.create(

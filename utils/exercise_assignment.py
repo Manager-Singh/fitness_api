@@ -9,6 +9,7 @@ from typing import Any, Iterable, Sequence
 from workouts.exercise_assignment_data import (
     BEAST_MODE_CANONICAL_KEYS,
     TEEN_ONLY_HGH_NAMES,
+    dedupe_name_key,
     normalize_exercise_name,
     spec_key_for_name,
 )
@@ -137,6 +138,46 @@ def _beast_mode_pool(pool: Iterable[Any]) -> list[Any]:
     return [ex for ex in pool if _is_beast_mode_eligible(ex)]
 
 
+def _core_dedupe_keys(core_exercises: Sequence[Any]) -> set[str]:
+    keys = set()
+    for ex in core_exercises:
+        k = dedupe_name_key(getattr(ex, "name", "") or "")
+        if k:
+            keys.add(k)
+    return keys
+
+
+def _select_beast_exercises(
+    pool: Iterable[Any],
+    losses: SegmentLosses,
+    score_fn,
+    count: int,
+    *,
+    core_exercises: Sequence[Any],
+    exclude: Sequence[Any] = (),
+) -> list[Any]:
+    """
+    Section 10.2: pick ``count`` beast-tier exercises from the whitelist.
+
+    Prefer whitelist exercises not already in core (by canonical name). Adult/teen
+    core programs include most whitelist moves; if none remain, still assign the top
+    scored whitelist picks so Beast slots are never empty.
+    """
+    exclude_ids = {e.id for e in exclude}
+    core_keys = _core_dedupe_keys(core_exercises)
+    whitelist = [ex for ex in _beast_mode_pool(pool) if ex.id not in exclude_ids]
+
+    non_core = [ex for ex in whitelist if dedupe_name_key(ex.name) not in core_keys]
+    beast = pick_top_scored(non_core, score_fn, count)
+    if len(beast) >= count:
+        return beast
+
+    already = {e.id for e in beast}
+    fallback_pool = [ex for ex in whitelist if ex.id not in already]
+    extra = pick_top_scored(fallback_pool, score_fn, count - len(beast))
+    return beast + extra
+
+
 def pick_top_scored(
     pool: Iterable[Any],
     score_fn,
@@ -168,11 +209,13 @@ def select_adult_recommended_beast(
         lambda ex: score_adult_exercise(ex, losses, is_beast=False),
         2,
     )
-    beast_pool = _beast_mode_pool(_exclude_core(remaining, recommended))
-    beast = pick_top_scored(
-        beast_pool,
+    beast = _select_beast_exercises(
+        pool,
+        losses,
         lambda ex: score_adult_exercise(ex, losses, is_beast=True),
         2,
+        core_exercises=core_exercises,
+        exclude=recommended,
     )
     _assert_no_teen_only(recommended + beast, "adult")
     for ex in beast:
@@ -195,11 +238,13 @@ def select_teen_recommended_beast(
         lambda ex: score_teen_recommended(ex, losses, hgh_mult, posture_mult),
         2,
     )
-    beast_pool = _beast_mode_pool(_exclude_core(remaining, recommended))
-    beast = pick_top_scored(
-        beast_pool,
+    beast = _select_beast_exercises(
+        pool,
+        losses,
         lambda ex: score_teen_beast(ex, losses, hgh_mult, posture_mult),
         2,
+        core_exercises=core_exercises,
+        exclude=recommended,
     )
     for ex in beast:
         if not _is_beast_mode_eligible(ex):
