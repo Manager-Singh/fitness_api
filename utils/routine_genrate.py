@@ -532,10 +532,11 @@ def build_posture_routine_slots(
         )
 
     core_ids = {ve.exercise.id for ve in core}
+    rec_ids = {e.id for e in recommended}
     if len(beast) < 2 and reserved_beast:
         have = {e.id for e in beast}
         for ex in reserved_beast:
-            if ex.id in core_ids or ex.id in have:
+            if ex.id in core_ids or ex.id in rec_ids or ex.id in have:
                 continue
             beast.append(ex)
             have.add(ex.id)
@@ -547,7 +548,18 @@ def build_posture_routine_slots(
     slots = []
     seen_names: set[str] = set()
 
+    used_exercise_ids = core_ids | rec_ids
+
     def _append_slot(ve, tier):
+        ex_id = ve.exercise_id if hasattr(ve, "exercise_id") else ve.exercise.id
+        if ex_id in used_exercise_ids:
+            logger.warning(
+                "Skipping duplicate exercise id=%s %r (tier=%s); already assigned",
+                ex_id,
+                ve.exercise.name,
+                tier,
+            )
+            return
         key = dedupe_name_key(getattr(ve.exercise, "name", "") or "")
         if not key or key in seen_names:
             if key:
@@ -557,6 +569,7 @@ def build_posture_routine_slots(
                     tier,
                 )
             return
+        used_exercise_ids.add(ex_id)
         seen_names.add(key)
         slots.append((ve, tier))
 

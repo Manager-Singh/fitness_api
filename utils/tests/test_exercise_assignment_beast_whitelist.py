@@ -70,11 +70,43 @@ class BeastWhitelistTests(SimpleTestCase):
         pool = core + reserved + [_ex("Hamstring Stretch"), _ex("Butterfly Stretch")]
         losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
         rec, beast = select_adult_recommended_beast(pool, losses, core, reserved_beast=reserved)
+        self.assertEqual(len(rec), 2)
         self.assertEqual(len(beast), 2)
         core_ids = {e.id for e in core}
+        reserved_ids = {e.id for e in reserved}
+        rec_ids = {e.id for e in rec}
+        beast_ids = {e.id for e in beast}
+        self.assertFalse(rec_ids & reserved_ids)
+        self.assertFalse(rec_ids & beast_ids)
+        self.assertFalse(core_ids & beast_ids)
         for ex in beast:
             self.assertTrue(_is_beast_mode_eligible(ex))
             self.assertNotIn(ex.id, core_ids)
+
+    def test_reserved_whitelist_not_duplicated_in_rec_and_beast(self):
+        """Hip Flexor reserved for beast must not also land in rec (9-slot bug)."""
+        core = [
+            _ex("Cobra Stretch"),
+            _ex("Chin Tucks"),
+            _ex("Decompression Hang"),
+            _ex("Glute Bridges"),
+            _ex("Butterfly Stretch"),
+            _ex("Cat-Cow Stretch"),
+        ]
+        hip = _ex("Hip Flexor Stretch")
+        wall = _ex("Wall Angels")
+        reserved = [hip, wall]
+        pool = core + reserved + [
+            _ex("Hamstring Stretch"),
+            _ex("Doorway Chest Stretch"),
+            _ex("Pelvic Tilts"),
+        ]
+        losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
+        rec, beast = select_adult_recommended_beast(pool, losses, core, reserved_beast=reserved)
+        all_ids = {e.id for e in core + rec + beast}
+        self.assertEqual(len(rec) + len(beast) + len(core), len(all_ids))
+        self.assertIn(hip.id, {e.id for e in beast})
+        self.assertNotIn(hip.id, {e.id for e in rec})
 
     def test_dedupe_logic_normalized_names(self):
         seen: set[str] = set()

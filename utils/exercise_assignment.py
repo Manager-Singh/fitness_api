@@ -217,7 +217,7 @@ def _select_beast_exercises(
         reverse=True,
     )
     for ex in reserved_scored:
-        if not _is_beast_mode_eligible(ex):
+        if ex.id in exclude_ids or not _is_beast_mode_eligible(ex):
             continue
         beast.append(ex)
         already_ids.add(ex.id)
@@ -251,8 +251,11 @@ def select_adult_recommended_beast(
     reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
     """Returns (recommended[2], beast[2]) from Exercise queryset/list."""
+    reserved_ids = {e.id for e in reserved_beast}
     remaining = _exclude_core(pool, core_exercises)
-    remaining = [ex for ex in remaining if not ex.teen_only]
+    remaining = [
+        ex for ex in remaining if not ex.teen_only and ex.id not in reserved_ids
+    ]
 
     recommended = pick_top_scored(
         remaining,
@@ -284,7 +287,9 @@ def select_teen_recommended_beast(
     reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
     hgh_mult, posture_mult = get_age_multipliers(age)
+    reserved_ids = {e.id for e in reserved_beast}
     remaining = _exclude_core(pool, core_exercises)
+    remaining = [ex for ex in remaining if ex.id not in reserved_ids]
 
     recommended = pick_top_scored(
         remaining,
