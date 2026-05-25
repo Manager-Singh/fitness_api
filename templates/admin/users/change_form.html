@@ -7,6 +7,15 @@
 {% endblock %}
 
 {% block after_field_sets %}
+{% if hm_progress_section %}
+<fieldset class="module hm-progress-fieldset wide">
+  <h2>Progress dashboard</h2>
+  <p class="help">Live snapshot from DailyLog + HeightLedger. Updated by cron every 5 minutes.</p>
+  <div class="hm-progress-fieldset-body">
+    {{ hm_progress_section|safe }}
+  </div>
+</fieldset>
+{% endif %}
 {% if hm_routine_section %}
 <fieldset class="module hm-routine-fieldset wide">
   <h2>Exercise routine</h2>

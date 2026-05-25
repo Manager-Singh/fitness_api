@@ -288,8 +288,6 @@ class UserAdmin(admin.ModelAdmin):
         "regenerate_routines",
         "delete_selected_users_with_confirm",
     ]
-    readonly_fields = ("progress_summary",)
-
     class Media:
         css = {"all": ("admin/css/user_progress.css",)}
 
@@ -341,6 +339,7 @@ class UserAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         user = self.get_object(request, object_id)
         if user is not None:
+            extra_context["hm_progress_section"] = progress_dashboard_html(user)
             extra_context["hm_routine_section"] = routine_section_html(user, request)
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
@@ -384,14 +383,6 @@ class UserAdmin(admin.ModelAdmin):
             )
         return (
             (
-                "Progress dashboard",
-                {
-                    "fields": ("progress_summary",),
-                    "classes": ("wide", "hm-progress-fieldset"),
-                    "description": "Live snapshot from DailyLog + HeightLedger. Updated by cron every 5 minutes.",
-                },
-            ),
-            (
                 "Account",
                 {
                     "fields": (
@@ -414,7 +405,6 @@ class UserAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj:
             return (
-                "progress_summary",
                 "last_reset_date",
                 "date_joined",
             )
@@ -454,10 +444,6 @@ class UserAdmin(admin.ModelAdmin):
         if obj.last_reset_date:
             return badge(str(obj.last_reset_date), color="#b45309", bg="#fef3c7")
         return badge("Never", color="#64748b", bg="#f1f5f9")
-
-    @admin.display(description="Progress dashboard")
-    def progress_summary(self, obj):
-        return progress_dashboard_html(obj)
 
     @admin.action(description="Recompute today's progress (force)")
     def recompute_today_progress(self, request, queryset):

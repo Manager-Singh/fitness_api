@@ -154,6 +154,9 @@ def _segment_bars_from_diagnostics(user) -> str:
         pct_after = _opt_pct_from_loss_um(loss_after_um, seg_key)
         pct_before = _opt_pct_from_loss_um(loss_before_um, seg_key)
         pct_today = max(0.0, pct_after - pct_before)
+        loss_cm = f"{loss_after_um / 10000.0:.2f}"
+        pct_today_str = f"{pct_today:.2f}" if pct_today else "0"
+        share_line = fmt_um_line(share_um) if share_um else "0 μm"
 
         w_before = max(0, min(100, int(round(pct_before))))
         w_today = max(0, min(100 - w_before, int(round(pct_today))))
@@ -168,17 +171,17 @@ def _segment_bars_from_diagnostics(user) -> str:
                 "</div>"
                 '<span class="hm-seg-pct">{}%'
                 '<span class="hm-seg-pct-today">+{}%</span></span>'
-                '<span class="hm-seg-loss">{} · {:.2f} cm'
+                '<span class="hm-seg-loss">{} · {} cm'
                 '<span class="hm-seg-today-gain"> · today <strong>+{}</strong></span></span>'
                 "</div>",
                 label,
                 w_before,
                 w_today,
                 int(round(pct_after)),
-                f"{pct_today:.2f}" if pct_today else "0",
+                pct_today_str,
                 fmt_um_line(loss_after_um),
-                loss_after_um / 10000.0,
-                fmt_um_line(share_um) if share_um else "0 μm",
+                loss_cm,
+                share_line,
             )
         )
 
@@ -195,7 +198,7 @@ def _segment_bars_from_diagnostics(user) -> str:
     return format_html(
         '<div class="hm-segments">{}{}</div>',
         legend,
-        format_html("".join(rows)),
+        mark_safe("".join(str(r) for r in rows)),
     )
 
 
