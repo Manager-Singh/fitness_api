@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from django.urls import reverse
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from django.middleware.csrf import get_token
 
@@ -195,6 +196,80 @@ def _segment_bars_from_diagnostics(user) -> str:
         '<div class="hm-segments">{}{}</div>',
         legend,
         format_html("".join(rows)),
+    )
+
+
+def compact_today_height_block(user) -> str:
+    """One compact block: ledger formula + per-segment today E1 share (μm)."""
+    if not user or not user.pk:
+        return ""
+    today = user_today(user)
+    ledger = (
+        HeightLedger.objects.filter(
+            user=user,
+            log_date=today,
+            entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    daily = DailyLog.objects.filter(user=user, log_date=today).first()
+    _e1_um, shares = _today_engine1_segment_shares(user)
+
+    if not ledger and not daily:
+        return format_html('<p class="hm-formula-muted">No daily compute for {} yet.</p>', today)
+
+    from users.spec_runtime import _um_from_dm
+
+    e1_um = int(getattr(ledger, "engine1_delta_um", 0) or 0) if ledger else 0
+    e2_um = _um_from_dm(getattr(ledger, "engine2_delta_dm", 0) or 0) if ledger else 0
+    bio_um = int(getattr(ledger, "bio_delta_um", 0) or 0) if ledger else 0
+    delta_um = int(getattr(ledger, "delta_um", 0) or 0) if ledger else 0
+
+    share_rows = []
+    for seg_key, label, field in _SEGMENT_BAR_DEFS:
+        share_um = int(shares.get(field, 0) or 0)
+        if share_um <= 0 and e1_um <= 0:
+            continue
+        share_rows.append(
+            f"<tr><td>{label}</td><td>{fmt_um_line(share_um)}</td></tr>"
+        )
+
+    share_table = ""
+    if share_rows and e1_um > 0:
+        share_table = mark_safe(
+            '<table class="hm-compact-table"><thead><tr>'
+            "<th>Segment</th><th>Today E1 share</th></tr></thead><tbody>"
+            + "".join(share_rows)
+            + "</tbody></table>"
+        )
+
+    pts_line = ""
+    if daily:
+        pts_line = format_html(
+            "<p class=\"hm-compact-line\">E1 points today: <strong>{}</strong> "
+            "(exercise {} · food {} · lifestyle {} · habits {})</p>",
+            daily.engine1_points,
+            daily.exercise_points,
+            daily.food_points,
+            daily.lifestyle_points,
+            daily.habit_points,
+        )
+
+    return format_html(
+        '<div class="hm-compact-today">'
+        "<p class=\"hm-compact-line\"><code>Δ_um = E1_um + E2_um + Bio_um</code></p>"
+        "<p class=\"hm-compact-line\">"
+        "{} + {} + {} = <strong>{}</strong></p>"
+        "{}"
+        "{}"
+        "</div>",
+        fmt_um_line(e1_um),
+        fmt_um_line(e2_um),
+        fmt_um_line(bio_um),
+        fmt_um_line(delta_um),
+        pts_line,
+        share_table,
     )
 
 
@@ -396,21 +471,6 @@ def progress_dashboard_html(user) -> str:
             badge_bool(daily.validated, "Yes", "No"),
         )
 
-    ledger_detail = ""
-    if ledger:
-        from users.spec_runtime import _um_from_dm
-
-        ledger_detail = format_html(
-            '<p class="hm-ledger-line">Latest ledger <strong>{}</strong>: '
-            "Δ <strong>{} cm</strong> · cumulative <strong>{} cm</strong> · "
-            "E1 Δ {} cm · E2 Δ {} cm</p>",
-            ledger.log_date,
-            fmt_cm(ledger.delta_um),
-            fmt_cm(ledger.cumulative_um),
-            fmt_cm(ledger.engine1_delta_um),
-            fmt_cm(_um_from_dm(ledger.engine2_delta_dm)),
-        )
-
     links = format_html(
         '<div class="hm-links">'
         '<a class="hm-link-btn" href="{}">Daily logs</a>'
@@ -421,25 +481,21 @@ def progress_dashboard_html(user) -> str:
     )
 
     footnote = format_html(
-        '<p class="hm-footnote">Progress is computed by cron '
-        "<code>run_daily_height_pipeline</code> (every 5 min) → "
-        "<code>compute_daily_height_for_user</code>. "
-        "Scroll down for formula tables and the last 30 days in the inlines below.</p>"
+        '<p class="hm-footnote">Updated by cron <code>run_daily_height_pipeline</code>. '
+        "Daily logs and height ledger tables below (last 30 days).</p>"
     )
-
-    from users.admin_formula_panels import daily_points_formula_html, posture_segment_formula_html
 
     return format_html(
         '<div class="hm-progress-dashboard">'
-        "{}{}{}{}{}{}{}{}{}"
+        "{}{}{}{}{}{}{}"
         "</div>",
         cards,
         unlock_row,
+        format_html('<div class="hm-section-title">Posture optimization bars</div>'),
         _segment_bars_from_diagnostics(user),
-        posture_segment_formula_html(user),
-        format_html('<div class="hm-section-title">Today breakdown (points)</div>{}', today_detail or "—"),
-        daily_points_formula_html(user, today),
-        ledger_detail,
+        format_html('<div class="hm-section-title">Today height &amp; E1 split</div>'),
+        compact_today_height_block(user),
+        format_html('<div class="hm-section-title">Today points</div>{}', today_detail or "—"),
         links,
         footnote,
     )

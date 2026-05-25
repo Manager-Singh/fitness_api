@@ -116,8 +116,7 @@ class PostureStateInline(admin.StackedInline):
         "questionnaire_completed",
         "assessment_sources_used",
         "total_recoverable_cm",
-        "total_recoverable_um_display",
-        "segment_loss_formula_panel",
+        "segments_summary",
         "last_recalculated_at",
         "last_scan_at",
         "questionnaire_completed_at",
@@ -131,29 +130,18 @@ class PostureStateInline(admin.StackedInline):
     def total_recoverable_cm(self, obj):
         return f"{fmt_cm(obj.total_recoverable_loss_um)} cm"
 
-    @admin.display(description="Total recoverable (μm)")
-    def total_recoverable_um_display(self, obj):
-        if not obj:
-            return "—"
-        from users.admin_formula_panels import fmt_um_line
-
-        return fmt_um_line(obj.total_recoverable_loss_um)
-
-    @admin.display(description="Segment losses")
+    @admin.display(description="Posture bars (live)")
     def segments_summary(self, obj):
         if not obj:
             return "—"
         from users.admin_ui import _segment_bars_from_diagnostics
 
-        return _segment_bars_from_diagnostics(obj.user)
-
-    @admin.display(description="Loss formulas (μm + split)")
-    def segment_loss_formula_panel(self, obj):
-        if not obj:
-            return "—"
-        from users.admin_formula_panels import posture_segment_formula_html
-
-        return posture_segment_formula_html(obj.user)
+        return format_html(
+            '<p class="hm-formula-muted" style="margin:0 0 6px;">'
+            "Full formulas are in <strong>Progress dashboard</strong> above.</p>"
+            "{}",
+            _segment_bars_from_diagnostics(obj.user),
+        )
 
 
 class DailyLogInline(admin.TabularInline):
@@ -173,7 +161,6 @@ class DailyLogInline(admin.TabularInline):
         "lifestyle_points",
         "habit_points",
         "validated_badge",
-        "points_formula_today",
         "genetic_average_cm",
         "updated_at",
     )
@@ -209,15 +196,6 @@ class DailyLogInline(admin.TabularInline):
     def validated_badge(self, obj):
         return badge_bool(obj.validated)
 
-    @admin.display(description="Formula (today)")
-    def points_formula_today(self, obj):
-        if obj.log_date != user_today(obj.user):
-            return "—"
-        from users.admin_formula_panels import daily_points_formula_html
-
-        return daily_points_formula_html(obj.user, obj.log_date)
-
-
 class HeightLedgerInline(admin.TabularInline):
     """Height ledger entries — daily_compute rows are the canonical height chain."""
     model = HeightLedger
@@ -233,7 +211,6 @@ class HeightLedgerInline(admin.TabularInline):
         "engine1_delta_cm",
         "engine2_delta_cm",
         "bio_delta_cm",
-        "ledger_formula_today",
     )
     fields = readonly_fields
     verbose_name = "Day"
@@ -289,25 +266,6 @@ class HeightLedgerInline(admin.TabularInline):
     @admin.display(description="Bio Δ")
     def bio_delta_cm(self, obj):
         return f"{fmt_cm(obj.bio_delta_um)} cm"
-
-    @admin.display(description="Formula (today)")
-    def ledger_formula_today(self, obj):
-        if obj.log_date != user_today(obj.user):
-            return "—"
-        from users.admin_formula_panels import fmt_um_line
-
-        e2_um = _um_from_dm(obj.engine2_delta_dm)
-        return format_html(
-            '<div class="hm-formula-panel hm-formula-panel-inline">'
-            "<code>Δ_um = E1_um + E2_um + Bio_um</code><br>"
-            "{} + {} + {} = <strong>{}</strong>"
-            "</div>",
-            fmt_um_line(obj.engine1_delta_um),
-            fmt_um_line(e2_um),
-            fmt_um_line(obj.bio_delta_um),
-            fmt_um_line(obj.delta_um),
-        )
-
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):

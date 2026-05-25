@@ -233,14 +233,56 @@
   padding: 4px 8px;
 }
 
-.inline-group .hm-formula-panel {
+/* Keep stacked inlines readable — do not blow out tabular columns */
+.inline-group .hm-formula-panel,
+.inline-group .hm-progress-dashboard,
+.inline-group .hm-segments {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tabular.inline-related {
+  display: block;
+  overflow-x: auto;
   max-width: 100%;
 }
 
-.tabular.inline-related tbody td.field-points_formula_today,
-.tabular.inline-related tbody td.field-ledger_formula_today,
-.tabular.inline-related tbody td.field-segment_loss_formula_panel {
-  min-width: 280px;
+.hm-progress-fieldset .readonly {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.hm-compact-today {
+  margin: 0.5rem 0 1rem;
+  padding: 0.65rem 0.85rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.hm-compact-line {
+  margin: 0.2rem 0;
+  color: #334155;
+}
+
+.hm-compact-table {
+  width: auto;
+  min-width: 240px;
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hm-compact-table th,
+.hm-compact-table td {
+  border: 1px solid #e2e8f0;
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.hm-compact-table th {
+  background: #f8fafc;
 }
 
 .hm-routine-panel {
