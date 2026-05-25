@@ -25,6 +25,7 @@ from utils.exercise_assignment import (
 )
 from utils.exercise_prescriptions import prescription_for_exercise_name
 from workouts.exercise_assignment_data import (
+    ADULT_CORE_6_BY_MIN_AGE,
     BEAST_MODE_CANONICAL_KEYS,
     TEEN_CORE_6_NAMES,
     normalize_exercise_name,
@@ -325,7 +326,47 @@ def _core_from_variant(variant, *, teen: bool, allowed_categories=None):
     return core[:6]
 
 
-def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None):
+def _adult_core_names_for_age(age: int) -> list[str]:
+    bracket = 21
+    for min_age in sorted(ADULT_CORE_6_BY_MIN_AGE.keys(), reverse=True):
+        if int(age) >= int(min_age):
+            bracket = min_age
+            break
+    return list(ADULT_CORE_6_BY_MIN_AGE.get(bracket, ADULT_CORE_6_BY_MIN_AGE[21]))
+
+
+def _append_core_slots_by_names(variant, core, names, seen_ids, *, allowed_categories):
+    """Fill core list toward 6 using spec core names (DB + synthetic fallback)."""
+    cats = allowed_categories or POSTURE_ALLOWED_CATEGORIES
+    for name in names:
+        if len(core) >= 6:
+            break
+        ex = Exercise.objects.filter(name__iexact=name).first()
+        if not ex or ex.id in seen_ids:
+            for candidate in Exercise.objects.filter(spinal_pct__isnull=False):
+                if spec_key_for_name(candidate.name) == spec_key_for_name(name):
+                    ex = candidate
+                    break
+        if not ex or ex.id in seen_ids:
+            continue
+        ve = _find_variant_exercise(variant, ex, tier=Tier.CORE)
+        if ve:
+            core.append(ve)
+        else:
+            pres = prescription_for_exercise_name(ex.name)
+            core.append(
+                _SyntheticVariantExercise(
+                    variant=variant,
+                    exercise=ex,
+                    tier=Tier.CORE,
+                    order=len(core) + 1,
+                    **pres,
+                )
+            )
+        seen_ids.add(ex.id)
+
+
+def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None, age: int = 25):
     """
     UserRoutineExercise enforces unique (routine, exercise). Core 6 often includes
     all four Section 10.2 beast-whitelist moves; keep at most two in core and
@@ -365,8 +406,31 @@ def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None):
         if len(other) + len(keep_wl) + len(fillers) >= 6:
             break
     new_core = (other + keep_wl + fillers)[:6]
+    seen_ids = {ve.exercise_id for ve in new_core}
+    if len(new_core) < 6:
+        name_list = (
+            TEEN_CORE_6_NAMES if 13 <= int(age) <= 20 else _adult_core_names_for_age(age)
+        )
+        # Prefer non-beast-whitelist spec names as fillers (Chin Tucks, Cat-Cow, …).
+        non_beast_names = [
+            n
+            for n in name_list
+            if (spec_key_for_name(n) or "") not in BEAST_MODE_CANONICAL_KEYS
+        ]
+        beast_names = [
+            n
+            for n in name_list
+            if (spec_key_for_name(n) or "") in BEAST_MODE_CANONICAL_KEYS
+        ]
+        _append_core_slots_by_names(
+            variant, new_core, non_beast_names, seen_ids, allowed_categories=cats
+        )
+        if len(new_core) < 6:
+            _append_core_slots_by_names(
+                variant, new_core, beast_names, seen_ids, allowed_categories=cats
+            )
     reserved = [ve.exercise for ve in drop_wl]
-    return new_core, reserved
+    return new_core[:6], reserved
 
 
 class _SyntheticVariantExercise:
@@ -432,7 +496,7 @@ def build_posture_routine_slots(
 
     if is_teen:
         core = _core_from_variant(variant, teen=True)
-        core, reserved_beast = _trim_core_whitelist_for_beast(core, variant)
+        core, reserved_beast = _trim_core_whitelist_for_beast(core, variant, age=age)
         pool = list(teen_scoring_pool_queryset(Exercise))
         pool_ids = {ex.id for ex in pool}
         for ex in beast_whitelist_exercises_from_db(Exercise):
@@ -445,7 +509,7 @@ def build_posture_routine_slots(
     else:
         core = _core_from_variant(variant, teen=False, allowed_categories=POSTURE_ALLOWED_CATEGORIES)
         core, reserved_beast = _trim_core_whitelist_for_beast(
-            core, variant, allowed_categories=POSTURE_ALLOWED_CATEGORIES
+            core, variant, allowed_categories=POSTURE_ALLOWED_CATEGORIES, age=age
         )
         pool = list(adult_scoring_pool_queryset(Exercise))
         pool_ids = {ex.id for ex in pool}
@@ -609,11 +673,15 @@ def generate_user_routines(
             beast_count,
             len(slots),
         )
-    if order < 10:
+    if len(slots) < 10 or order < 10:
         logger.warning(
-            "User %s posture routine has %s exercises (expected 10); beast_slots=%s",
+            "User %s posture routine has %s slots / %s persisted (expected 10); "
+            "core=%s rec=%s beast=%s",
             user.id,
+            len(slots),
             order,
+            sum(1 for _, t in slots if t == Tier.CORE),
+            sum(1 for _, t in slots if t == Tier.RECOMMENDED),
             beast_count,
         )
 
