@@ -138,6 +138,44 @@ def _beast_mode_pool(pool: Iterable[Any]) -> list[Any]:
     return [ex for ex in pool if _is_beast_mode_eligible(ex)]
 
 
+def beast_whitelist_exercises_from_db(ExerciseModel=None):
+    """
+    Load Section 10.2 beast whitelist rows from DB by canonical spec key.
+    Used when the scoring pool list omits them (name/matrix mismatch).
+    """
+    if ExerciseModel is None:
+        from workouts.models import Exercise as ExerciseModel
+
+    found: dict[str, Any] = {}
+    base_qs = ExerciseModel.objects.filter(
+        teen_only=False,
+        spinal_pct__isnull=False,
+        potency__isnull=False,
+    ).exclude(adult_only=True)
+    for ex in base_qs:
+        key = spec_key_for_name(getattr(ex, "name", "") or "")
+        if key and key in BEAST_MODE_CANONICAL_KEYS:
+            found[key] = ex
+    missing = BEAST_MODE_CANONICAL_KEYS - set(found)
+    if missing:
+        for ex in ExerciseModel.objects.filter(teen_only=False):
+            key = spec_key_for_name(getattr(ex, "name", "") or "")
+            if key in missing:
+                found[key] = ex
+                missing.discard(key)
+            if not missing:
+                break
+    return list(found.values())
+
+
+def _beast_candidates(pool: Iterable[Any]) -> list[Any]:
+    """Whitelist exercises from pool, else direct DB lookup."""
+    wl = _beast_mode_pool(pool)
+    if wl:
+        return wl
+    return beast_whitelist_exercises_from_db()
+
+
 def _core_dedupe_keys(core_exercises: Sequence[Any]) -> set[str]:
     keys = set()
     for ex in core_exercises:
@@ -165,7 +203,7 @@ def _select_beast_exercises(
     """
     exclude_ids = {e.id for e in exclude}
     core_keys = _core_dedupe_keys(core_exercises)
-    whitelist = [ex for ex in _beast_mode_pool(pool) if ex.id not in exclude_ids]
+    whitelist = [ex for ex in _beast_candidates(pool) if ex.id not in exclude_ids]
 
     non_core = [ex for ex in whitelist if dedupe_name_key(ex.name) not in core_keys]
     beast = pick_top_scored(non_core, score_fn, count)

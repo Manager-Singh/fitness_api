@@ -383,13 +383,25 @@ def build_posture_routine_slots(
     losses = segment_losses_from_breakdown(optimization_breakdown, section3_contract)
     is_teen = 13 <= int(age) <= 20
 
+    from utils.exercise_assignment import beast_whitelist_exercises_from_db
+
     if is_teen:
         core = _core_from_variant(variant, teen=True)
         pool = list(teen_scoring_pool_queryset(Exercise))
+        pool_ids = {ex.id for ex in pool}
+        for ex in beast_whitelist_exercises_from_db(Exercise):
+            if ex.id not in pool_ids:
+                pool.append(ex)
+                pool_ids.add(ex.id)
         recommended, beast = select_teen_recommended_beast(pool, losses, age, [ve.exercise for ve in core])
     else:
         core = _core_from_variant(variant, teen=False, allowed_categories=POSTURE_ALLOWED_CATEGORIES)
         pool = list(adult_scoring_pool_queryset(Exercise))
+        pool_ids = {ex.id for ex in pool}
+        for ex in beast_whitelist_exercises_from_db(Exercise):
+            if ex.id not in pool_ids:
+                pool.append(ex)
+                pool_ids.add(ex.id)
         recommended, beast = select_adult_recommended_beast(pool, losses, [ve.exercise for ve in core])
 
     from workouts.exercise_assignment_data import dedupe_name_key
@@ -557,11 +569,20 @@ def generate_user_routines(
     )
 
     order = _persist_routine_exercises(routine, slots)
+    beast_count = sum(1 for _, tier in slots if tier == Tier.BEAST)
+    if beast_count < 2:
+        logger.warning(
+            "User %s posture routine beast slots=%s (expected 2); slots=%s",
+            user.id,
+            beast_count,
+            len(slots),
+        )
     if order < 10:
         logger.warning(
-            "User %s posture routine has %s exercises (expected 10)",
+            "User %s posture routine has %s exercises (expected 10); beast_slots=%s",
             user.id,
             order,
+            beast_count,
         )
 
     _attach_posture_snapshot(routine, user)
