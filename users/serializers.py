@@ -3,6 +3,10 @@ from django.contrib.auth import authenticate, get_user_model
 from .models import OTP
 from django.utils import timezone
 from utils.country import DEFAULT_COUNTRY_CODE, normalize_country_code, resolve_country_code
+from utils.user_profile_display import (
+    apply_country_timezone_default,
+    apply_display_name_to_user,
+)
 import datetime
 
 User = get_user_model()
@@ -74,6 +78,9 @@ class RegisterSerializer(serializers.ModelSerializer):
             country_code=country_code,
             username=validated_data['email'],  # Use email as username
         )
+        apply_display_name_to_user(user, validated_data.get('name'))
+        apply_country_timezone_default(user, country_code)
+        user.save(update_fields=["display_name", "name", "timezone"])
         return user
 
 class SocialLoginSerializer(serializers.Serializer):
@@ -112,13 +119,14 @@ class SocialLoginSerializer(serializers.Serializer):
 
         if user:
             user.email = email
-            user.name = name
+            apply_display_name_to_user(user, name)
             user.profile_image_url = photo_url
             user.social_type = social_type
             user.fcm_token = fcm_token or user.fcm_token
             user.device_id = device_id
             if raw_cc not in (None, ""):
                 user.country_code = country_code
+                apply_country_timezone_default(user, country_code)
             user.save()
             return user, False  # Existing user
         else:
@@ -133,6 +141,8 @@ class SocialLoginSerializer(serializers.Serializer):
                 device_id=device_id,
                 country_code=country_code,
             )
+            apply_display_name_to_user(user, name)
+            apply_country_timezone_default(user, country_code)
             user.set_password(social_id)
             user.save()
             return user, True  # New us

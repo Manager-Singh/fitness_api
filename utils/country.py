@@ -1,6 +1,24 @@
 """ISO 3166-1 alpha-2 country codes for profile and leaderboard flags."""
 
 DEFAULT_COUNTRY_CODE = "CA"
+DEFAULT_TIMEZONE = "UTC"
+# Product default for Canada (Central); Canada spans multiple zones — client requested Central.
+DEFAULT_TIMEZONE_BY_COUNTRY = {
+    "CA": "America/Winnipeg",
+}
+
+
+def default_timezone_for_country(country_code: str | None) -> str:
+    cc = normalize_country_code(country_code)
+    if cc and cc in DEFAULT_TIMEZONE_BY_COUNTRY:
+        return DEFAULT_TIMEZONE_BY_COUNTRY[cc]
+    return DEFAULT_TIMEZONE
+
+
+def should_apply_country_default_timezone(user) -> bool:
+    """True when user has no explicit timezone or still on server default UTC."""
+    tz = str(getattr(user, "timezone", "") or "").strip()
+    return not tz or tz.upper() == "UTC"
 
 
 def normalize_country_code(value) -> str | None:

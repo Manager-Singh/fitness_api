@@ -15,7 +15,6 @@ from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
     POINTS_TO_CM_ENGINE2,
-    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
 )
 from utils.user_time import user_today
 from utils.posture.teen_genetic_average import (
@@ -234,41 +233,49 @@ def set_daily_validated(user, log_date):
     return daily
 
 
+def _posture_unlocked_for_segment_redistribution(state) -> bool:
+    """Teen/adult: apply Engine-1 bar updates after scan, questionnaire, or reconciliation assessment."""
+    if not state:
+        return False
+    if bool(state.scan_completed) or bool(state.questionnaire_completed):
+        return True
+    return bool(str(getattr(state, "assessment_sources_used", "") or "").strip())
+
+
 def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
     """
     Section 4.3 redistribution:
-    - Apply posture gain only to active segments (Current_Loss > 0)
-    - Re-normalize segment weights as segments get fully recovered.
+    - Daily_Gain_um is split across active segments proportional to each segment's Current_Loss_um.
+    - Re-normalize weights as segments hit zero (only remaining loss-bearing segments receive shares).
     """
     gain_um = max(0, int(engine1_gain_um or 0))
     if gain_um <= 0:
         return
 
     seg_defs = [
-        ("spinal_compression", "spinal_current_loss_um"),
-        ("posture_collapse", "collapse_current_loss_um"),
-        ("pelvic_tilt_back", "pelvic_current_loss_um"),
-        ("leg_hamstring", "legs_current_loss_um"),
+        ("spinal_current_loss_um"),
+        ("collapse_current_loss_um"),
+        ("pelvic_current_loss_um"),
+        ("legs_current_loss_um"),
     ]
     active = []
-    for key, field in seg_defs:
+    for field in seg_defs:
         cur = max(0, int(getattr(state, field, 0) or 0))
         if cur > 0:
-            active.append((key, field, cur))
+            active.append((field, cur))
     if not active:
         return
 
-    total_weight = sum(float(POSTURE_SEGMENT_DISTRIBUTION_RATIO.get(k, 0.0) or 0.0) for k, _, _ in active)
+    total_weight = sum(cur for _, cur in active)
     if total_weight <= 0:
         return
 
     consumed = 0
-    for idx, (key, field, cur) in enumerate(active):
-        weight = float(POSTURE_SEGMENT_DISTRIBUTION_RATIO.get(key, 0.0) or 0.0)
+    for idx, (field, cur) in enumerate(active):
         if idx == len(active) - 1:
             share = max(0, gain_um - consumed)
         else:
-            share = int(round(gain_um * (weight / total_weight)))
+            share = int(round(gain_um * (cur / total_weight)))
             consumed += share
         setattr(state, field, max(0, cur - share))
 
@@ -768,9 +775,8 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             },
         )
     # Update posture optimization bars as Engine 1 posture gain is earned.
-    # Adults always apply redistribution; teens apply it only after unlock (scan or questionnaire).
     if state and int(engine1_delta_um or 0) > 0:
-        if age >= 21 or bool(state.scan_completed) or bool(state.questionnaire_completed):
+        if age >= 21 or _posture_unlocked_for_segment_redistribution(state):
             _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
     return {
         "user_id": user.id,
@@ -862,4 +868,9 @@ def apply_pending_pre_scan_engine1(user, when=None):
     )
     # Mark pending rows as applied to avoid re-apply (keep rows for audit).
     HeightLedger.objects.filter(id__in=pending_ids).update(entry_type="pending_pre_scan_applied")
+
+    state, _ = PostureState.objects.get_or_create(user=user)
+    if _posture_unlocked_for_segment_redistribution(state):
+        _redistribute_engine1_gain_across_segments(state, total_pending_um)
+
     return {"applied_um": total_pending_um, "rows": len(pending_ids)}

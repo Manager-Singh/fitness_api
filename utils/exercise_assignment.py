@@ -6,7 +6,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
-from workouts.exercise_assignment_data import TEEN_ONLY_HGH_NAMES, normalize_exercise_name
+from workouts.exercise_assignment_data import (
+    BEAST_MODE_CANONICAL_KEYS,
+    TEEN_ONLY_HGH_NAMES,
+    normalize_exercise_name,
+    spec_key_for_name,
+)
 
 SegmentLosses = dict[str, float]
 
@@ -123,6 +128,15 @@ def _exclude_core(pool: Iterable[Any], core_exercises: Sequence[Any]) -> list[An
     return out
 
 
+def _is_beast_mode_eligible(exercise: Any) -> bool:
+    key = spec_key_for_name(getattr(exercise, "name", "") or "")
+    return bool(key and key in BEAST_MODE_CANONICAL_KEYS)
+
+
+def _beast_mode_pool(pool: Iterable[Any]) -> list[Any]:
+    return [ex for ex in pool if _is_beast_mode_eligible(ex)]
+
+
 def pick_top_scored(
     pool: Iterable[Any],
     score_fn,
@@ -154,13 +168,16 @@ def select_adult_recommended_beast(
         lambda ex: score_adult_exercise(ex, losses, is_beast=False),
         2,
     )
-    beast_pool = _exclude_core(remaining, recommended)
+    beast_pool = _beast_mode_pool(_exclude_core(remaining, recommended))
     beast = pick_top_scored(
         beast_pool,
         lambda ex: score_adult_exercise(ex, losses, is_beast=True),
         2,
     )
     _assert_no_teen_only(recommended + beast, "adult")
+    for ex in beast:
+        if not _is_beast_mode_eligible(ex):
+            raise ValueError(f"non-beast exercise {ex.name!r} assigned to beast tier")
     return recommended, beast
 
 
@@ -178,12 +195,15 @@ def select_teen_recommended_beast(
         lambda ex: score_teen_recommended(ex, losses, hgh_mult, posture_mult),
         2,
     )
-    beast_pool = _exclude_core(remaining, recommended)
+    beast_pool = _beast_mode_pool(_exclude_core(remaining, recommended))
     beast = pick_top_scored(
         beast_pool,
         lambda ex: score_teen_beast(ex, losses, hgh_mult, posture_mult),
         2,
     )
+    for ex in beast:
+        if not _is_beast_mode_eligible(ex):
+            raise ValueError(f"non-beast exercise {ex.name!r} assigned to beast tier")
     return recommended, beast
 
 

@@ -63,6 +63,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     instruction_lines = serializers.SerializerMethodField()
     completed = serializers.SerializerMethodField()
     section6_display_copy = serializers.SerializerMethodField()
+    tier_label = serializers.SerializerMethodField()
 
     class Meta:
         model = UserRoutineExercise
@@ -82,6 +83,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "instruction_lines",
             "order",
             "tier",
+            "tier_label",
             "sets",
             "unit",
             "qty_min",
@@ -142,6 +144,14 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
 
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
+
+    def get_tier_label(self, obj):
+        mapping = {
+            "core": "STANDARD",
+            "rec": "RECOMMENDED",
+            "beast": "BEAST MODE",
+        }
+        return mapping.get(str(obj.tier or "").lower(), str(obj.tier or "").upper() or "STANDARD")
 
 class UserRoutineSerializer(serializers.ModelSerializer):
     exercises = UserRoutineExerciseSerializer(many=True, read_only=True)

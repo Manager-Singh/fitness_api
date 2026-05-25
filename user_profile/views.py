@@ -31,6 +31,11 @@ from users.spec_runtime import get_user_runtime_state_snapshot
 from workouts.models import UserRoutine
 from django.db.models import Sum
 from utils.country import normalize_country_code
+from utils.user_profile_display import (
+    apply_country_timezone_default,
+    apply_display_name_to_user,
+    resolved_display_name,
+)
 from utils.profile_onboarding_ai import (
     has_onboarding_answers,
     run_onboarding_profile_analysis,
@@ -426,9 +431,10 @@ def update_profile_users(request):
 
     # User-level fields (same as my_profile POST): optional on update-profile.
     user_update_fields = []
-    if "display_name" in request.data:
-        user.display_name = str(request.data.get("display_name") or "").strip() or None
-        user_update_fields.append("display_name")
+    if "name" in request.data or "display_name" in request.data:
+        raw_name = request.data.get("display_name", request.data.get("name"))
+        apply_display_name_to_user(user, raw_name)
+        user_update_fields.extend(["display_name", "name"])
     if "avatar_url" in request.data:
         user.avatar_url = str(request.data.get("avatar_url") or "").strip() or None
         user_update_fields.append("avatar_url")
@@ -451,8 +457,11 @@ def update_profile_users(request):
                 )
             user.country_code = cc
             user_update_fields.append("country_code")
+            apply_country_timezone_default(user, cc)
+            if "timezone" not in user_update_fields:
+                user_update_fields.append("timezone")
     if user_update_fields:
-        user.save(update_fields=user_update_fields)
+        user.save(update_fields=list(dict.fromkeys(user_update_fields)))
 
     profile_data = model_to_dict(profile)
     onboarding_extra = {}
@@ -503,9 +512,11 @@ def update_profile_users(request):
             'email': user.email,
             'profile_step': getattr(user, 'profile_step', None),
             'account_tier': getattr(user, "account_tier", None),
-            'display_name': getattr(user, "display_name", None),
+            'name': resolved_display_name(user),
+            'display_name': resolved_display_name(user),
             'avatar_url': getattr(user, "avatar_url", None),
             'timezone': getattr(user, "timezone", None),
+            'country_code': normalize_country_code(getattr(user, "country_code", None)),
             'profile': profile_data,
             **onboarding_extra,
         },
@@ -1079,9 +1090,12 @@ def get_profile(request):
         'message': 'Profile retrieved successfully',
         'data': {
             'id': user.id,
-            'name': user.name,
+            'name': resolved_display_name(user),
+            'display_name': resolved_display_name(user),
             'username': user.username,
             'email': user.email,
+            'timezone': getattr(user, "timezone", None),
+            'country_code': normalize_country_code(getattr(user, "country_code", None)),
             'social_type': user.social_type,
             'profile_image_url': user.profile_image_url,
             'profile_step': getattr(user, 'profile_step', None),
@@ -1162,9 +1176,10 @@ def my_profile(request):
             else:
                 is_teen = False
 
-        # User-level fields (Spec 13.2: display_name, avatar_url, timezone).
-        if "display_name" in request.data:
-            user.display_name = str(request.data.get("display_name") or "").strip() or None
+        # User-level fields (Spec 13.2: name/display_name, avatar_url, timezone).
+        if "name" in request.data or "display_name" in request.data:
+            raw_name = request.data.get("display_name", request.data.get("name"))
+            apply_display_name_to_user(user, raw_name)
         if "avatar_url" in request.data:
             user.avatar_url = str(request.data.get("avatar_url") or "").strip() or None
         if "timezone" in request.data:
@@ -1183,6 +1198,7 @@ def my_profile(request):
                         status=422,
                     )
                 user.country_code = cc
+                apply_country_timezone_default(user, cc)
 
         # Profile-level onboarding fields (reuse same validation constants as update_profile_users).
         if "gender" in request.data:
@@ -1348,7 +1364,8 @@ def my_profile(request):
                     "username": user.username,
                     "account_tier": getattr(user, "account_tier", None),
                     "timezone": getattr(user, "timezone", None),
-                    "display_name": getattr(user, "display_name", None),
+                    "name": resolved_display_name(user),
+                    "display_name": resolved_display_name(user),
                     "avatar_url": getattr(user, "avatar_url", None),
                     "country_code": normalize_country_code(getattr(user, "country_code", None)),
                 },

@@ -82,28 +82,27 @@ class ExerciseAssignmentScoringTests(SimpleTestCase):
         names = {e.name for e in rec + beast}
         self.assertTrue(names & {"Decompression Hang", "Wall Angels", "Hip Flexor Stretch"})
 
-    def test_tc_t1_teen_beast_hgh_young(self):
+    def test_tc_t1_teen_beast_whitelist_only(self):
+        from workouts.exercise_assignment_data import BEAST_MODE_CANONICAL_KEYS, normalize_exercise_name
+
         losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
         pool = _teen_pool()
         core = [_ex_from_spec(n) for n in ["decompression hang", "cobra stretch", "hip flexor stretch", "wall angels"]]
         _, beast = select_teen_recommended_beast(pool, losses, 13, core)
         for ex in beast:
-            self.assertTrue(
-                ex.teen_only or ex.name.lower() in TEEN_ONLY_HGH_NAMES
-                or (ex.hgh_score or 0) >= 7
-            )
+            key = normalize_exercise_name(ex.name)
+            self.assertIn(key, BEAST_MODE_CANONICAL_KEYS)
+            self.assertFalse(ex.teen_only)
 
-    def test_tc_t2_teen_19_beast_less_hgh(self):
+    def test_tc_t2_teen_beast_never_doorway(self):
+        from workouts.exercise_assignment_data import normalize_exercise_name
+
         losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
         pool = _teen_pool()
         core = [_ex_from_spec("decompression hang")]
-        _, beast_19 = select_teen_recommended_beast(pool, losses, 19, core)
-        _, beast_13 = select_teen_recommended_beast(pool, losses, 13, core)
-        hgh_names = {"Box Jumps", "Mountain Climbers", "High Knees"}
-        self.assertLess(
-            sum(1 for e in beast_19 if e.name in hgh_names),
-            sum(1 for e in beast_13 if e.name in hgh_names),
-        )
+        _, beast = select_teen_recommended_beast(pool, losses, 19, core)
+        for ex in beast:
+            self.assertNotEqual(normalize_exercise_name(ex.name), "doorway chest stretch")
 
     def test_tc_n_adult_never_teen_only(self):
         import random

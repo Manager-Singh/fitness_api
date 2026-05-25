@@ -392,13 +392,30 @@ def build_posture_routine_slots(
         pool = list(adult_scoring_pool_queryset(Exercise))
         recommended, beast = select_adult_recommended_beast(pool, losses, [ve.exercise for ve in core])
 
+    from workouts.exercise_assignment_data import dedupe_name_key
+
     slots = []
+    seen_names: set[str] = set()
+
+    def _append_slot(ve, tier):
+        key = dedupe_name_key(getattr(ve.exercise, "name", "") or "")
+        if not key or key in seen_names:
+            if key:
+                logger.warning(
+                    "Skipping duplicate exercise %r in routine slots (tier=%s)",
+                    ve.exercise.name,
+                    tier,
+                )
+            return
+        seen_names.add(key)
+        slots.append((ve, tier))
+
     for ve in core:
-        slots.append((ve, Tier.CORE))
+        _append_slot(ve, Tier.CORE)
     for ve, tier in _variant_exercises_for_picks(variant, recommended, Tier.RECOMMENDED):
-        slots.append((ve, Tier.RECOMMENDED))
+        _append_slot(ve, tier)
     for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
-        slots.append((ve, Tier.BEAST))
+        _append_slot(ve, tier)
 
     meta = {
         "assignment_spec": "v1",
@@ -439,15 +456,21 @@ def _attach_posture_snapshot(routine, user) -> None:
 
 
 def _persist_routine_exercises(routine, slots, *, start_order: int = 0) -> int:
+    from workouts.exercise_assignment_data import dedupe_name_key
+
     seen_exercise_ids = set(
         UserRoutineExercise.objects.filter(routine=routine).values_list("exercise_id", flat=True)
     )
+    seen_normalized_names: set[str] = set()
     order = start_order
     for variant_ex, tier in slots:
         ex = variant_ex.exercise
-        if ex.id in seen_exercise_ids:
+        norm = dedupe_name_key(ex.name)
+        if ex.id in seen_exercise_ids or (norm and norm in seen_normalized_names):
             continue
         seen_exercise_ids.add(ex.id)
+        if norm:
+            seen_normalized_names.add(norm)
         order += 1
         ve_id = variant_ex.id if getattr(variant_ex, "id", None) else None
         UserRoutineExercise.objects.create(

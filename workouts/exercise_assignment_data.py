@@ -195,6 +195,14 @@ EXERCISE_NAME_ALIASES = {
     "mountain climber": "mountain climbers",
 }
 
+# Section 10.2 — only these four may appear as Beast Mode posture picks.
+BEAST_MODE_CANONICAL_KEYS = frozenset({
+    "decompression hang",
+    "wall angels",
+    "glute bridges",
+    "hip flexor stretch",
+})
+
 TEEN_CORE_6_NAMES = [
     "Decompression Hang",
     "Cobra Stretch",
@@ -277,6 +285,11 @@ def spec_key_for_name(name: str) -> str | None:
     if key in EXERCISE_ASSIGNMENT_SPEC:
         return key
     return EXERCISE_NAME_ALIASES.get(key)
+
+
+def dedupe_name_key(name: str) -> str:
+    """Canonical key for routine duplicate detection (spec keys + aliases)."""
+    return spec_key_for_name(name) or normalize_exercise_name(name)
 
 
 def is_teen_only_exercise(exercise) -> bool:
