@@ -1,0 +1,212 @@
+/* Height admin — progress dashboard + formula panels */
+
+.hm-progress-dashboard {
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.hm-formula-panel {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hm-formula-panel-inline {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  max-width: 420px;
+}
+
+.hm-formula-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #0f172a;
+  margin-bottom: 0.35rem;
+}
+
+.hm-formula-subtitle {
+  font-weight: 600;
+  font-size: 12px;
+  color: #334155;
+  margin: 0.75rem 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.hm-formula-note,
+.hm-formula-muted {
+  color: #64748b;
+  font-size: 12px;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.hm-formula-total {
+  margin: 0.5rem 0;
+  font-size: 13px;
+}
+
+.hm-formula-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 12px;
+}
+
+.hm-formula-table caption {
+  text-align: left;
+  font-weight: 600;
+  color: #475569;
+  padding-bottom: 0.35rem;
+}
+
+.hm-formula-table th,
+.hm-formula-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.hm-formula-table th {
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+}
+
+.hm-formula-table code {
+  font-size: 11px;
+  background: #f8fafc;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.hm-segments {
+  margin: 0.5rem 0;
+}
+
+.hm-seg-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 48px 200px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.hm-seg-name {
+  font-weight: 600;
+  color: #334155;
+}
+
+.hm-seg-track {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.hm-seg-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0ea5e9, #10b981);
+  border-radius: 4px;
+}
+
+.hm-seg-pct {
+  text-align: right;
+  font-weight: 600;
+  color: #0f766e;
+}
+
+.hm-seg-loss {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 0.75rem;
+}
+
+.hm-stat-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.hm-stat-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.hm-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.hm-stat-sub {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.hm-section-title {
+  font-weight: 600;
+  margin: 0.75rem 0 0.35rem;
+  color: #334155;
+}
+
+.hm-mini-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.hm-mini-table th,
+.hm-mini-table td {
+  border: 1px solid #e2e8f0;
+  padding: 4px 8px;
+}
+
+.inline-group .hm-formula-panel {
+  max-width: 100%;
+}
+
+.tabular.inline-related tbody td.field-points_formula_today,
+.tabular.inline-related tbody td.field-ledger_formula_today,
+.tabular.inline-related tbody td.field-segment_loss_formula_panel {
+  min-width: 280px;
+}
+
+.hm-routine-panel {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.hm-ex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.hm-ex-card {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}

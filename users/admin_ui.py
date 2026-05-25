@@ -92,11 +92,12 @@ def _segment_bars_from_diagnostics(user) -> str:
                 '<span class="hm-seg-name">{}</span>'
                 '<div class="hm-seg-track"><div class="hm-seg-fill" style="width:{}%;"></div></div>'
                 '<span class="hm-seg-pct">{}%</span>'
-                '<span class="hm-seg-loss">{} cm loss</span></div>',
+                '<span class="hm-seg-loss">{} · {:.2f} cm</span></div>',
                 label,
                 width,
                 int(round(pct)),
-                f"{loss_cm:.2f}",
+                fmt_um_line(int(round(loss_cm * 10000))),
+                loss_cm,
             )
         )
     return format_html('<div class="hm-segments">{}</div>', format_html("".join(rows)))
@@ -328,17 +329,21 @@ def progress_dashboard_html(user) -> str:
         '<p class="hm-footnote">Progress is computed by cron '
         "<code>run_daily_height_pipeline</code> (every 5 min) → "
         "<code>compute_daily_height_for_user</code>. "
-        "Scroll down for the last 30 days in the inlines below.</p>"
+        "Scroll down for formula tables and the last 30 days in the inlines below.</p>"
     )
+
+    from users.admin_formula_panels import daily_points_formula_html, posture_segment_formula_html
 
     return format_html(
         '<div class="hm-progress-dashboard">'
-        "{}{}{}{}{}{}{}"
+        "{}{}{}{}{}{}{}{}{}"
         "</div>",
         cards,
         unlock_row,
         _segment_bars_from_diagnostics(user),
-        format_html('<div class="hm-section-title">Today breakdown</div>{}', today_detail or "—"),
+        posture_segment_formula_html(user),
+        format_html('<div class="hm-section-title">Today breakdown (points)</div>{}', today_detail or "—"),
+        daily_points_formula_html(user, today),
         ledger_detail,
         links,
         footnote,

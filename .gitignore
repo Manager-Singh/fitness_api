@@ -26,7 +26,9 @@ heightmax.json
 db.sqlite3
 media/
 staticfiles/
-static/
+/static/*
+!/static/admin/
+!/static/admin/**
 local_settings.py
 apibackend/settings.py
 apibackend/asgi.py

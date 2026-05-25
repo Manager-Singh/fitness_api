@@ -15,6 +15,7 @@ from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
     POINTS_TO_CM_ENGINE2,
+    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
 )
 from utils.user_time import user_today
 from utils.posture.teen_genetic_average import (
@@ -242,40 +243,44 @@ def _posture_unlocked_for_segment_redistribution(state) -> bool:
     return bool(str(getattr(state, "assessment_sources_used", "") or "").strip())
 
 
+# Spec §4.3 segment_ratio[s] — fixed 30/35/25/10, renormalized over active segments only.
+_SEGMENT_RATIO_BY_LOSS_FIELD = {
+    "spinal_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["spinal_compression"],
+    "collapse_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["posture_collapse"],
+    "pelvic_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["pelvic_tilt_back"],
+    "legs_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["leg_hamstring"],
+}
+
+
 def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
     """
-    Section 4.3 redistribution:
-    - Daily_Gain_um is split across active segments proportional to each segment's Current_Loss_um.
-    - Re-normalize weights as segments hit zero (only remaining loss-bearing segments receive shares).
+    Section 4.3 redistribution (TheHeightApp Spec v3.3):
+    share[s] = Daily_Gain × (segment_ratio[s] / sum(segment_ratio for active s))
+    segment_ratio = 30% spinal / 35% collapse / 25% pelvic / 10% legs.
     """
     gain_um = max(0, int(engine1_gain_um or 0))
     if gain_um <= 0:
         return
 
-    seg_defs = [
-        ("spinal_current_loss_um"),
-        ("collapse_current_loss_um"),
-        ("pelvic_current_loss_um"),
-        ("legs_current_loss_um"),
-    ]
+    seg_defs = list(_SEGMENT_RATIO_BY_LOSS_FIELD.keys())
     active = []
     for field in seg_defs:
         cur = max(0, int(getattr(state, field, 0) or 0))
         if cur > 0:
-            active.append((field, cur))
+            active.append((field, cur, float(_SEGMENT_RATIO_BY_LOSS_FIELD[field])))
     if not active:
         return
 
-    total_weight = sum(cur for _, cur in active)
+    total_weight = sum(ratio for _, _, ratio in active)
     if total_weight <= 0:
         return
 
     consumed = 0
-    for idx, (field, cur) in enumerate(active):
+    for idx, (field, cur, ratio) in enumerate(active):
         if idx == len(active) - 1:
             share = max(0, gain_um - consumed)
         else:
-            share = int(round(gain_um * (cur / total_weight)))
+            share = int(round(gain_um * (ratio / total_weight)))
             consumed += share
         setattr(state, field, max(0, cur - share))
 
