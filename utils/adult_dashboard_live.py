@@ -19,6 +19,7 @@ from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_n
 from utils.age import get_user_age, get_user_age_exact
 from utils.check_payment import check_subscription_or_response
 from utils.monetization_gate import compute_monetization_flags
+from utils.paywall_flags import is_adult_age, is_teen_age
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.posture.height_constants import POINTS_TO_CM_ENGINE1
 from utils.user_time import user_today
@@ -58,15 +59,18 @@ def _today_engine_points(user, log_date):
 
 def build_adult_dashboard_live_payload(user, log_date=None):
     """
-    Build Issue #3 live dashboard fields for adults (21+).
+    Build Issue #3 live dashboard fields for adult dashboard accounts.
 
-    Returns None for teen accounts so callers can omit the block.
+    Adult band is sex-specific (female 18+, male 21+). Returns None for teen accounts.
     """
+    age_exact = get_user_age_exact(user)
     try:
         age = int(get_user_age(user) or 0)
     except Exception:
         age = 0
-    if age < 21:
+    if is_teen_age(age_exact, age, user=user):
+        return None
+    if not is_adult_age(age_exact, age, user=user):
         return None
 
     log_date = log_date or user_today(user)
@@ -74,7 +78,7 @@ def build_adult_dashboard_live_payload(user, log_date=None):
     monetization = compute_monetization_flags(
         age,
         subscription_data,
-        age_exact=get_user_age_exact(user),
+        age_exact=age_exact,
         user=user,
     )
     conversion_enabled = bool(monetization.get("conversion_enabled"))

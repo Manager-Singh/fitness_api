@@ -4,7 +4,8 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from utils.age import get_user_age
+from utils.age import get_user_age, get_user_age_exact
+from utils.paywall_flags import is_adult_age
 
 from .models import AgeGroup, Module, Food, ModuleFood
 from .serializers import (
@@ -202,8 +203,11 @@ class MyPlanView(APIView):
         # ── 1. Detect user age ─────────────────────────────────────────────────
         try:
             age = get_user_age(request.user)
+            age_exact = get_user_age_exact(request.user)
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        adult_nutrition_plan = is_adult_age(age_exact, age, user=request.user)
 
         # ── 2. Fetch modules for the user's age group ─────────────────────────
         modules = (
@@ -223,10 +227,10 @@ class MyPlanView(APIView):
             .order_by("age_group__min_age", "type", "sort_order", "name")
         )
 
-        # Spec-correct module visibility:
-        # - Teens: show teen nutrition modules (not adult Disc/Muscle split modules).
-        # - Adults: show Disc/Muscle nutrition modules (not teen-only boosting lists).
-        if age < 21:
+        # Spec-correct module visibility (sex-specific adult band: female 18+, male 21+):
+        # - Teens: teen nutrition modules only.
+        # - Adults: Disc/Muscle adult plan modules (not teen GrowthMax lists).
+        if not adult_nutrition_plan:
             # Exclude adult-only nutrition buckets for teens.
             adult_cats = ["disc", "muscle"]
             modules = modules.exclude(
@@ -317,7 +321,7 @@ class MyPlanView(APIView):
 
         raw_today_food_points = float(today_entries.aggregate(total=Sum("score"))["total"] or 0)
         # Traceable caps — must match nutration/views_log.py (adult flat model, teen 35).
-        if age < 21:
+        if not adult_nutrition_plan:
             cap_limit = 35.0
             traceable_today_food_points = min(raw_today_food_points, cap_limit)
             cap_reached = bool(raw_today_food_points >= cap_limit)

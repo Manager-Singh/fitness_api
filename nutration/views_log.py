@@ -335,6 +335,12 @@ class NutraLogViewSet(viewsets.ViewSet):
         else:
             traceable_food_points = min(raw_food_points, cap_limit)
         daily_nutrition_pts_today = int(round(traceable_food_points))
+        food_entry_count = int(today_entries.filter(food__isnull=False).count())
+        unique_food_ids = set(
+            int(fid)
+            for fid in today_entries.filter(food__isnull=False).values_list("food_id", flat=True)
+            if fid
+        )
         daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
         daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
         daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
@@ -367,6 +373,8 @@ class NutraLogViewSet(viewsets.ViewSet):
             "today_total_food_score_traceable": float(traceable_food_points),
             "today_total_food_score_raw": float(raw_food_points),
             "today_logged_nutrition": cleaned_log,
+            "nutrition_items_logged_count": food_entry_count,
+            "nutrition_foods_unique_count": len(unique_food_ids),
         }
         payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date, request=request)
 

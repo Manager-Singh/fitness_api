@@ -12,6 +12,13 @@ class GenderAccountTierTests(unittest.TestCase):
         self.assertFalse(is_teen_age(18.94, gender="female"))
         self.assertTrue(is_adult_age(18.94, gender="female"))
 
+    def test_female_18_must_not_use_male_default_band(self):
+        """Missing gender defaults to male (teen 13–20); female 18 must pass gender explicitly."""
+        self.assertTrue(is_teen_age(18.94))
+        self.assertFalse(is_adult_age(18.94))
+        self.assertFalse(is_teen_age(18.94, gender="female"))
+        self.assertTrue(is_adult_age(18.94, gender="female"))
+
     def test_male_18_is_teen(self):
         self.assertEqual(desired_account_tier(age_exact=18.5, gender="male"), "teen")
         self.assertTrue(is_teen_age(18.5, gender="male"))

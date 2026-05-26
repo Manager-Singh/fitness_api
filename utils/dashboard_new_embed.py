@@ -142,6 +142,8 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
     ).select_related("module")
     disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(entries)
     nutrition_pct = adult_nutrition_bar_percent(disc_ids, muscle_ids)
+    food_entry_count = entries.count()
+    unique_food_count = len({int(e.food_id) for e in entries if e.food_id})
     return {
         "cta": "Start Today's Routine",
         "posture_exercises_fraction": f"{completed_total}/{assigned_total or 0}",
@@ -150,6 +152,9 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         "exercises_done": completed_total,
         "total_exercises": assigned_total,
         "habits_logged": count_habits_logged(user, log_date),
+        "nutrition_items_logged_count": food_entry_count,
+        "nutrition_foods_unique_count": unique_food_count,
+        "nutrition_traceable_points": int(len(disc_ids) + len(muscle_ids)),
         "posture_exercises_percent": int(round((completed_total / max(1, assigned_total)) * 100)),
         "nutrition_percent": int(nutrition_pct),
         "teen_nutrition_dots": None,

@@ -645,12 +645,12 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     # Decimal-age bands must match /dashboard-new (Section 16 / trial boundaries).
     from utils.paywall_flags import is_adult_age, is_teen_age
 
-    profile_sex = (profile_dict.get("gender") or "").strip().lower()
-    if profile_sex not in {"male", "female"}:
-        profile_sex = "male"
+    from utils.paywall_flags import user_profile_sex
+    from utils.posture.height_constants import normalize_sex
 
-    is_teen_track = is_teen_age(age_exact, gender=profile_sex)
-    is_adult_track = is_adult_age(age_exact, gender=profile_sex)
+    profile_sex = normalize_sex(profile_dict.get("gender")) or user_profile_sex(user)
+    is_teen_track = is_teen_age(age_exact, gender=profile_sex, user=user)
+    is_adult_track = is_adult_age(age_exact, gender=profile_sex, user=user)
     transitioned_to_adult = False
     desired_tier = "adult" if is_adult_track else ("teen" if is_teen_track else None)
     update_user_fields = []

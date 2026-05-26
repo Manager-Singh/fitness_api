@@ -75,6 +75,38 @@ class AdultDashboardLivePayloadTests(TestCase):
         )
         prof, _ = UserProfile.objects.get_or_create(user=u)
         prof.birth_date = date.today() - timedelta(days=int(365.2425 * 15))
+        prof.gender = "male"
+        prof.save()
+        self.assertIsNone(build_adult_dashboard_live_payload(u))
+
+    def test_female_18_adult_returns_payload(self, mock_sub):
+        mock_sub.side_effect = lambda user: self._mock_paid_adult_sub()
+        u = User.objects.create_user(
+            username="female18live",
+            email="female18live@test.example",
+            password="secret123",
+            account_tier="adult",
+        )
+        prof, _ = UserProfile.objects.get_or_create(user=u)
+        prof.birth_date = date.today() - timedelta(days=int(365.2425 * 18.9))
+        prof.gender = "female"
+        prof.base_height_cm = "163"
+        prof.current_height_cm = "163"
+        prof.save()
+        payload = build_adult_dashboard_live_payload(u)
+        self.assertIsNotNone(payload)
+        self.assertIn("today_daily_points", payload)
+
+    def test_male_18_teen_returns_none(self, mock_sub):
+        mock_sub.side_effect = lambda user: self._mock_paid_adult_sub()
+        u = User.objects.create_user(
+            username="male18live",
+            email="male18live@test.example",
+            password="secret123",
+        )
+        prof, _ = UserProfile.objects.get_or_create(user=u)
+        prof.birth_date = date.today() - timedelta(days=int(365.2425 * 18.5))
+        prof.gender = "male"
         prof.save()
         self.assertIsNone(build_adult_dashboard_live_payload(u))
 
