@@ -24,7 +24,7 @@ from utils.ai_analysis import save_ai_analysis
 from posture_analysis.models import UserPosturalOptimizationData
 from posture_analysis.serializers import UserPosturalOptimizationDataSerializer
 from utils.posture_optimizer import calculate_optimization_breakdown
-from utils.graph_age_projection import calculate_height_projection
+from utils.graph_age_projection import calculate_height_projection, floor_teen_projection_targets
 
 from django.utils import timezone
 from django.db.models import Sum
@@ -771,6 +771,18 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     # Unoptimized is conservative (2cm below genetic) per spec fallback used elsewhere.
     lower_bound_cm = genetic_height_cm - 2
     optimized_ceiling_cm = red_us_optimized_target_cm
+    posture_boost_for_chart = min(
+        float(teen_profile.posture_potential_cm or 0.0),
+        float(POSTURE_BOOST_MAX_CM),
+    )
+    genetic_height_cm, optimized_ceiling_cm, lower_bound_cm = floor_teen_projection_targets(
+        current_cm_val,
+        genetic_height_cm,
+        optimized_ceiling_cm,
+        lower_bound_cm,
+        posture_boost_cm=posture_boost_for_chart,
+    )
+    red_us_optimized_target_cm = optimized_ceiling_cm
 
     chart_breakdown = calculate_height_projection(
         current_height_cm,
@@ -778,16 +790,13 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         genetic_height_cm,
         lower_bound_cm,
         teen_profile.sex,
+        age_exact=age_exact,
     )
-
-
-    # Pass TeenProfile to height engine
-    
 
     # ── 12. Projection targets for Section 16 chart labels ─────────────────
     # These must not be arbitrary +/- 5cm offsets; they are the chart endpoints.
     optimized_estimated_genetic_height_cm = round(red_us_optimized_target_cm, 2)
-    unoptimized_estimated_genetic_height_cm = round(genetic_height_cm - 2.0, 2)
+    unoptimized_estimated_genetic_height_cm = round(lower_bound_cm, 2)
     estimated_height_user = genetic_height_cm
 
     profile_fields = get_profile_fields(profile_dict, ["age", "gender", "g_p_height_change"], default=None)

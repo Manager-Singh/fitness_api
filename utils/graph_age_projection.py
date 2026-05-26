@@ -64,39 +64,90 @@
 
 import math
 
+
+def floor_teen_projection_targets(
+    current_height_cm,
+    genetic_height_cm,
+    optimized_height_cm,
+    unoptimized_height_cm,
+    *,
+    posture_boost_cm=0.0,
+):
+    """
+    When a teen already exceeds MPH, chart endpoints must not sit below current height.
+    Returns (genetic, optimized, unoptimized) in cm.
+    """
+    current = float(current_height_cm or 0.0)
+    genetic = float(genetic_height_cm or 0.0)
+    optimized = float(optimized_height_cm if optimized_height_cm is not None else genetic)
+    unoptimized = float(unoptimized_height_cm if unoptimized_height_cm is not None else genetic)
+    boost = max(0.0, float(posture_boost_cm or 0.0))
+
+    if current <= 0:
+        return genetic, optimized, unoptimized
+
+    if current > genetic:
+        genetic = current
+    optimized_floor = genetic + boost
+    if optimized < optimized_floor:
+        optimized = optimized_floor
+    if unoptimized > genetic:
+        unoptimized = min(unoptimized, genetic)
+    unoptimized = max(unoptimized, genetic - 2.0)
+    return genetic, optimized, unoptimized
+
+
 def calculate_height_projection(
     current_height,
     optimized_height,
     genetic_height,
     unoptimized_height,
-    gender
+    gender,
+    age_exact=None,
 ):
     """
-    Generate height projections from age 13 to 21 (boys) or 13 to 17 (girls).
+    Generate height projections from age 13 to 21 (boys) or 13 to 17+ (girls).
 
     NOTE:
     - If optimized_height or unoptimized_height is None,
       it will safely fall back to genetic_height for math,
       while UI can still lock/hide those lines.
+    - When current_height exceeds genetic targets, endpoints are floored first.
+    - Female teens 18–20 extend the axis with 0% growth years (Section 5.1 plateau).
     """
     gender = gender.lower()
 
     if gender == "male":
         start_percent = 0.88
-        age_range = list(range(13, 22))
         percent_splits = [3.6, 2.6, 1.9, 1.55, 1.1, 0.75, 0.3, 0.2]
+        end_age = 21
     elif gender == "female":
         start_percent = 0.96
-        age_range = list(range(13, 18))
         percent_splits = [2.25, 1.25, 0.4, 0.1]
+        end_age = 17
+        if age_exact is not None and float(age_exact) > 17.0:
+            extra_years = int(min(float(age_exact), 20.0)) - 17
+            percent_splits = percent_splits + ([0.0] * extra_years)
+            end_age = int(min(float(age_exact), 20.0))
     else:
         raise ValueError("Gender must be 'male' or 'female'")
 
-    # ─────────────────────────────────────────────
-    # SAFE FALLBACKS (KEY FIX)
-    # ─────────────────────────────────────────────
     optimized_height = optimized_height if optimized_height is not None else genetic_height
     unoptimized_height = unoptimized_height if unoptimized_height is not None else genetic_height
+
+    genetic_height, optimized_height, unoptimized_height = floor_teen_projection_targets(
+        current_height,
+        genetic_height,
+        optimized_height,
+        unoptimized_height,
+    )
+
+    age_range = list(range(13, end_age + 1))
+    if len(percent_splits) != len(age_range) - 1:
+        if len(percent_splits) > len(age_range) - 1:
+            percent_splits = percent_splits[: len(age_range) - 1]
+        else:
+            percent_splits = percent_splits + [0.0] * (len(age_range) - 1 - len(percent_splits))
 
     def project(final_height):
         base = round(final_height * start_percent, 2)
@@ -120,9 +171,12 @@ def calculate_height_projection(
     }
 
     max_height = max(optimized + genetic + unoptimized)
+    min_height = min(optimized + genetic + unoptimized)
     maxY = math.ceil(max_height / 10.0) * 10
+    minY = max(0, math.floor(min_height / 10.0) * 10)
 
     return {
         "data": result_data,
-        "maxY": maxY
+        "maxY": maxY,
+        "minY": minY,
     }

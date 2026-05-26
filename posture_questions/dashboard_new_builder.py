@@ -2,7 +2,7 @@
 import logging
 
 from users.models import HeightLedger
-from utils.graph_age_projection import calculate_height_projection
+from utils.graph_age_projection import calculate_height_projection, floor_teen_projection_targets
 from utils.adult_dashboard_metrics import adult_chart_series, count_habits_logged
 from utils.user_time import user_today
 from utils.teen_dashboard_dots import (
@@ -171,6 +171,14 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         teen_target_unoptimized_cm = max(0.0, teen_target_blue_cm - 2.0)
     # Unoptimized must not exceed genetic target.
     teen_target_unoptimized_cm = min(teen_target_unoptimized_cm, teen_target_blue_cm)
+    posture_boost_for_chart = max(0.0, teen_target_red_cm - teen_target_blue_cm)
+    teen_target_blue_cm, teen_target_red_cm, teen_target_unoptimized_cm = floor_teen_projection_targets(
+        max(teen_height_live_cm, base_height_cm),
+        teen_target_blue_cm,
+        teen_target_red_cm,
+        teen_target_unoptimized_cm,
+        posture_boost_cm=posture_boost_for_chart,
+    )
 
     # Do not flag \"zero cumulative\" as anomalous unless we have actual ledger history.
     if (
@@ -264,6 +272,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
                 teen_chart_genetic_cm,
                 teen_chart_unoptimized_cm,
                 profile_gender,
+                age_exact=age_exact,
             )
         except Exception:
             canonical_chart = payload.get("chart_breakdown")
