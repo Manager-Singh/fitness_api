@@ -22,8 +22,14 @@ from typing import Any, Dict
 
 # --- Age tiers (Section 2 /12) ---
 TEEN_MIN_AGE = 13
+# Onboarding picker / routines / Engine 2 (spec Section 5.7: Core 4 for 13–17, Core 6 for 18–20).
 TEEN_MAX_AGE = 20
+# Account tier / dashboard (sex-specific — Section 5.1 female growth ends ~17).
+TEEN_ACCOUNT_MAX_AGE_FEMALE = 17
+ADULT_ACCOUNT_MIN_AGE_FEMALE = 18
 ADULT_MIN_AGE = 21
+TEEN_ACCOUNT_MAX_AGE_MALE = TEEN_MAX_AGE
+ADULT_ACCOUNT_MIN_AGE_MALE = ADULT_MIN_AGE
 ADULT_AGE_MAX = 100
 
 # --- Section 2 onboarding + Section 12.4 validation bounds (cm) ---

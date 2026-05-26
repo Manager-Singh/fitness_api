@@ -63,6 +63,7 @@ from utils.posture.height_constants import (
     TOTAL_STRUCTURAL_CEILING_CM,
     UI_TO_CODE_VARIABLE_NAMES,
     default_optimization_breakdown_pending_scan,
+    normalize_sex,
 )
 
 # Import services
@@ -124,7 +125,14 @@ def upsert_posture_questions(request):
         )
         current_height = base_height
 
-        if current_age < 21:
+        profile_sex_q = normalize_sex(profile_dict.get("gender"))
+        age_exact_q = float(get_user_age_exact(user) or current_age or 0)
+        from utils.paywall_flags import is_adult_age, is_teen_age as is_teen_age_band
+
+        is_adult = is_adult_age(age_exact_q, current_age, gender=profile_sex_q, user=user)
+        is_teen = is_teen_age_band(age_exact_q, current_age, gender=profile_sex_q, user=user)
+
+        if is_teen:
             father_height = _profile_float(profile_dict.get("father_height_cm"), default=None)
             mother_height = _profile_float(profile_dict.get("mother_height_cm"), default=None)
         else:
@@ -133,9 +141,6 @@ def upsert_posture_questions(request):
 
     except (TypeError, ValueError, KeyError) as e:
         return Response({'error': f'Invalid profile data: {e}'}, status=status.HTTP_400_BAD_REQUEST)
-
-    is_adult = bool(getattr(user, "account_tier", None) == "adult" or current_age >= 21)
-    is_teen = bool(current_age < 21)
 
     # ───── 1. Calculate Estimated Genetic Height using service ─────
     genetic_estimate = GeneticHeightService.upsert_genetic_estimate(
@@ -204,7 +209,9 @@ def upsert_posture_questions(request):
                     age_exact_now = float(get_user_age_exact(user) or 0.0)
                 except Exception:
                     age_exact_now = 0.0
-                if 13.0 <= age_exact_now < 21.0:
+                from utils.paywall_flags import is_teen_age as _is_teen_age_unlock
+
+                if _is_teen_age_unlock(age_exact_now, user=user):
                     if getattr(user, "trial_start", None) is None:
                         user.trial_start = now_ts
                     if getattr(user, "trial_end", None) is None and getattr(user, "trial_start", None) is not None:
@@ -636,14 +643,23 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
             age_exact = 0.0
     age_years = int(age_exact) if age_exact >= 0 else 0
     # Decimal-age bands must match /dashboard-new (Section 16 / trial boundaries).
-    is_teen_track = bool(13.0 <= age_exact <= 20.999)
-    is_adult_track = bool(age_exact >= 21.0)
+    from utils.paywall_flags import is_adult_age, is_teen_age
+
+    profile_sex = (profile_dict.get("gender") or "").strip().lower()
+    if profile_sex not in {"male", "female"}:
+        profile_sex = "male"
+
+    is_teen_track = is_teen_age(age_exact, gender=profile_sex)
+    is_adult_track = is_adult_age(age_exact, gender=profile_sex)
     transitioned_to_adult = False
-    desired_tier = "adult" if age_exact >= 21.0 else "teen"
+    desired_tier = "adult" if is_adult_track else ("teen" if is_teen_track else None)
     update_user_fields = []
-    if getattr(user, "account_tier", None) != desired_tier:
+    if desired_tier is not None and getattr(user, "account_tier", None) != desired_tier:
         user.account_tier = desired_tier
         update_user_fields.append("account_tier")
+        if desired_tier == "adult" and getattr(user, "transitioned_to_adult_at", None) is None:
+            user.transitioned_to_adult_at = timezone.now()
+            update_user_fields.append("transitioned_to_adult_at")
     if age_exact >= 21.0 and str(profile.age or "") != str(age_years):
         profile.age = str(age_years)
         profile.save(update_fields=["age"])

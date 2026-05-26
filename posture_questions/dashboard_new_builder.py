@@ -3,6 +3,7 @@ import logging
 
 from users.models import HeightLedger
 from utils.graph_age_projection import calculate_height_projection, floor_teen_projection_targets
+from utils.paywall_flags import is_teen_age
 from utils.adult_dashboard_metrics import adult_chart_series, count_habits_logged
 from utils.user_time import user_today
 from utils.teen_dashboard_dots import (
@@ -20,14 +21,22 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     payload = dict(payload or {})
     age_exact = float(payload.get("age_exact") or 0.0)
     nav = payload.get("section16_navigation") or {}
-    # Prefer canonical variant from /dashboard (matches is_teen_track + account_tier).
-    _dv = nav.get("dashboard_variant")
-    if _dv == "teen":
+    # Decimal age is canonical; do not treat 18yo as adult when account_tier is stale.
+    profile_gender_early = str((payload.get("profile") or {}).get("gender") or "male").strip().lower()
+    if profile_gender_early not in {"male", "female"}:
+        profile_gender_early = "male"
+    if age_exact and is_teen_age(age_exact, gender=profile_gender_early):
         is_teen = True
-    elif _dv == "adult":
+    elif age_exact and not is_teen_age(age_exact, gender=profile_gender_early):
         is_teen = False
     else:
-        is_teen = bool(13.0 <= age_exact <= 20.999)
+        _dv = nav.get("dashboard_variant")
+        if _dv == "teen":
+            is_teen = True
+        elif _dv == "adult":
+            is_teen = False
+        else:
+            is_teen = is_teen_age(age_exact, gender=profile_gender_early)
 
     scan_access = payload.get("scan_access") or {}
     section4 = payload.get("section4_contract") or {}

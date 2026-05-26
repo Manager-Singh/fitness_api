@@ -155,16 +155,20 @@ def leaderboard_users_queryset():
 
 def is_adult_track_user(user, age_years: int | None) -> bool:
     """
-    Bucket for global/friends leaderboard. Matches dashboard posture convention:
-    adult track if ``account_tier == 'adult'`` OR whole-year age is 21+.
-
-    ``age_years`` may be None when age lookup fails; tier still follows ``account_tier``.
+    Bucket for global/friends leaderboard. Sex-specific teen/adult bands.
+    Decimal age + profile gender win over a stale ``account_tier``.
     """
-    if getattr(user, "account_tier", None) == "adult":
+    from utils.age import get_user_age_exact
+    from utils.paywall_flags import is_adult_age, is_teen_age
+
+    age_exact = get_user_age_exact(user)
+    if is_teen_age(age_exact, age_years, user=user):
+        return False
+    if is_adult_age(age_exact, age_years, user=user):
         return True
     if age_years is not None and age_years >= 21:
         return True
-    return False
+    return getattr(user, "account_tier", None) == "adult"
 
 
 # Keep rankings responsive; leaderboard points are recomputed frequently.

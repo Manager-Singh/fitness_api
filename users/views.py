@@ -21,6 +21,7 @@ import datetime
 from utils.age import get_user_age
 from utils.user_time import user_today
 from utils.profile_completeness import compute_profile_update_status, compute_step_to_show
+from utils.account_tier import auth_track_fields
 from user_profile.models import Payment,UserProfile
 from django.db.models import Q
 from utils.check_payment import check_subscription_or_response
@@ -187,6 +188,7 @@ class RegisterView(APIView):
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
+            track = auth_track_fields(user, age_years=age)
 
             # 🔥 Final registration response (same as login response)
             return Response({
@@ -198,6 +200,7 @@ class RegisterView(APIView):
                 'is_profile_updated': is_profile_updated,
                 'profile_update_missing': profile_update_missing,
                 'step_to_show': step_to_show,
+                **track,
                 'user': UserSerializer(user).data,
                 'access': access_token,
                 'refresh': str(refresh),
@@ -264,6 +267,7 @@ class SocialRegisterView(APIView):
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
+            track = auth_track_fields(user, age_years=age)
 
             # Final response matching login & register APIs
             return Response({
@@ -276,6 +280,7 @@ class SocialRegisterView(APIView):
                 "is_profile_updated": is_profile_updated,
                 "profile_update_missing": profile_update_missing,
                 "step_to_show": step_to_show,
+                **track,
                 "user": UserSerializer(user).data,
                 "access": access_token,
                 "refresh": str(refresh),
@@ -340,6 +345,7 @@ class LoginView(APIView):
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
+            track = auth_track_fields(user, age_years=age)
 
             email_verification_pending = getattr(user, "verified", None) is None
             verification_otp_sent = False
@@ -358,6 +364,7 @@ class LoginView(APIView):
                 'step_to_show': step_to_show,
                 'email_verification_pending': email_verification_pending,
                 'verification_otp_sent': verification_otp_sent,
+                **track,
                 'user': UserSerializer(user).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),

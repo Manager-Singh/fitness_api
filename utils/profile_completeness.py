@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from utils.age import get_user_age, get_user_age_exact
+from utils.paywall_flags import is_teen_age
 
 # Profile basics (step_1) vs parent heights (step_2) vs posture scan/questionnaire (step_3).
 STEP_1_FIELDS = frozenset({"gender", "age", "current_height_cm"})
@@ -18,19 +19,14 @@ def _nonempty(val) -> bool:
 
 
 def is_teen_for_profile_requirements(user) -> bool:
-    """Align with posture flows: teen track or whole-year age under 21."""
-    tier = getattr(user, "account_tier", None)
-    if tier == "teen":
-        return True
-    if tier == "adult":
-        return False
-    age_reg = get_user_age(user, default="register")
-    if age_reg is not None:
-        return age_reg < 21
+    """Teen onboarding (parent heights): sex-specific teen band (female 13–17, male 13–20)."""
     exact = get_user_age_exact(user)
     if exact is not None:
-        return exact < 21.0
-    return False
+        return is_teen_age(exact, user=user)
+    age_reg = get_user_age(user, default="register")
+    if age_reg is not None:
+        return is_teen_age(age_years=age_reg, user=user)
+    return getattr(user, "account_tier", None) == "teen"
 
 
 def compute_profile_update_status(user, profile) -> Tuple[bool, List[str]]:

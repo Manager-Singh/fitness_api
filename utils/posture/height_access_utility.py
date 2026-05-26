@@ -1,10 +1,6 @@
 from django.utils import timezone
 
-from utils.posture.height_constants import (
-    TEEN_MIN_AGE,
-    TEEN_MAX_AGE,
-    ADULT_MIN_AGE,
-)
+from utils.paywall_flags import is_adult_age, is_teen_age
 from utils.posture.teen_height_engine import (
     teen_height_free,
     teen_height_paid,
@@ -36,9 +32,9 @@ def get_height_view(user, profile, is_paid, optimized_height_cm=None,total_score
     days_since_scan = _days_since_last_scan(profile)
 
     # ---------------------
-    # TEENS (13–20)
+    # TEENS (13–17) — dashboard/account band
     # ---------------------
-    if TEEN_MIN_AGE <= age <= TEEN_MAX_AGE:
+    if is_teen_age(age_exact=age, age_years=age, sex=getattr(profile, "sex", None)):
         if not is_paid:
             return {
                 "tier": "teen_free",
@@ -63,9 +59,9 @@ def get_height_view(user, profile, is_paid, optimized_height_cm=None,total_score
         }
 
     # ---------------------
-    # ADULTS (21+)
+    # ADULTS (18+)
     # ---------------------
-    if age >= ADULT_MIN_AGE:
+    if is_adult_age(age_exact=age, age_years=age, sex=getattr(profile, "sex", None)):
         if not is_paid:
             return {
                 "tier": "adult_free",

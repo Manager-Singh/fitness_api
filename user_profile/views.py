@@ -40,6 +40,7 @@ from utils.profile_onboarding_ai import (
     has_onboarding_answers,
     run_onboarding_profile_analysis,
 )
+from utils.paywall_flags import account_age_bounds, is_teen_age
 from utils.posture.height_constants import (
     ADULT_AGE_MAX,
     ADULT_MIN_AGE,
@@ -270,20 +271,18 @@ def update_profile_users(request):
         if age_val not in (None, ""):
             age_num = _as_float(age_val, "age")
 
-        tier = (getattr(user, "account_tier", None) or "").strip().lower()
-        if tier == "teen":
-            is_teen = True
-        elif tier == "adult":
-            is_teen = False
+        sex = normalize_sex(request.data.get("gender", profile.gender))
+
+        if age_num is not None:
+            is_teen = is_teen_age(age_years=age_num, gender=sex, user=user)
+        elif profile.birth_date or birth_date_parsed:
+            dob0 = birth_date_parsed or profile.birth_date
+            is_teen = is_teen_age(age_exact=_age_exact_years(dob0), gender=sex, user=user)
         else:
-            if age_num is not None:
-                is_teen = TEEN_MIN_AGE <= age_num <= TEEN_MAX_AGE
-            elif profile.birth_date or birth_date_parsed:
-                dob0 = birth_date_parsed or profile.birth_date
-                ae0 = _age_exact_years(dob0)
-                is_teen = TEEN_MIN_AGE <= ae0 < ADULT_MIN_AGE
-            else:
-                is_teen = False
+            tier = (getattr(user, "account_tier", None) or "").strip().lower()
+            is_teen = tier == "teen"
+
+        tier_bounds = account_age_bounds(gender=sex, user=user)
 
         _bound(current_height_cm, USER_HEIGHT_CM_MIN, USER_HEIGHT_CM_MAX, MSG_USER_HEIGHT_RANGE)
         _bound(father_height_cm, PARENT_HEIGHT_CM_MIN, PARENT_HEIGHT_CM_MAX, MSG_FATHER_HEIGHT_RANGE)
@@ -292,7 +291,7 @@ def update_profile_users(request):
             _bound(wingspan_cm, WINGSPAN_CM_MIN, WINGSPAN_CM_MAX, MSG_WINGSPAN_RANGE)
 
         if not is_teen and age_num is not None:
-            _bound(age_num, float(ADULT_MIN_AGE), float(ADULT_AGE_MAX), MSG_ADULT_AGE_RANGE)
+            _bound(age_num, tier_bounds["adult_min"], float(ADULT_AGE_MAX), MSG_ADULT_AGE_RANGE)
         if is_teen and age_num is not None:
             _bound(age_num, float(TEEN_MIN_AGE), float(TEEN_MAX_AGE), MSG_TEEN_UI_AGE_RANGE)
 
@@ -305,7 +304,7 @@ def update_profile_users(request):
                 return Response({"error": MSG_TEEN_REQUIRES_DOB}, status=status.HTTP_400_BAD_REQUEST)
             if effective_dob is not None:
                 ae = _age_exact_years(effective_dob)
-                if ae < float(TEEN_MIN_AGE) or ae >= float(ADULT_MIN_AGE):
+                if ae < float(TEEN_MIN_AGE) or ae >= tier_bounds["adult_min"]:
                     return Response({"error": MSG_TEEN_DOB_AGE_RANGE}, status=status.HTTP_400_BAD_REQUEST)
 
         if is_teen and (
@@ -313,8 +312,6 @@ def update_profile_users(request):
         ):
             if father_height_cm is None or mother_height_cm is None:
                 return Response({"error": MSG_TEEN_REQUIRES_PARENTS}, status=status.HTTP_400_BAD_REQUEST)
-
-        sex = normalize_sex(request.data.get("gender", profile.gender))
         if is_teen and father_height_cm is not None and mother_height_cm is not None:
             if sex not in ("male", "female"):
                 return Response(
@@ -407,23 +404,13 @@ def update_profile_users(request):
         except (TypeError, ValueError):
             pass
 
-    if not getattr(user, "account_tier", None):
-        if age_num is not None:
-            if TEEN_MIN_AGE <= age_num <= TEEN_MAX_AGE:
-                user.account_tier = "teen"
-                user.save(update_fields=["account_tier"])
-            elif age_num >= ADULT_MIN_AGE:
-                user.account_tier = "adult"
-                user.save(update_fields=["account_tier"])
-        elif profile.birth_date or birth_date_parsed:
-            dob1 = profile.birth_date or birth_date_parsed
-            ae1 = (date.today() - dob1).days / 365.2425
-            if TEEN_MIN_AGE <= ae1 < ADULT_MIN_AGE:
-                user.account_tier = "teen"
-                user.save(update_fields=["account_tier"])
-            elif ae1 >= ADULT_MIN_AGE:
-                user.account_tier = "adult"
-                user.save(update_fields=["account_tier"])
+    from utils.account_tier import sync_account_tier
+
+    sync_account_tier(
+        user,
+        age_years=int(age_num) if age_num is not None else None,
+        save=True,
+    )
 
     if 'profile_step' in request.data:
         user.profile_step = request.data['profile_step']
@@ -1162,19 +1149,17 @@ def my_profile(request):
             except ValueError:
                 return Response({"error": "birth_date must be YYYY-MM-DD."}, status=422)
 
-        tier = (getattr(user, "account_tier", None) or "").strip().lower()
-        if tier == "teen":
-            is_teen = True
-        elif tier == "adult":
-            is_teen = False
+        sex = normalize_sex(request.data.get("gender", profile.gender))
+
+        if age_num is not None:
+            is_teen = is_teen_age(age_years=age_num, gender=sex, user=user)
+        elif birth_date_candidate:
+            is_teen = is_teen_age(age_exact=_age_exact_years(birth_date_candidate), gender=sex, user=user)
         else:
-            if age_num is not None:
-                is_teen = TEEN_MIN_AGE <= age_num <= TEEN_MAX_AGE
-            elif birth_date_candidate:
-                ae0 = _age_exact_years(birth_date_candidate)
-                is_teen = TEEN_MIN_AGE <= ae0 < ADULT_MIN_AGE
-            else:
-                is_teen = False
+            tier = (getattr(user, "account_tier", None) or "").strip().lower()
+            is_teen = tier == "teen"
+
+        tier_bounds = account_age_bounds(gender=sex, user=user)
 
         # User-level fields (Spec 13.2: name/display_name, avatar_url, timezone).
         if "name" in request.data or "display_name" in request.data:
@@ -1203,6 +1188,12 @@ def my_profile(request):
         # Profile-level onboarding fields (reuse same validation constants as update_profile_users).
         if "gender" in request.data:
             profile.gender = str(request.data.get("gender") or "").strip() or profile.gender
+            sex = normalize_sex(profile.gender)
+            tier_bounds = account_age_bounds(gender=sex, user=user)
+            if age_num is not None:
+                is_teen = is_teen_age(age_years=age_num, gender=sex, user=user)
+            elif profile.birth_date:
+                is_teen = is_teen_age(age_exact=_age_exact_years(profile.birth_date), gender=sex, user=user)
         if "age" in request.data:
             profile.age = str(request.data.get("age") or "").strip() or profile.age
         if "birth_date" in request.data:
@@ -1229,7 +1220,7 @@ def my_profile(request):
             _bound(mh, PARENT_HEIGHT_CM_MIN, PARENT_HEIGHT_CM_MAX, MSG_MOTHER_HEIGHT_RANGE)
 
             if not is_teen and age_num is not None:
-                _bound(age_num, float(ADULT_MIN_AGE), float(ADULT_AGE_MAX), MSG_ADULT_AGE_RANGE)
+                _bound(age_num, tier_bounds["adult_min"], float(ADULT_AGE_MAX), MSG_ADULT_AGE_RANGE)
             if is_teen and age_num is not None:
                 _bound(age_num, float(TEEN_MIN_AGE), float(TEEN_MAX_AGE), MSG_TEEN_UI_AGE_RANGE)
 
@@ -1240,6 +1231,10 @@ def my_profile(request):
                     request.data.get(k) not in (None, "") for k in ("current_height_cm", "age", "father_height_cm", "mother_height_cm")
                 ):
                     return Response({"error": MSG_TEEN_REQUIRES_DOB}, status=422)
+                if effective_dob is not None:
+                    ae = _age_exact_years(effective_dob)
+                    if ae < float(TEEN_MIN_AGE) or ae >= tier_bounds["adult_min"]:
+                        return Response({"error": MSG_TEEN_DOB_AGE_RANGE}, status=422)
                 if (fh is None or mh is None) and any(
                     request.data.get(k) not in (None, "") for k in ("current_height_cm", "age", "birth_date")
                 ):

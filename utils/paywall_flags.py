@@ -2,8 +2,8 @@
 QA paywall bypass flags — when enabled, users behave as fully paid for their tier.
 
 Settings (apibackend/settings.py):
-  ADULT_PAYWALL_DISABLED = True  # adults 21+
-  TEEN_PAYWALL_DISABLED = True   # teens 13–20
+  ADULT_PAYWALL_DISABLED = True  # adults 21+ (male) / 18+ (female)
+  TEEN_PAYWALL_DISABLED = True   # teens 13–20 (male) / 13–17 (female)
 """
 
 from __future__ import annotations
@@ -11,6 +11,75 @@ from __future__ import annotations
 from django.conf import settings
 
 from utils.age import get_user_age, get_user_age_exact
+from utils.posture.height_constants import (
+    ADULT_ACCOUNT_MIN_AGE_FEMALE,
+    ADULT_ACCOUNT_MIN_AGE_MALE,
+    TEEN_ACCOUNT_MAX_AGE_FEMALE,
+    TEEN_ACCOUNT_MAX_AGE_MALE,
+    TEEN_MIN_AGE,
+    normalize_sex,
+)
+
+
+def _age_value(age_exact=None, age_years=None) -> float:
+    try:
+        if age_exact is not None:
+            return float(age_exact)
+        return float(age_years or 0)
+    except (TypeError, ValueError):
+        return float(int(age_years or 0))
+
+
+def user_profile_sex(user) -> str | None:
+    """Profile gender when available (``male`` / ``female``)."""
+    if user is None:
+        return None
+    try:
+        profile = getattr(user, "profile", None)
+        if profile is not None:
+            return normalize_sex(getattr(profile, "gender", None))
+    except Exception:
+        pass
+    try:
+        from user_profile.models import UserProfile
+
+        profile = UserProfile.objects.filter(user=user).only("gender").first()
+        if profile:
+            return normalize_sex(profile.gender)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_sex(*, gender=None, sex=None, user=None) -> str:
+    """Default ``male`` when unknown (matches genetic-height helpers)."""
+    return (
+        normalize_sex(gender)
+        or normalize_sex(sex)
+        or user_profile_sex(user)
+        or "male"
+    )
+
+
+def account_age_bounds(*, gender=None, sex=None, user=None) -> dict:
+    """
+    Dashboard / account tier age cutoffs by sex.
+
+    Female: teen 13–17, adult 18+ (biological growth largely complete).
+    Male: teen 13–20, adult 21+ (spec teen dashboard band).
+    """
+    s = _resolve_sex(gender=gender, sex=sex, user=user)
+    if s == "female":
+        return {
+            "teen_min": float(TEEN_MIN_AGE),
+            "teen_max": float(TEEN_ACCOUNT_MAX_AGE_FEMALE),
+            "adult_min": float(ADULT_ACCOUNT_MIN_AGE_FEMALE),
+        }
+    return {
+        "teen_min": float(TEEN_MIN_AGE),
+        "teen_max": float(TEEN_ACCOUNT_MAX_AGE_MALE),
+        "adult_min": float(ADULT_ACCOUNT_MIN_AGE_MALE),
+    }
 
 
 def adult_paywall_disabled() -> bool:
@@ -21,20 +90,24 @@ def teen_paywall_disabled() -> bool:
     return bool(getattr(settings, "TEEN_PAYWALL_DISABLED", False))
 
 
-def is_teen_age(age_exact=None, age_years=None) -> bool:
-    try:
-        ae = float(age_exact) if age_exact is not None else float(age_years or 0)
-    except (TypeError, ValueError):
-        ae = float(int(age_years or 0))
-    return 13.0 <= ae <= 20.999
+def is_teen_age(age_exact=None, age_years=None, *, gender=None, sex=None, user=None) -> bool:
+    ae = _age_value(age_exact, age_years)
+    bounds = account_age_bounds(gender=gender, sex=sex, user=user)
+    return bounds["teen_min"] <= ae <= bounds["teen_max"] + 0.999
 
 
-def is_adult_age(age_exact=None, age_years=None) -> bool:
-    try:
-        ae = float(age_exact) if age_exact is not None else float(age_years or 0)
-    except (TypeError, ValueError):
-        ae = float(int(age_years or 0))
-    return ae >= 21.0
+def is_adult_age(age_exact=None, age_years=None, *, gender=None, sex=None, user=None) -> bool:
+    ae = _age_value(age_exact, age_years)
+    bounds = account_age_bounds(gender=gender, sex=sex, user=user)
+    return ae >= bounds["adult_min"]
+
+
+def is_teen_routine_age(age_exact=None, age_years=None) -> bool:
+    """Teen exercise / Engine 2 band per spec: 13–20 (both sexes)."""
+    from utils.posture.height_constants import TEEN_MAX_AGE
+
+    ae = _age_value(age_exact, age_years)
+    return float(TEEN_MIN_AGE) <= ae <= float(TEEN_MAX_AGE) + 0.999
 
 
 def qa_paid_bypass_for_user(user, *, age_exact=None) -> bool:
@@ -42,9 +115,9 @@ def qa_paid_bypass_for_user(user, *, age_exact=None) -> bool:
     ae = age_exact
     if ae is None:
         ae = get_user_age_exact(user)
-    if is_teen_age(ae) and teen_paywall_disabled():
+    if is_teen_age(ae, user=user) and teen_paywall_disabled():
         return True
-    if is_adult_age(ae) and adult_paywall_disabled():
+    if is_adult_age(ae, user=user) and adult_paywall_disabled():
         return True
     return False
 
@@ -62,7 +135,7 @@ def apply_subscription_qa_overlay(user, payload: dict) -> dict:
 
     out = dict(payload)
 
-    if teen_paywall_disabled() and is_teen_age(age_exact):
+    if teen_paywall_disabled() and is_teen_age(age_exact, user=user):
         out.update(
             {
                 "is_paid": True,
@@ -79,22 +152,17 @@ def apply_subscription_qa_overlay(user, payload: dict) -> dict:
             except (TypeError, ValueError):
                 out["trial_day"] = 7
 
-    if adult_paywall_disabled():
-        try:
-            age = int(get_user_age(user) or 0)
-        except Exception:
-            age = 0
-        if age >= 21:
-            out.update(
-                {
-                    "is_paid": True,
-                    "is_trial": False,
-                    "expired": False,
-                    "plan": out.get("plan") or "QA Full Access",
-                    "plan_type": "Paid",
-                    "message": "QA testing: adult paywall disabled (full paid access).",
-                }
-            )
+    if adult_paywall_disabled() and is_adult_age(age_exact, user=user):
+        out.update(
+            {
+                "is_paid": True,
+                "is_trial": False,
+                "expired": False,
+                "plan": out.get("plan") or "QA Full Access",
+                "plan_type": "Paid",
+                "message": "QA testing: adult paywall disabled (full paid access).",
+            }
+        )
 
     return out
 
@@ -110,8 +178,8 @@ def apply_monetization_qa_overlay(user, flags: dict, *, age_exact=None) -> dict:
         ae_f = 0.0
 
     out = dict(flags)
-    is_teen = 13.0 <= ae_f <= 20.999
-    is_adult = ae_f >= 21.0
+    is_teen = is_teen_age(ae_f, user=user)
+    is_adult = is_adult_age(ae_f, user=user)
 
     if teen_paywall_disabled() and is_teen:
         return {
@@ -159,6 +227,6 @@ def effective_full_access_trial_expired(
         trial_day = int(trial_day) if trial_day is not None else None
     except (TypeError, ValueError):
         trial_day = None
-    if is_teen_age(age_exact) and trial_day is not None and trial_day > 7:
+    if is_teen_age(age_exact, user=user) and trial_day is not None and trial_day > 7:
         return True
     return bool(sub.get("full_access_trial_expired", False))

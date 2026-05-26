@@ -21,8 +21,8 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None, use
     except (TypeError, ValueError):
         ae = float(int(age_years or 0))
 
-    is_teen = is_teen_age(ae)
-    is_adult = is_adult_age(ae)
+    is_teen = is_teen_age(ae, user=user)
+    is_adult = is_adult_age(ae, user=user)
 
     if teen_paywall_disabled() and is_teen:
         result = {

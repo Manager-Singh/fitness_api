@@ -191,7 +191,9 @@ def _build_dashboard_new_embed_fast(user, log_date):
         age_exact = float(get_user_age_exact(user) or 0)
     except Exception:
         age_exact = 0.0
-    is_teen = bool(13.0 <= age_exact <= 20.999)
+    from utils.paywall_flags import is_teen_age
+
+    is_teen = is_teen_age(age_exact, user=user)
 
     diagnostics = build_posture_optimization_diagnostics(user=user, optimization_breakdown=None)
     routine_progress = _routine_progress_snapshot(user, log_date, is_teen=is_teen)
