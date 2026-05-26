@@ -238,22 +238,34 @@ class MyPlanView(APIView):
                 nutrition_category__in=adult_cats,
             )
         else:
+            from utils.adult_nutrition import adult_nutrition_plan_module_q
+
             # Adults: exclude teen-only nutrition modules.
             modules = modules.exclude(
                 type=Module.NUTRITION,
                 nutrition_category="teen",
+            ).exclude(
+                type=Module.NUTRITION,
+                name__icontains="growthmax",
             )
-            # Adult nutrition plan UX (spec-friendly):
-            # Only show the two detailed adult food modules in the plan list.
-            # Hide the "bucket" modules (Disc/Muscle) if they exist.
-            adult_plan_module_names = [
-                "Spine Support & Disc Lubrication Foods",
-                "Posture Muscle Repair & Fuel Foods",
-            ]
             if type_q in ("", "nutrition"):
-                modules = modules.filter(
-                    Q(type=Module.LIFESTYLE)
-                    | Q(type=Module.NUTRITION, name__in=adult_plan_module_names)
+                # Lifestyle stays age-filtered; adult disc/muscle catalog may live in 21+ age groups
+                # while female adults start at 18 — always merge those modules in.
+                age_filtered_pks = set(
+                    modules.filter(type=Module.LIFESTYLE).values_list("pk", flat=True)
+                )
+                adult_nut_pks = set(
+                    Module.objects.filter(adult_nutrition_plan_module_q()).values_list("pk", flat=True)
+                )
+                modules = (
+                    Module.objects.select_related("age_group")
+                    .prefetch_related(
+                        "module_foods__food",
+                        "module_activities__activity",
+                        "module_activities",
+                    )
+                    .filter(pk__in=age_filtered_pks | adult_nut_pks)
+                    .order_by("age_group__min_age", "type", "sort_order", "name")
                 )
 
         if type_q == "nutrition":

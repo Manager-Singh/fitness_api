@@ -19,6 +19,28 @@ ADULT_PLAN_MODULE_NAMES = (
     "Posture Muscle Repair & Fuel Foods",
 )
 
+# Short titles used in admin / test seeds (must still appear on adult plan API).
+ADULT_PLAN_MODULE_SHORT_NAMES = (
+    "Disc Lubrication",
+    "Posture Muscle Repair",
+)
+
+
+def adult_nutrition_plan_module_q():
+    """
+    Django Q for nutrition Module rows that belong on the adult food plan.
+    Matches by nutrition_category and known module titles (not exact long names only).
+    """
+    from django.db.models import Q
+
+    from nutration.models import Module
+
+    nut = Module.NUTRITION
+    q = Q(type=nut, nutrition_category__in=("disc", "muscle"))
+    for name in ADULT_PLAN_MODULE_NAMES + ADULT_PLAN_MODULE_SHORT_NAMES:
+        q |= Q(type=nut, name=name)
+    return q
+
 # Catalog size for UX copy / soft “complete list” hints (7 + 6 in spec).
 ADULT_NUTRITION_FOOD_SLOT_MAX = 13
 
