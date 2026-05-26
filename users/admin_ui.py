@@ -10,9 +10,11 @@ from django.middleware.csrf import get_token
 from users.models import DailyLog, HeightLedger, PostureState
 from users.spec_runtime import (
     LEDGER_ENTRY_DAILY_COMPUTE,
+    _um_from_dm,
     compute_engine1_gain_shares,
     get_user_runtime_state_snapshot,
 )
+
 from utils.posture.diagnostics_contract import build_posture_optimization_diagnostics
 from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct_precise
 from utils.user_time import user_today
@@ -169,19 +171,19 @@ def _segment_bars_from_diagnostics(user) -> str:
                 '<div class="hm-seg-fill-base" style="width:{}%;"></div>'
                 '<div class="hm-seg-fill-today" style="width:{}%;"></div>'
                 "</div>"
-                '<span class="hm-seg-pct">{}%'
-                '<span class="hm-seg-pct-today">+{}%</span></span>'
-                '<span class="hm-seg-loss">{} · {} cm'
-                '<span class="hm-seg-today-gain"> · today <strong>+{}</strong></span></span>'
+                '<span class="hm-seg-pct">{}%<span class="hm-seg-pct-today"> +{}%</span></span>'
+                '<span class="hm-seg-loss" title="Remaining loss">'
+                "{} cm left"
+                '<span class="hm-seg-today-gain"> · today <strong>{}</strong></span>'
+                "</span>"
                 "</div>",
                 label,
                 w_before,
                 w_today,
                 int(round(pct_after)),
                 pct_today_str,
-                fmt_um_line(loss_after_um),
                 loss_cm,
-                share_line,
+                share_line if share_um else "0 μm",
             )
         )
 
@@ -414,6 +416,229 @@ def routine_section_html(user, request) -> str:
     )
 
 
+def _segment_shares_for_ledger(ledger, state) -> dict[str, int]:
+    """Per-segment Engine-1 μm for one ledger day (metadata, else estimate from state)."""
+    if not ledger:
+        return {}
+    meta = ledger.metadata or {}
+    raw = meta.get("engine1_segment_shares_um")
+    if isinstance(raw, dict) and raw:
+        return {k: int(v or 0) for k, v in raw.items()}
+    e1_um = int(getattr(ledger, "engine1_delta_um", 0) or 0)
+    if e1_um > 0 and state:
+        return compute_engine1_gain_shares(state, e1_um)
+    return {}
+
+
+def progress_posture_by_date_html(user, *, days: int = 30) -> str:
+    """Engine-1 posture segment split per ledger day (last N days)."""
+    if not user or not user.pk:
+        return ""
+
+    today = user_today(user)
+    state = PostureState.objects.filter(user=user).first()
+    ledgers = _ledger_rows_by_date(user, days=days)
+    if not ledgers:
+        return format_html(
+            '<p class="hm-formula-muted">No daily ledger rows yet — segment split appears after '
+            "<code>compute_daily_height_for_user</code> runs.</p>"
+        )
+
+    day_blocks = []
+    for log_date in sorted(ledgers.keys(), reverse=True):
+        ledger = ledgers[log_date]
+        e1_um = int(getattr(ledger, "engine1_delta_um", 0) or 0)
+        delta_um = int(getattr(ledger, "delta_um", 0) or 0)
+        shares = _segment_shares_for_ledger(ledger, state)
+        is_today = log_date == today
+
+        if delta_um > 0:
+            delta_label = format_html(
+                '<span class="hm-posture-delta-pos">+{} cm</span>',
+                fmt_cm(delta_um),
+            )
+        else:
+            delta_label = format_html("<span>{} cm</span>", fmt_cm(delta_um))
+
+        date_label = (
+            format_html("{} {}", log_date, badge("TODAY", color="#166534", bg="#dcfce7"))
+            if is_today
+            else str(log_date)
+        )
+
+        seg_rows = []
+        for _seg_key, label, field in _SEGMENT_BAR_DEFS:
+            share_um = int(shares.get(field, 0) or 0)
+            pct = f"{(100.0 * share_um / e1_um):.1f}%" if e1_um > 0 and share_um else "—"
+            gain_cell = (
+                format_html(
+                    '<strong style="color:#0f766e">+{}</strong>',
+                    fmt_um_line(share_um),
+                )
+                if share_um > 0
+                else "0 μm"
+            )
+            seg_rows.append(
+                format_html(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    label,
+                    gain_cell,
+                    pct,
+                )
+            )
+
+        if e1_um > 0 and not any(int(shares.get(f, 0) or 0) for _, _, f in _SEGMENT_BAR_DEFS):
+            seg_rows = [
+                format_html(
+                    "<tr><td colspan=\"3\" class=\"hm-formula-muted\">"
+                    "E1 total {} — per-segment split not stored for this day."
+                    "</td></tr>",
+                    fmt_um_line(e1_um),
+                )
+            ]
+
+        day_blocks.append(
+            format_html(
+                '<div class="hm-posture-day{}">'
+                '<div class="hm-posture-day-head">'
+                "<span class=\"hm-posture-day-date\">{}</span>"
+                '<span class="hm-posture-day-meta">E1 {} · Δ {}</span>'
+                "</div>"
+                '<table class="hm-posture-day-table">'
+                "<thead><tr><th>Segment</th><th>E1 gain</th><th>% of day E1</th></tr></thead>"
+                "<tbody>{}</tbody>"
+                "</table></div>",
+                " hm-posture-day-today" if is_today else "",
+                date_label,
+                fmt_um_line(e1_um) if e1_um else "0 μm",
+                delta_label,
+                mark_safe("".join(str(r) for r in seg_rows)),
+            )
+        )
+
+    return format_html(
+        '<div class="hm-posture-by-date">{}</div>',
+        mark_safe("".join(str(b) for b in day_blocks)),
+    )
+
+
+def _ledger_rows_by_date(user, *, days: int = 30) -> dict:
+    """Latest daily_compute row per log_date (up to ``days`` dates)."""
+    out = {}
+    qs = HeightLedger.objects.filter(
+        user=user,
+        entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
+    ).order_by("-log_date", "-created_at")
+    for row in qs:
+        if row.log_date not in out:
+            out[row.log_date] = row
+        if len(out) >= days:
+            break
+    return out
+
+
+def progress_history_html(user, *, days: int = 30) -> str:
+    """Merged daily points + height gain for the last N local days."""
+    if not user or not user.pk:
+        return ""
+
+    today = user_today(user)
+    logs = {
+        d.log_date: d
+        for d in DailyLog.objects.filter(user=user).order_by("-log_date")[:days]
+    }
+    ledgers = _ledger_rows_by_date(user, days=days)
+    all_dates = sorted(set(logs) | set(ledgers), reverse=True)[:days]
+
+    if not all_dates:
+        return format_html(
+            '<p class="hm-formula-muted">No daily history yet. '
+            "Run the pipeline or log workouts/nutrition to build rows.</p>"
+        )
+
+    body_rows = []
+    for log_date in all_dates:
+        daily = logs.get(log_date)
+        ledger = ledgers.get(log_date)
+        is_today = log_date == today
+        date_cell = (
+            format_html(
+                "{} {}",
+                log_date,
+                badge("TODAY", color="#166534", bg="#dcfce7"),
+            )
+            if is_today
+            else str(log_date)
+        )
+        delta_um = int(getattr(ledger, "delta_um", 0) or 0) if ledger else 0
+        cum_um = int(getattr(ledger, "cumulative_um", 0) or 0) if ledger else None
+        e1_um = int(getattr(ledger, "engine1_delta_um", 0) or 0) if ledger else 0
+        e2_um = _um_from_dm(getattr(ledger, "engine2_delta_dm", 0) or 0) if ledger else 0
+        bio_um = int(getattr(ledger, "bio_delta_um", 0) or 0) if ledger else 0
+
+        if delta_um > 0:
+            delta_cell = format_html(
+                '<strong style="color:#0f766e">+{} cm</strong>',
+                fmt_cm(delta_um),
+            )
+        else:
+            delta_cell = f"{fmt_cm(delta_um)} cm"
+
+        cum_cell = f"{fmt_cm(cum_um)} cm" if cum_um is not None else "—"
+        e1_pts = daily.engine1_points if daily else "—"
+        e2_pts = daily.engine2_points if daily else "—"
+        validated = badge_bool(daily.validated) if daily else "—"
+        row_cls = "hm-row-today" if is_today else ""
+
+        body_rows.append(
+            format_html(
+                "<tr class=\"{}\">"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "<td>{}</td>"
+                "</tr>",
+                row_cls,
+                date_cell,
+                delta_cell,
+                cum_cell,
+                fmt_cm(e1_um),
+                fmt_cm(e2_um),
+                fmt_cm(bio_um),
+                e1_pts,
+                e2_pts,
+                daily.exercise_points if daily else "—",
+                validated,
+            )
+        )
+
+    return format_html(
+        '<div class="hm-history-wrap">'
+        '<table class="hm-history-table">'
+        "<thead><tr>"
+        "<th>Date</th>"
+        "<th>Δ height</th>"
+        "<th>Cumulative</th>"
+        "<th>E1 Δ</th>"
+        "<th>E2 Δ</th>"
+        "<th>Bio Δ</th>"
+        "<th>E1 pts</th>"
+        "<th>E2 pts</th>"
+        "<th>Exercise pts</th>"
+        "<th>OK</th>"
+        "</tr></thead>"
+        "<tbody>{}</tbody>"
+        "</table></div>",
+        mark_safe("".join(str(r) for r in body_rows)),
+    )
+
+
 def progress_dashboard_html(user) -> str:
     if not user or not user.pk:
         return "—"
@@ -485,16 +710,20 @@ def progress_dashboard_html(user) -> str:
 
     footnote = format_html(
         '<p class="hm-footnote">Updated by cron <code>run_daily_height_pipeline</code>. '
-        "Daily logs and height ledger tables below (last 30 days).</p>"
+        "Inline tables below mirror the same last-30-day window.</p>"
     )
 
     return format_html(
         '<div class="hm-progress-dashboard">'
-        "{}{}{}{}{}{}{}"
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}"
         "</div>",
         cards,
         unlock_row,
-        format_html('<div class="hm-section-title">Posture optimization bars</div>'),
+        format_html('<div class="hm-section-title">Height gain history (last 30 days)</div>'),
+        progress_history_html(user),
+        format_html('<div class="hm-section-title">Posture E1 split by date (last 30 days)</div>'),
+        progress_posture_by_date_html(user),
+        format_html('<div class="hm-section-title">Current posture snapshot (live)</div>'),
         _segment_bars_from_diagnostics(user),
         format_html('<div class="hm-section-title">Today height &amp; E1 split</div>'),
         compact_today_height_block(user),

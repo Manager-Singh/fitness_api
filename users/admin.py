@@ -144,6 +144,18 @@ class PostureStateInline(admin.StackedInline):
         )
 
 
+def _inline_parent_user_id(inline, request):
+    """Resolve parent user pk on change view (must not slice before this filter)."""
+    if getattr(inline, "instance", None) is not None and inline.instance.pk:
+        return inline.instance.pk
+    match = getattr(request, "resolver_match", None)
+    if match:
+        oid = match.kwargs.get("object_id")
+        if oid:
+            return int(oid)
+    return None
+
+
 class DailyLogInline(admin.TabularInline):
     """Per-day point totals written by compute_daily_height_for_user (cron / pipeline)."""
     model = DailyLog
@@ -172,11 +184,15 @@ class DailyLogInline(admin.TabularInline):
         css = {"all": ("admin/css/user_progress.css",)}
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request).order_by("-log_date")
+        qs = super().get_queryset(request)
+        user_id = _inline_parent_user_id(self, request)
+        if not user_id:
+            return qs.none()
+        qs = qs.filter(user_id=user_id).order_by("-log_date")
         pks = list(qs.values_list("pk", flat=True)[:30])
         if not pks:
             return qs.none()
-        return qs.filter(pk__in=pks).order_by("-log_date")
+        return qs.model.objects.filter(pk__in=pks).order_by("-log_date")
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -220,13 +236,15 @@ class HeightLedgerInline(admin.TabularInline):
         css = {"all": ("admin/css/user_progress.css",)}
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request).filter(entry_type="daily_compute").order_by(
-            "-log_date", "-created_at"
-        )
+        qs = super().get_queryset(request).filter(entry_type="daily_compute")
+        user_id = _inline_parent_user_id(self, request)
+        if not user_id:
+            return qs.none()
+        qs = qs.filter(user_id=user_id).order_by("-log_date", "-created_at")
         pks = list(qs.values_list("pk", flat=True)[:30])
         if not pks:
             return qs.none()
-        return qs.filter(pk__in=pks).order_by("-log_date", "-created_at")
+        return qs.model.objects.filter(pk__in=pks).order_by("-log_date", "-created_at")
 
     def has_add_permission(self, request, obj=None):
         return False
