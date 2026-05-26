@@ -708,15 +708,14 @@ def progress_dashboard_html(user) -> str:
         ledger_url,
     )
 
-    footnote = format_html(
+    footnote = (
         '<p class="hm-footnote">Updated by cron <code>run_daily_height_pipeline</code>. '
         "Inline tables below mirror the same last-30-day window.</p>"
     )
 
-    return format_html(
-        '<div class="hm-progress-dashboard">'
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}"
-        "</div>",
+    # Join pre-rendered SafeStrings — avoid one format_html() with many `{}` placeholders
+    # (child HTML can contain braces and breaks str.format positional indexing on live).
+    sections = (
         cards,
         unlock_row,
         format_html('<div class="hm-section-title">Height gain history (last 30 days)</div>'),
@@ -727,7 +726,15 @@ def progress_dashboard_html(user) -> str:
         _segment_bars_from_diagnostics(user),
         format_html('<div class="hm-section-title">Today height &amp; E1 split</div>'),
         compact_today_height_block(user),
-        format_html('<div class="hm-section-title">Today points</div>{}', today_detail or "—"),
+        format_html(
+            '<div class="hm-section-title">Today points</div>{}',
+            today_detail or "—",
+        ),
         links,
         footnote,
+    )
+    return mark_safe(
+        '<div class="hm-progress-dashboard">'
+        + "".join(str(part) for part in sections)
+        + "</div>"
     )
