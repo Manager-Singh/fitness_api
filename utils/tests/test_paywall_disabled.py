@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from user_profile.models import UserProfile
 from utils.check_payment import _apply_paywall_disabled_flags, check_subscription_or_response
@@ -88,3 +89,25 @@ class PaywallDisabledFlagTests(TestCase):
         self.assertTrue(qa_paid_bypass_for_user(adult))
         self.assertTrue(effective_is_paid(teen, {"is_paid": False}))
         self.assertTrue(effective_is_paid(adult, {"is_paid": False}))
+
+    def test_female_adult_18_plus_not_trial_with_stale_trial_dates(self):
+        """Female 18+ is adult; legacy 13–20 trial window must not apply."""
+        now = timezone.now()
+        u = User.objects.create_user(
+            username="female_adult_trial",
+            email="female_adult_trial@test.example",
+            password="secret123",
+        )
+        prof, _ = UserProfile.objects.get_or_create(user=u)
+        prof.gender = "Female"
+        prof.birth_date = date.today() - timedelta(days=int(365.2425 * 18.95))
+        prof.save()
+        u.account_tier = "adult"
+        u.trial_start = now - timedelta(days=1)
+        u.trial_end = now + timedelta(days=6)
+        u.save()
+
+        data = check_subscription_or_response(u).data
+        self.assertFalse(data.get("is_trial"))
+        self.assertNotEqual(data.get("plan"), "Trial")
+        self.assertIsNone(data.get("trial_day"))

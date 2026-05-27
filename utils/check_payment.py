@@ -47,7 +47,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from user_profile.models import Payment
 from utils.age import get_user_age_exact
-from utils.paywall_flags import apply_subscription_qa_overlay
+from utils.paywall_flags import apply_subscription_qa_overlay, is_teen_age
 
 
 def _apply_paywall_disabled_flags(user, payload: dict) -> dict:
@@ -140,7 +140,7 @@ def check_subscription_or_response(user):
     trial_start = user.trial_start
     trial_end = user.trial_end
     age_exact = get_user_age_exact(user)
-    is_teen = bool(age_exact is not None and 13.0 <= float(age_exact) < 21.0)
+    is_teen = is_teen_age(age_exact, user=user)
     trial_day = None
 
     # 🔎 Check subscription
