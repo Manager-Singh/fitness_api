@@ -111,3 +111,25 @@ class PaywallDisabledFlagTests(TestCase):
         self.assertFalse(data.get("is_trial"))
         self.assertNotEqual(data.get("plan"), "Trial")
         self.assertIsNone(data.get("trial_day"))
+
+    def test_account_tier_adult_blocks_trial_even_with_active_trial_window(self):
+        """Persisted adult tier must win over stale trial dates (login/subscription)."""
+        now = timezone.now()
+        u = User.objects.create_user(
+            username="tier_adult_trial",
+            email="tier_adult_trial@test.example",
+            password="secret123",
+        )
+        prof, _ = UserProfile.objects.get_or_create(user=u)
+        prof.gender = "Female"
+        prof.birth_date = date.today() - timedelta(days=int(365.2425 * 18.95))
+        prof.save()
+        u.account_tier = "adult"
+        u.trial_start = now - timedelta(days=1)
+        u.trial_end = now + timedelta(days=6)
+        u.save()
+
+        data = check_subscription_or_response(u).data
+        self.assertEqual(u.account_tier, "adult")
+        self.assertFalse(data.get("is_trial"))
+        self.assertNotEqual(data.get("plan"), "Trial")

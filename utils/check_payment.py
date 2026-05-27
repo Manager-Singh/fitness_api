@@ -47,7 +47,20 @@ from rest_framework.response import Response
 from rest_framework import status
 from user_profile.models import Payment
 from utils.age import get_user_age_exact
-from utils.paywall_flags import apply_subscription_qa_overlay, is_teen_age
+from utils.paywall_flags import apply_subscription_qa_overlay, is_adult_age, is_teen_age
+
+
+def _user_eligible_for_teen_trial(user, age_exact=None) -> bool:
+    """
+    7-day full-access trial applies to teens only (female 13–17, male 13–20).
+    Adults never qualify, including when stale trial_start/trial_end exist on the row.
+    """
+    if getattr(user, "account_tier", None) == "adult":
+        return False
+    ae = age_exact if age_exact is not None else get_user_age_exact(user)
+    if is_adult_age(ae, user=user):
+        return False
+    return is_teen_age(ae, user=user)
 
 
 def _apply_paywall_disabled_flags(user, payload: dict) -> dict:
@@ -140,7 +153,7 @@ def check_subscription_or_response(user):
     trial_start = user.trial_start
     trial_end = user.trial_end
     age_exact = get_user_age_exact(user)
-    is_teen = is_teen_age(age_exact, user=user)
+    is_teen = _user_eligible_for_teen_trial(user, age_exact=age_exact)
     trial_day = None
 
     # 🔎 Check subscription

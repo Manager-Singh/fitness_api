@@ -178,17 +178,16 @@ class RegisterView(APIView):
                 payment_status__iexact="succeeded"
             ).exists()
 
-            # 🟢 Subscription details JSON (plan, days_left, expired, message...)
-            subscription_response = check_subscription_or_response(user)
-            subscription_data = subscription_response.data
-
-            # 🟢 Profile info
+            # 🟢 Profile info + tier (must run before subscription — adults must not get teen trial)
             profile, _ = UserProfile.objects.get_or_create(user=user)
             is_profile_updated, profile_update_missing = compute_profile_update_status(
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
             track = auth_track_fields(user, age_years=age)
+
+            subscription_response = check_subscription_or_response(user)
+            subscription_data = subscription_response.data
 
             # 🔥 Final registration response (same as login response)
             return Response({
@@ -257,17 +256,15 @@ class SocialRegisterView(APIView):
                 payment_status__iexact="succeeded"
             ).exists()
 
-            # 👉 Subscription details JSON
-            subscription_response = check_subscription_or_response(user)
-            subscription_data = subscription_response.data
-
-            # 👉 User profile
             profile, _ = UserProfile.objects.get_or_create(user=user)
             is_profile_updated, profile_update_missing = compute_profile_update_status(
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
             track = auth_track_fields(user, age_years=age)
+
+            subscription_response = check_subscription_or_response(user)
+            subscription_data = subscription_response.data
 
             # Final response matching login & register APIs
             return Response({
@@ -336,16 +333,15 @@ class LoginView(APIView):
                 payment_status__iexact="succeeded"
             ).exists()
 
-            # 👇 Get subscription info from utility
-            subscription_response = check_subscription_or_response(user)
-            subscription_data = subscription_response.data  # extract JSON data
-
             profile, _ = UserProfile.objects.get_or_create(user=user)
             is_profile_updated, profile_update_missing = compute_profile_update_status(
                 user, profile
             )
             step_to_show = compute_step_to_show(user, profile)
             track = auth_track_fields(user, age_years=age)
+
+            subscription_response = check_subscription_or_response(user)
+            subscription_data = subscription_response.data
 
             email_verification_pending = getattr(user, "verified", None) is None
             verification_otp_sent = False
