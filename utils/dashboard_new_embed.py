@@ -45,6 +45,15 @@ def _strip_subscription_from_embed(payload):
     return payload
 
 
+def _embed_daily_points(user, subscription_data=None) -> int:
+    """Food + lifestyle activity + workouts + capped micro-habits (matches dashboard-new)."""
+    from utils.check_payment import check_subscription_or_response
+    from utils.scores_summary import get_today_daily_points
+
+    sub = subscription_data if subscription_data is not None else check_subscription_or_response(user).data
+    return int(get_today_daily_points(user, sub) or 0)
+
+
 def _want_full_dashboard(request=None) -> bool:
     if bool(getattr(settings, "DASHBOARD_LOG_EMBED_FULL", False)):
         return True
@@ -114,7 +123,7 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
             "teen_nutrition_dots": nutrition_dots,
             "teen_lifestyle_dots": lifestyle_dots,
             "streak_days": 0,
-            "daily_points": int((daily.engine1_points if daily else 0) or 0) + int((daily.engine2_points if daily else 0) or 0),
+            "daily_points": _embed_daily_points(user, subscription_data=None),
             "rank": None,
         }
 
@@ -160,7 +169,7 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         "teen_nutrition_dots": None,
         "teen_lifestyle_dots": None,
         "streak_days": 0,
-        "daily_points": int((daily.engine1_points if daily else 0) or 0),
+        "daily_points": _embed_daily_points(user, subscription_data=None),
         "rank": None,
     }
 

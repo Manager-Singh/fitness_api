@@ -37,6 +37,7 @@ class DashboardNewRoutineSerializer(serializers.Serializer):
     teen_lifestyle_dots = serializers.IntegerField(required=False, allow_null=True)
     streak_days = serializers.IntegerField()
     daily_points = serializers.IntegerField()
+    daily_points_breakdown = serializers.DictField(required=False, allow_null=True)
     rank = serializers.IntegerField(required=False, allow_null=True)
 
 

@@ -482,6 +482,87 @@ from utils.age import get_user_age
 from utils.user_time import user_today
 
 
+def habit_score_for_date(user, log_date) -> int:
+    """Micro-habit points for one local day (Engine 1 cap, same as spec_runtime)."""
+    from habits.services import capped_habit_points_for_engine
+
+    return int(capped_habit_points_for_engine(user, log_date))
+
+
+def get_today_daily_points(user, subscription_data) -> int:
+    """Dashboard ``daily_points``: food + lifestyle activity + workouts + capped habits."""
+    return int(get_user_score_summary(user, subscription_data, mode="today_total_score") or 0)
+
+
+def today_score_breakdown(user, subscription_data) -> dict:
+    """Today's point components (matches ``get_today_daily_points``)."""
+    summary = get_user_score_summary(user, subscription_data)
+    today = summary.get("today") or {}
+    food = int(today.get("food_score") or 0)
+    lifestyle = int(today.get("activity_score") or 0)
+    workout = int(today.get("workout_score") or 0)
+    habits = int(today.get("habit_score") or 0)
+    return {
+        "food_score": food,
+        "lifestyle_score": lifestyle,
+        "activity_score": lifestyle,
+        "workout_score": workout,
+        "habit_score": habits,
+        "total_score": int(today.get("total_score") or (food + lifestyle + workout + habits)),
+    }
+
+
+def _habit_score_by_date(user) -> dict:
+    """Map log_date -> capped habit points for merging into daily score frames."""
+    from django.db.models import Sum
+
+    from habits.models import MicroHabitLog
+    from habits.services import DAILY_HABIT_CAP
+
+    out: dict = {}
+    rows = (
+        MicroHabitLog.objects.filter(user=user)
+        .values("log_date")
+        .annotate(raw=Sum("points"))
+    )
+    for row in rows:
+        d = row["log_date"]
+        out[d] = min(DAILY_HABIT_CAP, int(row["raw"] or 0))
+    return out
+
+
+def _merge_habit_scores_into_df(df, user):
+    """Add ``habit_score`` column aligned to ``entry_date`` rows."""
+    habit_by_date = _habit_score_by_date(user)
+    if df is None or df.empty:
+        return df
+
+    def _habit_for_row(ed_val):
+        try:
+            d = ed_val.date() if hasattr(ed_val, "date") else pd.Timestamp(ed_val).date()
+        except Exception:
+            return 0
+        return int(habit_by_date.get(d, 0))
+
+    df["habit_score"] = df["entry_date"].apply(_habit_for_row)
+    return df
+
+
+def _enrich_summary_row_with_habits(row: dict, user, log_date) -> dict:
+    """Ensure habit_score and total_score include micro-habits (e.g. empty nutra/workout day)."""
+    habit = habit_score_for_date(user, log_date)
+    row = dict(row or {})
+    row["habit_score"] = habit
+    row["total_score"] = int(
+        (row.get("food_score") or 0)
+        + (row.get("activity_score") or 0)
+        + (row.get("workout_score") or 0)
+        + habit
+    )
+    row["posture_gain_cm"] = round(float(row["total_score"]) * 0.001, 4)
+    return row
+
+
 def get_user_score_summary(user, subscription_data, mode=None):
     # IMPORTANT: "today" must be computed in the user's timezone so dashboard/home
     # matches workout/nutrition logging and daily reset semantics.
@@ -623,7 +704,10 @@ def get_user_score_summary(user, subscription_data, mode=None):
             "workout_score": pd.Series(dtype="float"),
             "posture_score": pd.Series(dtype="float"),
             "hgh_score": pd.Series(dtype="float"),
+            "habit_score": pd.Series(dtype="float"),
         })
+
+    df = _merge_habit_scores_into_df(df, user)
 
     # ensure numeric and no-nulls
     df["food_score"] = pd.to_numeric(df.get("food_score", 0), errors="coerce").fillna(0)
@@ -635,6 +719,7 @@ def get_user_score_summary(user, subscription_data, mode=None):
     df["workout_score"] = pd.to_numeric(df.get("workout_score", 0), errors="coerce").fillna(0)
     df["posture_score"] = pd.to_numeric(df.get("posture_score", 0), errors="coerce").fillna(0)
     df["hgh_score"] = pd.to_numeric(df.get("hgh_score", 0), errors="coerce").fillna(0)
+    df["habit_score"] = pd.to_numeric(df.get("habit_score", 0), errors="coerce").fillna(0)
 
     # ---------------- Extra cols ----------------
     if not df.empty:
@@ -660,6 +745,7 @@ def get_user_score_summary(user, subscription_data, mode=None):
                 "food_score": 0,
                 "activity_score": 0,
                 "workout_score": 0,
+                "habit_score": 0,
                 "total_score": 0,
                 "posture_gain_cm": 0.000,
             }
@@ -669,16 +755,26 @@ def get_user_score_summary(user, subscription_data, mode=None):
                 )
             return [empty_result]
 
+        agg_spec = {
+            "food_score": ("food_score", "sum"),
+            "activity_score": ("activity_score", "sum"),
+            "workout_score": ("workout_score", "sum"),
+        }
+        if "habit_score" in group_df.columns:
+            agg_spec["habit_score"] = ("habit_score", "sum")
         summary = (
-            group_df.groupby(group_col).agg(
-                food_score=("food_score", "sum"),
-                activity_score=("activity_score", "sum"),
-                workout_score=("workout_score", "sum"),
-            )
+            group_df.groupby(group_col).agg(**agg_spec)
             .reset_index()
             .sort_values(by=group_col, ascending=False)
         )
-        summary["total_score"] = summary["food_score"] + summary["activity_score"] + summary["workout_score"]
+        if "habit_score" not in summary.columns:
+            summary["habit_score"] = 0
+        summary["total_score"] = (
+            summary["food_score"]
+            + summary["activity_score"]
+            + summary["workout_score"]
+            + summary["habit_score"]
+        )
         summary["posture_gain_cm"] = (summary["total_score"] * 0.001).round(4)
 
         if label_func:
@@ -695,6 +791,7 @@ def get_user_score_summary(user, subscription_data, mode=None):
         today_df = pd.DataFrame(columns=df.columns)
 
     today_summary = summarize(today_df, "entry_date", default_key=pd.Timestamp(today))[0]
+    today_summary = _enrich_summary_row_with_habits(today_summary, user, today)
 
     # explicit exercise count (number of workout entries today)
     today_summary["exercise_count"] = WorkoutEntry.objects.filter(session__user=user, session__date=today).count()
@@ -791,11 +888,11 @@ def get_user_score_summary(user, subscription_data, mode=None):
                     axis=1,
                 )
 
-            daily_engine1 = df["posture_score"] + df["adult_engine_food"]
+            daily_engine1 = df["posture_score"] + df["adult_engine_food"] + df["habit_score"]
             total_engine1_points = float(daily_engine1.sum())
     else:
-        # Teen Engine 1: posture only.
-        daily_engine1 = df["posture_score"]
+        # Teen Engine 1: posture + micro-habits (capped per day).
+        daily_engine1 = df["posture_score"] + df["habit_score"]
 
         # Teen Engine 2: hgh + capped inputs.
         daily_engine2 = (

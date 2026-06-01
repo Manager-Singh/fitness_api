@@ -1,4 +1,4 @@
-"""Paid adults (male/female) must see lifestyle modules on my-nutrition-plan."""
+"""Nutrition plan + daily_points score tests."""
 
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -7,9 +7,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from habits.models import MicroHabit, MicroHabitLog
 from nutration.models import Activity, AgeGroup, Module, ModuleActivity
+from nutration.models_log import NutraEntry, NutraSession
 from nutration.views import MyPlanView
 from user_profile.models import UserProfile
+from utils.scores_summary import get_today_daily_points, today_score_breakdown
 
 User = get_user_model()
 
@@ -91,3 +94,58 @@ class AdultPaidLifestylePlanTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data.get("lifestyle") or [], [])
+
+
+class DailyPointsIncludesHabitsAndLifestyleTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="pts_user",
+            email="pts_user@test.example",
+            password="secret123",
+        )
+        prof, _ = UserProfile.objects.get_or_create(user=self.user)
+        prof.gender = "female"
+        prof.birth_date = date.today() - timedelta(days=int(365.2425 * 16))
+        prof.save()
+        self.ag = AgeGroup.objects.create(name="13-20", min_age=13, max_age=20)
+        self.life_mod = Module.objects.create(
+            name="Sunlight Exposure",
+            short_name="Sun",
+            type=Module.LIFESTYLE,
+            age_group=self.ag,
+        )
+        act = Activity.objects.create(name="Sun AM", short_name="Sun")
+        ModuleActivity.objects.create(module=self.life_mod, activity=act, score=6)
+        habit, _ = MicroHabit.objects.get_or_create(
+            code="tech_neck_lift",
+            defaults={
+                "name": "Tech-Neck",
+                "logging_mode": "once_daily",
+                "points_per_log": 2,
+            },
+        )
+        MicroHabitLog.objects.create(
+            user=self.user,
+            log_date=date.today(),
+            habit=habit,
+            slot="once",
+            points=2,
+        )
+
+    def test_today_daily_points_includes_lifestyle_and_habits(self):
+        session = NutraSession.objects.create(user=self.user, date=date.today())
+        activity = Activity.objects.get(name="Sun AM")
+        NutraEntry.objects.create(
+            session=session,
+            module=self.life_mod,
+            activity=activity,
+            score=6,
+        )
+
+        sub = _paid_subscription()
+        total = get_today_daily_points(self.user, sub)
+        breakdown = today_score_breakdown(self.user, sub)
+        self.assertGreaterEqual(total, 8)  # 6 lifestyle + 2 habits (capped)
+        self.assertEqual(breakdown["lifestyle_score"], 6)
+        self.assertEqual(breakdown["habit_score"], 2)
+        self.assertEqual(breakdown["total_score"], total)

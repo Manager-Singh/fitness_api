@@ -684,6 +684,9 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
 
     score_summary = get_user_score_summary(user=user,subscription_data=subscription_data)
     today_total_score = get_user_score_summary(user=user,subscription_data=subscription_data, mode="today_total_score")
+    from utils.scores_summary import today_score_breakdown
+
+    today_score_breakdown_payload = today_score_breakdown(user, subscription_data)
 
     # ── 6. Date handling ─────────────────────
     try:
@@ -1290,6 +1293,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
             },
             "subscription": subscription_data,
             "today_total_score": today_total_score,
+            "today_score_breakdown": today_score_breakdown_payload,
             "last_scan": profile_dict.get("last_scan"),
             "profile": profile_fields,
             "ai_analysis": ai_analysis,

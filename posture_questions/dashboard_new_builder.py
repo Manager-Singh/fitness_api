@@ -395,6 +395,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             "teen_lifestyle_dots": teen_lifestyle_dots if is_teen else None,
             "streak_days": today_streak,
             "daily_points": int(payload.get("today_total_score") or 0),
+            "daily_points_breakdown": payload.get("today_score_breakdown"),
             "rank": rank_value,
         },
         "posture_optimization": {
