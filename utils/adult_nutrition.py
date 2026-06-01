@@ -41,6 +41,20 @@ def adult_nutrition_plan_module_q():
         q |= Q(type=nut, name=name)
     return q
 
+
+def adult_lifestyle_plan_module_pks() -> set[int]:
+    """
+    Lifestyle (LIFE) modules for paid adult plans (male 21+ / female 18+).
+
+    Lifestyle rows are often seeded on teen age groups (e.g. 13–20) so strict
+    per-user age filtering leaves male adults with an empty lifestyle list.
+  """
+    from nutration.models import Module
+
+    return set(
+        Module.objects.filter(type=Module.LIFESTYLE).values_list("pk", flat=True)
+    )
+
 # Catalog size for UX copy / soft “complete list” hints (7 + 6 in spec).
 ADULT_NUTRITION_FOOD_SLOT_MAX = 13
 

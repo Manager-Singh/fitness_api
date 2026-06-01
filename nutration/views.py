@@ -5,7 +5,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from utils.age import get_user_age, get_user_age_exact
-from utils.paywall_flags import is_adult_age
+from utils.check_payment import check_subscription_or_response
+from utils.paywall_flags import effective_is_paid, is_adult_age
 
 from .models import AgeGroup, Module, Food, ModuleFood
 from .serializers import (
@@ -208,6 +209,11 @@ class MyPlanView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         adult_nutrition_plan = is_adult_age(age_exact, age, user=request.user)
+        subscription_data = check_subscription_or_response(request.user).data
+        adult_paid_lifestyle = bool(
+            adult_nutrition_plan
+            and effective_is_paid(request.user, subscription_data, age_exact=age_exact)
+        )
 
         # ── 2. Fetch modules for the user's age group ─────────────────────────
         modules = (
@@ -248,14 +254,17 @@ class MyPlanView(APIView):
                 type=Module.NUTRITION,
                 name__icontains="growthmax",
             )
-            if type_q in ("", "nutrition"):
-                # Lifestyle stays age-filtered; adult disc/muscle catalog may live in 21+ age groups
-                # while female adults start at 18 — always merge those modules in.
-                age_filtered_pks = set(
-                    modules.filter(type=Module.LIFESTYLE).values_list("pk", flat=True)
-                )
+            if type_q in ("", "nutrition", "lifestyle"):
+                from utils.adult_nutrition import adult_lifestyle_plan_module_pks
+
+                # Adult disc/muscle may live in 21+ age groups while female adults start at 18.
+                # Paid adults (both sexes) get the full lifestyle catalog (often teen age band only).
+                age_filtered_pks = set(modules.values_list("pk", flat=True))
                 adult_nut_pks = set(
                     Module.objects.filter(adult_nutrition_plan_module_q()).values_list("pk", flat=True)
+                )
+                adult_life_pks = (
+                    adult_lifestyle_plan_module_pks() if adult_paid_lifestyle else set()
                 )
                 modules = (
                     Module.objects.select_related("age_group")
@@ -264,7 +273,7 @@ class MyPlanView(APIView):
                         "module_activities__activity",
                         "module_activities",
                     )
-                    .filter(pk__in=age_filtered_pks | adult_nut_pks)
+                    .filter(pk__in=age_filtered_pks | adult_nut_pks | adult_life_pks)
                     .order_by("age_group__min_age", "type", "sort_order", "name")
                 )
 
