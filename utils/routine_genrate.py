@@ -32,6 +32,7 @@ from workouts.exercise_assignment_data import (
     ADULT_CORE_6_BY_MIN_AGE,
     BEAST_MODE_CANONICAL_KEYS,
     TEEN_CORE_6_NAMES,
+    dedupe_name_key,
     normalize_exercise_name,
     spec_key_for_name,
 )
@@ -858,14 +859,55 @@ def _regen_rec_beast_only(
         tier__in=[Tier.RECOMMENDED, Tier.BEAST],
     ).delete()
 
-    rec_beast_slots = []
-    for ve, tier in _variant_exercises_for_picks(variant, recommended, Tier.RECOMMENDED):
-        rec_beast_slots.append((ve, tier))
-    for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
-        rec_beast_slots.append((ve, tier))
-
     core_count = len(core_exercises)
-    order = _persist_routine_exercises(routine, rec_beast_slots, start_order=core_count)
+
+    # Build rec/beast slots with the SAME id/name de-dup the full path applies, so
+    # the running count reflects what will actually persist. Seed the seen sets with
+    # the retained Core 6 so a rec/beast pick can never collide with a Core move.
+    seen_names: set[str] = set()
+    used_ids: set[int] = set()
+    combined: list = []
+    for ve in core_ve_list:
+        ex = ve.exercise
+        used_ids.add(ex.id)
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if key:
+            seen_names.add(key)
+        combined.append((ve, Tier.CORE))
+
+    def _append_unique(ve, tier) -> None:
+        ex = ve.exercise
+        ex_id = getattr(ve, "exercise_id", None) or ex.id
+        if ex_id in used_ids:
+            return
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if not key or key in seen_names:
+            return
+        used_ids.add(ex_id)
+        seen_names.add(key)
+        combined.append((ve, tier))
+
+    for ve, tier in _variant_exercises_for_picks(variant, recommended, Tier.RECOMMENDED):
+        _append_unique(ve, tier)
+    for ve, tier in _variant_exercises_for_picks(variant, beast, Tier.BEAST):
+        _append_unique(ve, tier)
+
+    # Backfill rec/beast toward the spec 6+2+2 = 10 total. Without this, a short or
+    # name-colliding selection would silently persist a 9-exercise routine.
+    if len(combined) < 10:
+        _backfill_posture_slots(
+            combined,
+            seen_names,
+            used_ids,
+            variant=variant,
+            pool=pool,
+            losses=losses,
+            is_teen=is_teen,
+            age=age,
+        )
+    persist_slots = combined[len(core_ve_list):]
+
+    order = _persist_routine_exercises(routine, persist_slots, start_order=core_count)
 
     assignment_meta = {
         "assignment_spec": "v1",
