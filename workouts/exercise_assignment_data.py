@@ -59,7 +59,7 @@ EXERCISE_ASSIGNMENT_SPEC = {
     "hamstring stretch": {
         "name": "Hamstring Stretch",
         "age_group": "both",
-        "spinal_pct": 50, "collapse_pct": 30, "pelvic_pct": 65, "legs_pct": 5,
+        "spinal_pct": 5, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 65,
         "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
         "category": "posture", "points": 6,
     },
@@ -94,7 +94,7 @@ EXERCISE_ASSIGNMENT_SPEC = {
     "butterfly stretch": {
         "name": "Butterfly Stretch",
         "age_group": "both",
-        "spinal_pct": 50, "collapse_pct": 70, "pelvic_pct": 25, "legs_pct": 5,
+        "spinal_pct": 5, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 25,
         "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
         "category": "posture", "points": 5,
     },

@@ -15,6 +15,7 @@ from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
     POINTS_TO_CM_ENGINE2,
+    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
 )
 from utils.user_time import user_today
 from utils.posture.teen_genetic_average import (
@@ -242,18 +243,30 @@ def _posture_unlocked_for_segment_redistribution(state) -> bool:
     return bool(str(getattr(state, "assessment_sources_used", "") or "").strip())
 
 
+SEGMENT_FIELD_RATIO = {
+    "spinal_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["spinal_compression"],
+    "collapse_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["posture_collapse"],
+    "pelvic_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["pelvic_tilt_back"],
+    "legs_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["leg_hamstring"],
+}
+
+
 def compute_engine1_gain_shares(state, engine1_gain_um) -> dict[str, int]:
     """
-    Section 4.3 — preview/applied share of today's Engine-1 gain (μm) per segment field.
-    Weights = Current_Loss_um on each active segment before today's reduction is applied.
+    Section 4.3 / §9 — share of today's Engine-1 gain (μm) applied to each segment's
+    Current_Loss.
+
+    Per spec v34: the daily gain is split across ACTIVE segments (Current_Loss > 0)
+    by the FIXED segment ratios (30/35/25/10), renormalized over the active set:
+
+        share[s] = Daily_Gain × (segment_ratio[s] / Σ segment_ratio[active])
+
+    Each share is capped at that segment's remaining Current_Loss. Worked example
+    from the spec (spinal already at 0): Collapse 35/70=50%, Pelvic 25/70≈36%,
+    Legs 10/70≈14%.
     """
     gain_um = max(0, int(engine1_gain_um or 0))
-    seg_defs = [
-        "spinal_current_loss_um",
-        "collapse_current_loss_um",
-        "pelvic_current_loss_um",
-        "legs_current_loss_um",
-    ]
+    seg_defs = list(SEGMENT_FIELD_RATIO.keys())
     if gain_um <= 0 or not state:
         return {f: 0 for f in seg_defs}
 
@@ -265,19 +278,14 @@ def compute_engine1_gain_shares(state, engine1_gain_um) -> dict[str, int]:
     if not active:
         return {f: 0 for f in seg_defs}
 
-    total_weight = sum(cur for _, cur in active)
-    if total_weight <= 0:
+    total_ratio = sum(SEGMENT_FIELD_RATIO[field] for field, _ in active)
+    if total_ratio <= 0:
         return {f: 0 for f in seg_defs}
 
     shares = {f: 0 for f in seg_defs}
-    consumed = 0
-    for idx, (field, cur) in enumerate(active):
-        if idx == len(active) - 1:
-            share = max(0, gain_um - consumed)
-        else:
-            share = int(round(gain_um * (cur / total_weight)))
-            consumed += share
-        shares[field] = min(share, cur)
+    for field, cur in active:
+        raw_share = int(round(gain_um * (SEGMENT_FIELD_RATIO[field] / total_ratio)))
+        shares[field] = min(raw_share, cur)
     return shares
 
 
@@ -285,7 +293,8 @@ def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
     """
     Section 4.3 — apply today's Engine-1 height gain (μm) to segment Current_Loss.
 
-    Daily gain is split across active segments proportional to each segment's Current_Loss_um.
+    Daily gain is split across active segments by the fixed segment ratios
+    (30/35/25/10) renormalized over the active set (see compute_engine1_gain_shares).
     """
     gain_um = max(0, int(engine1_gain_um or 0))
     if gain_um <= 0:
@@ -760,8 +769,10 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         and int(engine1_delta_um or 0) > 0
         and (age >= 21 or _posture_unlocked_for_segment_redistribution(state))
     ):
+        # Informational only: today's per-segment split of the Engine-1 gain. The
+        # authoritative segment Current_Loss is set deterministically AFTER the ledger
+        # row is written (see resync below), so repeated recomputes can't drift the bars.
         engine1_segment_shares_um = compute_engine1_gain_shares(state, engine1_delta_um)
-        _redistribute_engine1_gain_across_segments(state, engine1_delta_um)
 
     HeightLedger.objects.create(
         user=user,
@@ -804,6 +815,21 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
                 "reason": "teen_pre_scan",
             },
         )
+
+    # Section 4.3: derive segment Current_Loss deterministically from the assessment
+    # baseline minus cumulative Engine-1 recovery (now that today's ledger row exists).
+    # This is idempotent, so force_recompute / rebuild can't compound the reduction and
+    # drive the optimization bars past the real recovery.
+    if state and (age >= 21 or _posture_unlocked_for_segment_redistribution(state)):
+        try:
+            from utils.posture.state_recalculator import resync_segment_losses_from_baseline
+
+            resync_segment_losses_from_baseline(user)
+        except Exception:
+            logger.exception(
+                "compute_daily_height_for_user: segment resync failed",
+                extra={"user_id": getattr(user, "id", None), "log_date": str(log_date)},
+            )
     return {
         "user_id": user.id,
         "delta_um": max(0, delta_um),

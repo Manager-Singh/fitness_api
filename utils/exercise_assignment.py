@@ -194,36 +194,42 @@ def _select_beast_exercises(
     core_exercises: Sequence[Any],
     exclude: Sequence[Any] = (),
     reserved_beast: Sequence[Any] = (),
+    allow_teen_only: bool = True,
 ) -> list[Any]:
     """
-    Section 10.2: pick ``count`` beast-tier exercises from the whitelist.
+    Exercise Assignment Spec (Parts 1–2): Beast picks are the top ``count`` from the
+    FULL remaining pool scored by the beast formula — NOT a fixed whitelist.
 
-    Must use exercise IDs not already on core (UserRoutineExercise unique_together
-    is routine+exercise, not per-tier).
+    Adults: ``allow_teen_only=False`` (HGH exercises are teen-only in every document).
+    Teens: ``allow_teen_only=True`` so HGH movers (Box Jumps, Mountain Climbers, …)
+    are eligible — they dominate the beast formula for younger teens.
+
+    Beast exercise IDs must not already be on core/recommended (UserRoutineExercise
+    unique_together is routine+exercise, not per-tier).
     """
-    exclude_ids = {e.id for e in exclude}
-    core_ids = {e.id for e in core_exercises}
-    whitelist = [ex for ex in _beast_candidates(pool) if ex.id not in exclude_ids]
+    blocked_ids = {e.id for e in core_exercises} | {e.id for e in exclude}
+    blocked_keys = {
+        dedupe_name_key(getattr(e, "name", "") or "")
+        for e in list(core_exercises) + list(exclude)
+    }
 
-    non_core = [ex for ex in whitelist if ex.id not in core_ids]
-    beast = pick_top_scored(non_core, score_fn, count)
-    if len(beast) >= count:
-        return beast
-
-    already_ids = {e.id for e in beast}
-    reserved_scored = sorted(
-        [ex for ex in reserved_beast if ex.id not in core_ids and ex.id not in already_ids],
-        key=lambda ex: score_fn(ex),
-        reverse=True,
-    )
-    for ex in reserved_scored:
-        if ex.id in exclude_ids or not _is_beast_mode_eligible(ex):
+    candidates: list[Any] = []
+    seen_ids: set[int] = set()
+    seen_keys: set[str] = set()
+    for ex in list(pool) + list(reserved_beast):
+        if ex.id in blocked_ids or ex.id in seen_ids:
             continue
-        beast.append(ex)
-        already_ids.add(ex.id)
-        if len(beast) >= count:
-            break
-    return beast
+        if not allow_teen_only and getattr(ex, "teen_only", False):
+            continue
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if key and (key in blocked_keys or key in seen_keys):
+            continue
+        seen_ids.add(ex.id)
+        if key:
+            seen_keys.add(key)
+        candidates.append(ex)
+
+    return pick_top_scored(candidates, score_fn, count)
 
 
 def pick_top_scored(
@@ -270,11 +276,9 @@ def select_adult_recommended_beast(
         core_exercises=core_exercises,
         exclude=recommended,
         reserved_beast=reserved_beast,
+        allow_teen_only=False,
     )
     _assert_no_teen_only(recommended + beast, "adult")
-    for ex in beast:
-        if not _is_beast_mode_eligible(ex):
-            raise ValueError(f"non-beast exercise {ex.name!r} assigned to beast tier")
     return recommended, beast
 
 
@@ -304,10 +308,8 @@ def select_teen_recommended_beast(
         core_exercises=core_exercises,
         exclude=recommended,
         reserved_beast=reserved_beast,
+        allow_teen_only=True,
     )
-    for ex in beast:
-        if not _is_beast_mode_eligible(ex):
-            raise ValueError(f"non-beast exercise {ex.name!r} assigned to beast tier")
     return recommended, beast
 
 

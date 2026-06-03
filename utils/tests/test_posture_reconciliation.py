@@ -1,12 +1,12 @@
 """Tests for posture assessment reconciliation and routine regen threshold."""
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.test import TestCase
 from django.utils import timezone
 
 from posture.models import PostureAssessment
-from users.models import PostureState, User
+from users.models import HeightLedger, PostureState, User
 from utils.posture.state_recalculator import recalculate_posture_state
 from utils.posture.state_to_breakdown import (
     breakdown_to_segment_um,
@@ -96,6 +96,62 @@ class PostureReconciliationTests(TestCase):
         um = breakdown_to_segment_um(bd)
         self.assertEqual(um["spinal"], 12000)
         self.assertEqual(um["total"], 12000 + 5000 + 3000 + 1000)
+
+    def test_reconciliation_preserves_engine1_recovery(self):
+        """Recalc must subtract cumulative Engine-1 recovery from the new baseline,
+        not reset the bars to the raw assessment baseline (v34 §4.3)."""
+        # Baseline assessment: 1.00 cm spinal loss (10000 um), others 0.
+        self._make_assessment(
+            PostureAssessment.SOURCE_QUESTIONNAIRE,
+            10000,
+            timezone.now(),
+            total_loss_um=10000,
+        )
+        # User already recovered 0.05 cm (500 um) of posture via Engine-1.
+        HeightLedger.objects.create(
+            user=self.user,
+            log_date=date.today(),
+            entry_type="daily_compute",
+            engine1_delta_um=500,
+        )
+        state = recalculate_posture_state(self.user)
+        # Baseline (ceiling) stays at 10000; current loss reflects the 500 um recovered.
+        self.assertEqual(state.total_recoverable_loss_um, 10000)
+        self.assertEqual(state.spinal_current_loss_um, 9500)
+
+    def test_resync_segment_losses_is_idempotent(self):
+        """Deterministic resync must not drift on repeated runs (force_recompute/rebuild safety)."""
+        from utils.posture.state_recalculator import resync_segment_losses_from_baseline
+
+        self._make_assessment(
+            PostureAssessment.SOURCE_QUESTIONNAIRE,
+            10000,
+            timezone.now(),
+            total_loss_um=10000,
+        )
+        HeightLedger.objects.create(
+            user=self.user,
+            log_date=date.today(),
+            entry_type="daily_compute",
+            engine1_delta_um=500,
+        )
+        v1 = resync_segment_losses_from_baseline(self.user).spinal_current_loss_um
+        resync_segment_losses_from_baseline(self.user)
+        v3 = resync_segment_losses_from_baseline(self.user).spinal_current_loss_um
+        self.assertEqual(v1, 9500)  # baseline 10000 − 500 recovery
+        self.assertEqual(v3, 9500)  # no drift after repeated runs
+
+    def test_reconciliation_no_recovery_keeps_baseline(self):
+        """With no Engine-1 recovery, current loss equals the assessment baseline."""
+        self._make_assessment(
+            PostureAssessment.SOURCE_QUESTIONNAIRE,
+            10000,
+            timezone.now(),
+            total_loss_um=10000,
+        )
+        state = recalculate_posture_state(self.user)
+        self.assertEqual(state.spinal_current_loss_um, 10000)
+        self.assertEqual(state.total_recoverable_loss_um, 10000)
 
     def test_delta_pct_triggers_at_15(self):
         state = PostureState(

@@ -11,7 +11,7 @@ class HeightLedgerWriterTests(SimpleTestCase):
         offenders = []
         for path in root.rglob("*.py"):
             s = str(path)
-            if "/venv/" in s or "migrations" in s or "users/tests/" in s:
+            if "/venv/" in s or "migrations" in s or "/tests/" in s:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             if "HeightLedger.objects.create" not in text:

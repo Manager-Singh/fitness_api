@@ -82,17 +82,17 @@ class ExerciseAssignmentScoringTests(SimpleTestCase):
         names = {e.name for e in rec + beast}
         self.assertTrue(names & {"Decompression Hang", "Wall Angels", "Hip Flexor Stretch"})
 
-    def test_tc_t1_teen_beast_whitelist_only(self):
-        from workouts.exercise_assignment_data import BEAST_MODE_CANONICAL_KEYS, normalize_exercise_name
-
+    def test_tc_t1_teen_beast_is_hgh_dominant(self):
+        """Exercise Assignment Spec TC-T1: young teen Beast picks are HGH movers."""
         losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
         pool = _teen_pool()
         core = [_ex_from_spec(n) for n in ["decompression hang", "cobra stretch", "hip flexor stretch", "wall angels"]]
         _, beast = select_teen_recommended_beast(pool, losses, 13, core)
+        beast_names = {e.name for e in beast}
+        # Document worked example (age 14, same losses): Box Jumps + Mountain Climbers.
+        self.assertEqual(beast_names, {"Box Jumps", "Mountain Climbers"})
         for ex in beast:
-            key = normalize_exercise_name(ex.name)
-            self.assertIn(key, BEAST_MODE_CANONICAL_KEYS)
-            self.assertFalse(ex.teen_only)
+            self.assertTrue(ex.teen_only)
 
     def test_tc_t2_teen_beast_never_doorway(self):
         from workouts.exercise_assignment_data import normalize_exercise_name

@@ -26,7 +26,6 @@ from utils.exercise_assignment import (
     score_adult_exercise,
     score_teen_beast,
     score_teen_recommended,
-    _beast_candidates,
 )
 from utils.exercise_prescriptions import prescription_for_exercise_name
 from workouts.exercise_assignment_data import (
@@ -373,79 +372,15 @@ def _append_core_slots_by_names(variant, core, names, seen_ids, *, allowed_categ
 
 def _trim_core_whitelist_for_beast(core, variant, *, allowed_categories=None, age: int = 25):
     """
-    UserRoutineExercise enforces unique (routine, exercise). Core 6 often includes
-    all four Section 10.2 beast-whitelist moves; keep at most two in core and
-    reserve the rest for beast tier only.
-    """
-    cats = allowed_categories or POSTURE_ALLOWED_CATEGORIES
-    keep_wl = []
-    drop_wl = []
-    other = []
-    for ve in core:
-        key = spec_key_for_name(getattr(ve.exercise, "name", "") or "")
-        if key in BEAST_MODE_CANONICAL_KEYS:
-            if len(keep_wl) < 2:
-                keep_wl.append(ve)
-            else:
-                drop_wl.append(ve)
-        else:
-            other.append(ve)
-    # ≤2 whitelist in core: no trim needed. >2: reserve extras for beast (never backfill whitelist into core).
-    if not drop_wl:
-        return core[:6], []
+    Preserve the documented Core 6 as-is.
 
-    seen_ids = {ve.exercise_id for ve in other + keep_wl}
-    fillers = []
-    extra_core = (
-        _variant_qs(variant, Tier.CORE, allowed_categories=cats)
-        .select_related("exercise")
-        .order_by("order")
-    )
-    for ve in extra_core:
-        if ve.exercise_id in seen_ids:
-            continue
-        key = spec_key_for_name(ve.exercise.name)
-        if key in BEAST_MODE_CANONICAL_KEYS:
-            continue
-        fillers.append(ve)
-        seen_ids.add(ve.exercise_id)
-        if len(other) + len(keep_wl) + len(fillers) >= 6:
-            break
-    new_core = (other + keep_wl + fillers)[:6]
-    seen_ids = {ve.exercise_id for ve in new_core}
-    if len(new_core) < 6:
-        name_list = (
-            TEEN_CORE_6_NAMES if 13 <= int(age) <= 20 else _adult_core_names_for_age(age)
-        )
-        # Prefer non-beast-whitelist spec names as fillers (Chin Tucks, Cat-Cow, …).
-        non_beast_names = [
-            n
-            for n in name_list
-            if (spec_key_for_name(n) or "") not in BEAST_MODE_CANONICAL_KEYS
-        ]
-        _append_core_slots_by_names(
-            variant, new_core, non_beast_names, seen_ids, allowed_categories=cats
-        )
-        if len(new_core) < 6:
-            for ex in adult_scoring_pool_queryset(Exercise):
-                if len(new_core) >= 6:
-                    break
-                key = spec_key_for_name(ex.name)
-                if key in BEAST_MODE_CANONICAL_KEYS or ex.id in seen_ids:
-                    continue
-                pres = prescription_for_exercise_name(ex.name)
-                new_core.append(
-                    _SyntheticVariantExercise(
-                        variant=variant,
-                        exercise=ex,
-                        tier=Tier.CORE,
-                        order=len(new_core) + 1,
-                        **pres,
-                    )
-                )
-                seen_ids.add(ex.id)
-    reserved = [ve.exercise for ve in drop_wl]
-    return new_core[:6], reserved
+    Under the Exercise Assignment Spec (Parts 1–2), Beast Mode is scored across the
+    FULL remaining pool, so there is no longer any need to evict beast-eligible moves
+    from core to keep beast slots fillable. Beast selection already excludes core
+    exercise ids (UserRoutineExercise is unique per routine+exercise), so keeping the
+    spec Core 6 intact is both correct and matches §4.4 of the master spec.
+    """
+    return core[:6], []
 
 
 class _SyntheticVariantExercise:
@@ -526,7 +461,13 @@ def _backfill_posture_slots(
         score_beast = lambda ex: score_adult_exercise(ex, losses, is_beast=True)
 
     if need_beast > 0:
-        for ex in pick_top_scored(_beast_candidates(pool), score_beast, need_beast + 4, exclude=exclude):
+        # Exercise Assignment Spec: beast comes from the full pool (adults exclude
+        # teen-only HGH moves; teens keep them — they win the beast formula).
+        if is_teen:
+            beast_pool = list(pool)
+        else:
+            beast_pool = [ex for ex in pool if not getattr(ex, "teen_only", False)]
+        for ex in pick_top_scored(beast_pool, score_beast, need_beast + 6, exclude=exclude):
             if _add(ex, Tier.BEAST):
                 need_beast -= 1
             if need_beast <= 0:
@@ -715,7 +656,38 @@ def assign_teen_posture_exercises(variant, optimization_breakdown, age, ranked_s
 
 
 def assign_teen_hgh_beast(variant, ranked_segments, age):
-    return []
+    """Spec v33 §10.6 — pick ONE HGH Beast Mode exercise for teens.
+
+    Pool = HGH beast-tier exercises for the variant (Core-2 HGH lives in the
+    CORE tier and is therefore naturally excluded). Walk the worst-ranked
+    segments in order and return the highest-points exercise whose primary
+    segment matches; ties broken by points desc. Fallback to "HGH Boost" if
+    present, else the highest-points exercise in the pool.
+
+    Returns a list of 0 or 1 VariantExercise (callers expect a slot list).
+    """
+    pool = list(
+        VariantExercise.objects.filter(variant=variant, tier=Tier.BEAST)
+        .filter(exercise__category__in=list(HGH_ALLOWED_CATEGORIES))
+        .select_related("exercise")
+        .order_by("-exercise__points", "order", "id")
+    )
+    if not pool:
+        return []
+
+    for segment in ranked_segments or []:
+        mapped_type = SEGMENT_TO_EXERCISE_TYPE.get(segment)
+        if mapped_type is None:
+            continue
+        candidates = [ve for ve in pool if ve.type == mapped_type]
+        if candidates:
+            return [candidates[0]]
+
+    for ve in pool:
+        if "hgh boost" in (ve.exercise.name or "").strip().lower():
+            return [ve]
+
+    return [pool[0]]
 
 
 def _attach_posture_snapshot(routine, user) -> None:

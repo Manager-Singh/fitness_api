@@ -1,112 +1,92 @@
-"""Section 10.2 — beast tier whitelist and duplicate prevention."""
+"""Exercise Assignment Spec (Parts 1–2) — beast selection scores the full pool.
+
+Historical note: an earlier model restricted Beast Mode to a 4-exercise posture
+whitelist. The authoritative Exercise_Assignment_Spec.docx scores Beast across the
+full remaining pool, so these tests assert the documented invariants instead:
+  - adults never receive teen-only HGH moves (TC-N),
+  - no exercise is assigned to more than one tier,
+  - high-intensity non-whitelist moves (Plank, Superman Hold) can be beast.
+"""
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
-from utils.exercise_assignment import (
-    _is_beast_mode_eligible,
-    select_adult_recommended_beast,
+from utils.exercise_assignment import select_adult_recommended_beast
+from workouts.exercise_assignment_data import (
+    EXERCISE_ASSIGNMENT_SPEC,
+    TEEN_ONLY_HGH_NAMES,
+    dedupe_name_key,
+    normalize_exercise_name,
 )
-from workouts.exercise_assignment_data import dedupe_name_key, normalize_exercise_name
 
 
-_ex_id = 0
+def _ex_from_spec(key: str):
+    spec = EXERCISE_ASSIGNMENT_SPEC[key]
+    return SimpleNamespace(
+        id=abs(hash(key)) % 1000000,
+        name=spec["name"],
+        teen_only=spec.get("teen_only", False),
+        adult_only=spec.get("adult_only", False),
+        spinal_pct=spec["spinal_pct"],
+        collapse_pct=spec["collapse_pct"],
+        pelvic_pct=spec["pelvic_pct"],
+        legs_pct=spec["legs_pct"],
+        potency=spec["potency"],
+        hgh_score=spec["hgh_score"],
+        beast_bonus=spec["beast_bonus"],
+        assignment_matrix_ready=True,
+    )
 
 
-def _ex(name, **kwargs):
-    global _ex_id
-    _ex_id += 1
-    defaults = {
-        "teen_only": False,
-        "spinal_pct": 50,
-        "collapse_pct": 50,
-        "pelvic_pct": 50,
-        "legs_pct": 50,
-        "potency": 7,
-        "hgh_score": 1,
-        "beast_bonus": 1,
-        "assignment_matrix_ready": True,
-    }
-    defaults.update(kwargs)
-    return SimpleNamespace(id=kwargs.pop("id", _ex_id), name=name, **defaults)
+def _adult_pool():
+    return [
+        _ex_from_spec(k)
+        for k, v in EXERCISE_ASSIGNMENT_SPEC.items()
+        if not v.get("teen_only") and not v.get("adult_only")
+    ]
 
 
-class BeastWhitelistTests(SimpleTestCase):
-    def test_doorway_not_beast_eligible(self):
-        doorway = _ex("Doorway Chest Stretch")
-        self.assertFalse(_is_beast_mode_eligible(doorway))
-        self.assertTrue(_is_beast_mode_eligible(_ex("Wall Angels")))
-
-    def test_beast_picks_only_whitelist(self):
-        pool = [
-            _ex("Doorway Chest Stretch"),
-            _ex("Doorways Chest Stretch"),
-            _ex("Wall Angels"),
-            _ex("Glute Bridges"),
-            _ex("Hip Flexor Stretch"),
-            _ex("Decompression Hang"),
-            _ex("Cat-Cow Stretch"),
-        ]
-        core = [_ex("Cobra Stretch"), _ex("Hamstring Stretch")]
-        losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
+class BeastSelectionFullPoolTests(SimpleTestCase):
+    def test_adult_beast_can_be_non_whitelist_intense_move(self):
+        # Collapse-dominant user. Recommended (no beast bonus) takes Doorway + Wall
+        # Angels; beast (intensity weighted) should then surface Superman Hold / Plank.
+        losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
+        pool = _adult_pool()
+        core = [_ex_from_spec("decompression hang"), _ex_from_spec("cobra stretch")]
         rec, beast = select_adult_recommended_beast(pool, losses, core)
-        for ex in beast:
-            key = normalize_exercise_name(ex.name)
-            self.assertIn(
-                key,
-                {"decompression hang", "wall angels", "glute bridges", "hip flexor stretch"},
-            )
-            self.assertNotEqual(key, "doorway chest stretch")
-
-    def test_beast_filled_from_reserved_when_whitelist_only_on_core(self):
-        """After core trim, reserved whitelist rows must fill beast without duplicate exercise ids."""
-        core = [
-            _ex("Decompression Hang"),
-            _ex("Cobra Stretch"),
-            _ex("Pelvic Tilts"),
-            _ex("Wall Angels"),
-        ]
-        reserved = [_ex("Glute Bridges"), _ex("Hip Flexor Stretch")]
-        pool = core + reserved + [_ex("Hamstring Stretch"), _ex("Butterfly Stretch")]
-        losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
-        rec, beast = select_adult_recommended_beast(pool, losses, core, reserved_beast=reserved)
-        self.assertEqual(len(rec), 2)
+        beast_names = {e.name for e in beast}
         self.assertEqual(len(beast), 2)
-        core_ids = {e.id for e in core}
-        reserved_ids = {e.id for e in reserved}
-        rec_ids = {e.id for e in rec}
-        beast_ids = {e.id for e in beast}
-        self.assertFalse(rec_ids & reserved_ids)
-        self.assertFalse(rec_ids & beast_ids)
-        self.assertFalse(core_ids & beast_ids)
-        for ex in beast:
-            self.assertTrue(_is_beast_mode_eligible(ex))
-            self.assertNotIn(ex.id, core_ids)
+        # At least one classic non-whitelist intense move appears in beast.
+        self.assertTrue(beast_names & {"Superman Hold", "Plank", "Butterfly Stretch"})
 
-    def test_reserved_whitelist_not_duplicated_in_rec_and_beast(self):
-        """Hip Flexor reserved for beast must not also land in rec (9-slot bug)."""
-        core = [
-            _ex("Cobra Stretch"),
-            _ex("Chin Tucks"),
-            _ex("Decompression Hang"),
-            _ex("Glute Bridges"),
-            _ex("Butterfly Stretch"),
-            _ex("Cat-Cow Stretch"),
-        ]
-        hip = _ex("Hip Flexor Stretch")
-        wall = _ex("Wall Angels")
-        reserved = [hip, wall]
-        pool = core + reserved + [
-            _ex("Hamstring Stretch"),
-            _ex("Doorway Chest Stretch"),
-            _ex("Pelvic Tilts"),
-        ]
+    def test_no_exercise_in_two_tiers(self):
         losses = {"spinal": 0.5, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
-        rec, beast = select_adult_recommended_beast(pool, losses, core, reserved_beast=reserved)
-        all_ids = {e.id for e in core + rec + beast}
-        self.assertEqual(len(rec) + len(beast) + len(core), len(all_ids))
-        self.assertIn(hip.id, {e.id for e in beast})
-        self.assertNotIn(hip.id, {e.id for e in rec})
+        pool = _adult_pool()
+        core = [_ex_from_spec("decompression hang"), _ex_from_spec("cobra stretch")]
+        rec, beast = select_adult_recommended_beast(pool, losses, core)
+        ids = [e.id for e in rec + beast]
+        keys = [dedupe_name_key(e.name) for e in rec + beast]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(keys), len(set(keys)))
+        core_ids = {e.id for e in core}
+        self.assertFalse(core_ids & set(ids))
+
+    def test_tc_n_adult_never_teen_only(self):
+        import random
+
+        pool = _adult_pool()
+        core = [_ex_from_spec("decompression hang")]
+        for _ in range(50):
+            losses = {
+                "spinal": random.random(),
+                "collapse": random.random() * 2,
+                "pelvic": random.random(),
+                "legs": random.random(),
+            }
+            rec, beast = select_adult_recommended_beast(pool, losses, core)
+            for ex in rec + beast:
+                self.assertFalse(ex.teen_only)
+                self.assertNotIn(normalize_exercise_name(ex.name), TEEN_ONLY_HGH_NAMES)
 
     def test_dedupe_logic_normalized_names(self):
         seen: set[str] = set()
