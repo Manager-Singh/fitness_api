@@ -25,6 +25,7 @@ class ExerciseSerializer(serializers.ModelSerializer):
             "instruction_lines",
             "category",       # human‑readable string
             "points",
+            "seconds_per_rep",
             "photo_url",      # absolute URL or null
         )
 

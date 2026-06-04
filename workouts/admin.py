@@ -104,7 +104,7 @@ class ExerciseAdmin(admin.ModelAdmin):
             _("Instructions"),
             {
                 "classes": ("wide",),
-                "fields": ("instruction_methods", "safety_note"),
+                "fields": ("instruction_methods", "safety_note", "seconds_per_rep"),
                 "description": _(
                     "Add one or more methods (each with a title + ordered steps). Stored as structured JSON for the app."
                 ),

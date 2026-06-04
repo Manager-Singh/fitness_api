@@ -56,6 +56,14 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
     # NEW ▶︎ has the user completed this exercise today?
     completed = serializers.SerializerMethodField()
     section6_display_copy = serializers.SerializerMethodField()
+    seconds_per_rep = serializers.DecimalField(
+        source="exercise.seconds_per_rep",
+        max_digits=4,
+        decimal_places=2,
+        allow_null=True,
+        read_only=True,
+    )
+    primary_timer_dosage = serializers.SerializerMethodField()
 
     class Meta:
         model  = VariantExercise
@@ -67,6 +75,8 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
             "safety_note",
             "instruction_lines",
             "order", "tier",'type', "sets", "qty_min", "qty_max", "unit",
+            "seconds_per_rep",
+            "primary_timer_dosage",
             "completed", "section6_display_copy",
         )
 
@@ -96,6 +106,18 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
 
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
+
+    def get_primary_timer_dosage(self, obj):
+        from workouts.exercise_timer_display import format_primary_timer_dosage
+
+        per_side = "per" in (obj.notes or "").lower()
+        return format_primary_timer_dosage(
+            sets=obj.sets,
+            quantity_min=obj.quantity_min,
+            quantity_max=obj.quantity_max,
+            unit=obj.unit,
+            per_side=per_side,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────

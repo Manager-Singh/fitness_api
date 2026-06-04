@@ -64,6 +64,14 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     completed = serializers.SerializerMethodField()
     section6_display_copy = serializers.SerializerMethodField()
     tier_label = serializers.SerializerMethodField()
+    seconds_per_rep = serializers.DecimalField(
+        source="exercise.seconds_per_rep",
+        max_digits=4,
+        decimal_places=2,
+        allow_null=True,
+        read_only=True,
+    )
+    primary_timer_dosage = serializers.SerializerMethodField()
 
     class Meta:
         model = UserRoutineExercise
@@ -89,6 +97,8 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "qty_min",
             "qty_max",
             "notes",
+            "seconds_per_rep",
+            "primary_timer_dosage",
             "completed",
             "section6_display_copy",
         )
@@ -144,6 +154,18 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
 
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
+
+    def get_primary_timer_dosage(self, obj):
+        from workouts.exercise_timer_display import format_primary_timer_dosage
+
+        per_side = "per" in (obj.notes or "").lower()
+        return format_primary_timer_dosage(
+            sets=obj.sets,
+            quantity_min=obj.qty_min,
+            quantity_max=obj.qty_max,
+            unit=obj.unit,
+            per_side=per_side,
+        )
 
     def get_tier_label(self, obj):
         mapping = {

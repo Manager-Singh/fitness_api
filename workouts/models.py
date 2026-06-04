@@ -128,6 +128,16 @@ class Exercise(models.Model):
     beast_bonus = models.PositiveSmallIntegerField(default=0)
     teen_only = models.BooleanField(default=False)
     adult_only = models.BooleanField(default=False)
+    seconds_per_rep = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Rep-counter auto-pace interval (seconds between rep ticks). "
+            "Leave empty for hold/timer exercises (unit=secs)."
+        ),
+    )
 
     class Meta:
         ordering = ["name"]
