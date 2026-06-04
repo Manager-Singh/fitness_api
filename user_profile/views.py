@@ -990,8 +990,7 @@ def get_profile(request):
 
         # Check active status (within duration)
         created_at = latest_payment.created_at
-        duration = getattr(package, 'duration', )  # default 30 if not defined
-        duration_days = int(duration)*30
+        duration_days = package.duration_in_days()
         expires_at = created_at + timedelta(days=duration_days)
         
 

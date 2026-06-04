@@ -107,7 +107,9 @@ class PaymentPackageSerializer(serializers.ModelSerializer):
         if not free_payment:
             return False
 
-        expiry_date = free_payment.created_at + timedelta(days=30 * int(free_payment.package.duration))
+        expiry_date = free_payment.created_at + timedelta(
+            days=free_payment.package.duration_in_days()
+        )
         return timezone.now() < expiry_date
 
     def get_user_payment(self, obj):
@@ -136,7 +138,9 @@ class PaymentPackageSerializer(serializers.ModelSerializer):
         if not latest_payment:
             return False
 
-        expiry_date = latest_payment.created_at + timedelta(days=30 * int(latest_payment.package.duration))
+        expiry_date = latest_payment.created_at + timedelta(
+            days=latest_payment.package.duration_in_days()
+        )
 
         if timezone.now() > expiry_date:
             return False
@@ -159,6 +163,8 @@ class PaymentPackageSerializer(serializers.ModelSerializer):
         if latest_payment.package_id != obj.id:
             return 0
 
-        expiry_date = latest_payment.created_at + timedelta(days=30 * int(latest_payment.package.duration))
+        expiry_date = latest_payment.created_at + timedelta(
+            days=latest_payment.package.duration_in_days()
+        )
 
         return max((expiry_date - timezone.now()).days, 0)

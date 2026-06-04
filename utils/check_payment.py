@@ -171,11 +171,9 @@ def check_subscription_or_response(user):
     # the response must reflect paid access even if trial window is still active.
     if latest_payment:
         package = latest_payment.package
-        try:
-            duration_months = int(package.duration)
-        except (ValueError, TypeError):
-            duration_months = 3
-        expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
+        expiry_date = latest_payment.created_at + timedelta(
+            days=package.duration_in_days()
+        )
         if expiry_date >= now:
             days_left = (expiry_date - now).days
             if not bool(package.is_free):
@@ -249,12 +247,7 @@ def check_subscription_or_response(user):
 
     package = latest_payment.package
 
-    try:
-        duration_months = int(package.duration)
-    except (ValueError, TypeError):
-        duration_months = 3
-
-    expiry_date = latest_payment.created_at + timedelta(days=duration_months * 30)
+    expiry_date = latest_payment.created_at + timedelta(days=package.duration_in_days())
 
     if expiry_date < now:
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1 if (is_teen and trial_start) else None
