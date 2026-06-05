@@ -72,6 +72,15 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     primary_timer_dosage = serializers.SerializerMethodField()
+    # Item 1 (robust fix): serve dosage LIVE from the linked catalog prescription
+    # (VariantExercise) instead of the frozen UserRoutineExercise snapshot, so
+    # existing users see current catalog numbers (sets/reps/unit) without needing
+    # a routine regeneration. Falls back to the stored row for legacy rows that
+    # have no variant link.
+    sets = serializers.SerializerMethodField()
+    unit = serializers.SerializerMethodField()
+    qty_min = serializers.SerializerMethodField()
+    qty_max = serializers.SerializerMethodField()
 
     class Meta:
         model = UserRoutineExercise
@@ -155,22 +164,57 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
 
+    @staticmethod
+    def _dosage_source(obj):
+        """Canonical (sets, qty_min, qty_max, unit, notes) for this row.
+
+        Prefer the live catalog prescription (VariantExercise) so catalog edits
+        show up without regenerating routines; fall back to the stored
+        UserRoutineExercise snapshot only when there is no variant link.
+        """
+        ve = getattr(obj, "variant_exercise", None)
+        if ve is not None:
+            return {
+                "sets": ve.sets,
+                "qty_min": ve.quantity_min,
+                "qty_max": ve.quantity_max,
+                "unit": ve.unit,
+                # URE.notes is overwritten with the assignment label at generation
+                # time, dropping the "per side"/"per leg" qualifier; VE.notes keeps it.
+                "notes": ve.notes or obj.notes,
+            }
+        return {
+            "sets": obj.sets,
+            "qty_min": obj.qty_min,
+            "qty_max": obj.qty_max,
+            "unit": obj.unit,
+            "notes": obj.notes,
+        }
+
+    def get_sets(self, obj):
+        return self._dosage_source(obj)["sets"]
+
+    def get_unit(self, obj):
+        return self._dosage_source(obj)["unit"]
+
+    def get_qty_min(self, obj):
+        return self._dosage_source(obj)["qty_min"]
+
+    def get_qty_max(self, obj):
+        return self._dosage_source(obj)["qty_max"]
+
     def get_primary_timer_dosage(self, obj):
         from workouts.exercise_timer_display import format_primary_timer_dosage
 
-        # Routine generation overwrites UserRoutineExercise.notes with the
-        # assignment label ("REC - posture assignment spec"), dropping the
-        # catalog's "per side"/"per leg" qualifier. Read it from the linked
-        # VariantExercise (set on import), falling back to this row's notes.
-        ve = getattr(obj, "variant_exercise", None)
-        note_src = (getattr(ve, "notes", None) or obj.notes or "").lower()
+        src = self._dosage_source(obj)
+        note_src = (src["notes"] or "").lower()
         per_side = "per" in note_src
         per_side_word = "leg" if "leg" in note_src else "side"
         return format_primary_timer_dosage(
-            sets=obj.sets,
-            quantity_min=obj.qty_min,
-            quantity_max=obj.qty_max,
-            unit=obj.unit,
+            sets=src["sets"],
+            quantity_min=src["qty_min"],
+            quantity_max=src["qty_max"],
+            unit=src["unit"],
             per_side=per_side,
             per_side_word=per_side_word,
         )
