@@ -158,13 +158,21 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     def get_primary_timer_dosage(self, obj):
         from workouts.exercise_timer_display import format_primary_timer_dosage
 
-        per_side = "per" in (obj.notes or "").lower()
+        # Routine generation overwrites UserRoutineExercise.notes with the
+        # assignment label ("REC - posture assignment spec"), dropping the
+        # catalog's "per side"/"per leg" qualifier. Read it from the linked
+        # VariantExercise (set on import), falling back to this row's notes.
+        ve = getattr(obj, "variant_exercise", None)
+        note_src = (getattr(ve, "notes", None) or obj.notes or "").lower()
+        per_side = "per" in note_src
+        per_side_word = "leg" if "leg" in note_src else "side"
         return format_primary_timer_dosage(
             sets=obj.sets,
             quantity_min=obj.qty_min,
             quantity_max=obj.qty_max,
             unit=obj.unit,
             per_side=per_side,
+            per_side_word=per_side_word,
         )
 
     def get_tier_label(self, obj):

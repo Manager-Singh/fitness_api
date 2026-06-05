@@ -30,11 +30,14 @@ def build_posture_optimization_diagnostics(
     re_scan_timer_days = None if days_since_scan is None else max(0, int(rescan_days) - int(days_since_scan))
     next_scan_at = None if last_scan_at is None else (last_scan_at + timedelta(days=int(rescan_days)))
 
+    # Keep FULL micrometre precision here. Per POSTURE_BARS_DIRECTIVE.md the
+    # precise bars must reflect sub-0.01cm recovery (1 logged point moves the
+    # Legs bar ~0.01%); rounding to 2dp (=100um) up front froze that movement.
     runtime_segments = {
-        "spinal_compression": round(float(runtime.get("spinal_current_loss_um", 0)) / 10000.0, 2),
-        "posture_collapse": round(float(runtime.get("collapse_current_loss_um", 0)) / 10000.0, 2),
-        "pelvic_tilt_back": round(float(runtime.get("pelvic_current_loss_um", 0)) / 10000.0, 2),
-        "leg_hamstring": round(float(runtime.get("legs_current_loss_um", 0)) / 10000.0, 2),
+        "spinal_compression": float(runtime.get("spinal_current_loss_um", 0)) / 10000.0,
+        "posture_collapse": float(runtime.get("collapse_current_loss_um", 0)) / 10000.0,
+        "pelvic_tilt_back": float(runtime.get("pelvic_current_loss_um", 0)) / 10000.0,
+        "leg_hamstring": float(runtime.get("legs_current_loss_um", 0)) / 10000.0,
     }
 
     # Section 4.3: after unlock, bars must reflect live PostureState (Engine-1 recovery),

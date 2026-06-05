@@ -21,11 +21,12 @@ class ParsedDosage:
     unit: str  # Unit.REPS or Unit.SECS
     per_side: bool
     is_timer: bool
+    per_side_word: str = "side"  # "side" or "leg" (the client catalog distinguishes both)
 
     @property
     def per_side_note(self) -> str:
         if self.per_side:
-            return "per side"
+            return f"per {self.per_side_word or 'side'}"
         return ""
 
 
@@ -47,7 +48,8 @@ def parse_primary_timer_dosage(text: str) -> ParsedDosage | None:
     sets = int(m.group(1))
     qty_min, qty_max = _parse_quantity(m.group(2))
     unit_word = m.group(3).lower()
-    per_side = bool(m.group(4))
+    side_word = (m.group(4) or "").lower()
+    per_side = bool(side_word)
     is_timer = "second" in unit_word or "(timer)" in text.lower()
     unit = Unit.SECS if is_timer else Unit.REPS
     return ParsedDosage(
@@ -57,6 +59,7 @@ def parse_primary_timer_dosage(text: str) -> ParsedDosage | None:
         unit=unit,
         per_side=per_side,
         is_timer=is_timer,
+        per_side_word=side_word or "side",
     )
 
 
@@ -67,18 +70,25 @@ def format_primary_timer_dosage(
     quantity_max: int | None,
     unit: str,
     per_side: bool = False,
+    per_side_word: str | None = None,
 ) -> str:
-    """Human-readable dosage matching the client catalog format."""
+    """Human-readable dosage matching the client catalog format.
+
+    ``per_side_word`` lets callers preserve the catalog's "per side" vs
+    "per leg" distinction; defaults to "side" when only the boolean is given.
+    """
+    suffix = ""
+    if per_side:
+        word = (per_side_word or "side").strip().lower() or "side"
+        suffix = f" per {word}"
+    if unit == Unit.SECS:
+        if quantity_max and quantity_max != quantity_min:
+            qty = f"{quantity_min}–{quantity_max}"
+        else:
+            qty = str(quantity_min)
+        return f"{sets} set(s) × {qty} seconds{suffix} (timer)"
     if quantity_max and quantity_max != quantity_min:
         qty = f"{quantity_min}–{quantity_max}"
     else:
         qty = str(quantity_min)
-    if unit == Unit.SECS:
-        base = f"{sets} set(s) × {qty} seconds"
-        if per_side:
-            base += " per side"
-        return f"{base} (timer)"
-    base = f"{sets} set(s) × {qty} reps"
-    if per_side:
-        base += " per side"
-    return base
+    return f"{sets} set(s) × {qty} reps{suffix}"

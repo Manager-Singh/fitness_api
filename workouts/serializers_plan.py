@@ -110,13 +110,16 @@ class ExerciseWorkoutSerializer(serializers.ModelSerializer):
     def get_primary_timer_dosage(self, obj):
         from workouts.exercise_timer_display import format_primary_timer_dosage
 
-        per_side = "per" in (obj.notes or "").lower()
+        note_src = (obj.notes or "").lower()
+        per_side = "per" in note_src
+        per_side_word = "leg" if "leg" in note_src else "side"
         return format_primary_timer_dosage(
             sets=obj.sets,
             quantity_min=obj.quantity_min,
             quantity_max=obj.quantity_max,
             unit=obj.unit,
             per_side=per_side,
+            per_side_word=per_side_word,
         )
 
 

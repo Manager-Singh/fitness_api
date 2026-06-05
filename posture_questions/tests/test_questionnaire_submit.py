@@ -275,38 +275,56 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
 
 
 class Issue9VisualQuestionnaireScoringTests(TestCase):
-    def test_issue9_example_matches_spec(self):
+    """Acceptance tests from POSTURE_LOSS_SCORING_FIX.md (client-signed-off recalibration)."""
+
+    @staticmethod
+    def _bars_sum(r):
+        return sum(r["segments"][s]["loss_cm"] for s in ("spinal", "collapse", "pelvic", "legs"))
+
+    def test_all_d_is_max_and_bars_reconcile(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
-        # Example scenario in doc: mostly B
-        answers = {"q1": "B", "q2": "B", "q3": "B", "q4": "B", "q5": "A", "q6": "B", "q7": "A", "q8": "B"}
-        r = compute_issue9_visual_results(answers)
-        self.assertAlmostEqual(r["raw_loss_cm"], 3.7, places=2)
-        self.assertAlmostEqual(r["total_loss_cm"], 3.7, places=2)
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 3.33, places=2)
-        self.assertEqual(r["ranked_segments"][0], "collapse")
-        self.assertEqual(r["ranked_segments"][1], "pelvic")
+        r = compute_issue9_visual_results({q: "D" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 6.00, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 6.00, places=2)
 
-    def test_q8_is_multiplier_only(self):
+    def test_all_a_hits_floor(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
-        base_answers = {"q1": "A", "q2": "A", "q3": "A", "q4": "A", "q5": "A", "q6": "A", "q7": "A"}
-        r_a = compute_issue9_visual_results({**base_answers, "q8": "A"})
-        r_d = compute_issue9_visual_results({**base_answers, "q8": "D"})
-        # raw_loss should be identical (q8 not included)
-        self.assertAlmostEqual(r_a["raw_loss_cm"], r_d["raw_loss_cm"], places=2)
-        # recoverable must differ due to multiplier
-        self.assertNotEqual(r_a["total_recoverable_loss_cm"], r_d["total_recoverable_loss_cm"])
+        r = compute_issue9_visual_results({q: "A" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.50, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 0.50, places=2)
 
-    def test_q5_option_d_is_point6(self):
+    def test_all_c_total(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
-        answers_b = {"q1": "A", "q2": "A", "q3": "A", "q4": "A", "q5": "B", "q6": "A", "q7": "A", "q8": "A"}
-        answers_d = {**answers_b, "q5": "D"}
-        r_b = compute_issue9_visual_results(answers_b)
-        r_d = compute_issue9_visual_results(answers_d)
-        # B and D are both 0.6, so totals match exactly when multiplier=1.0
-        self.assertAlmostEqual(r_b["raw_loss_cm"], r_d["raw_loss_cm"], places=2)
+        r = compute_issue9_visual_results({q: "C" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 4.15, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 4.15, places=2)
+
+    def test_q8_adds_loss_never_halves(self):
+        from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
+
+        base = {q: "A" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7")}
+        r = compute_issue9_visual_results({**base, "q8": "D"})
+        # Q8=D alone (others A) adds 0.7 (proves Q8 ADDS and never multiplies/halves).
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.70, places=2)
+        self.assertEqual(r.get("structural_loss_cm"), 0.0)
+
+    def test_reconciliation_across_random_mixes(self):
+        import random
+        from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
+
+        rng = random.Random(1234)
+        qs = ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")
+        for _ in range(2000):
+            answers = {q: rng.choice("ABCD") for q in qs}
+            r = compute_issue9_visual_results(answers)
+            # Bars are rounded to 2dp each, so their sum can drift up to ~0.02
+            # from the headline; that is the "within rounding" tolerance.
+            self.assertAlmostEqual(
+                r["total_recoverable_loss_cm"], self._bars_sum(r), delta=0.03, msg=str(answers)
+            )
 
     def test_issue9_can_use_existing_answer_fields_as_letters(self):
         """
