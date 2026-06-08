@@ -22,9 +22,26 @@ def apply_display_name_to_user(user, raw_name) -> None:
     user.name = label
 
 
-def apply_country_timezone_default(user, country_code: str | None) -> None:
-    """Set timezone from country when user has not chosen a non-UTC zone."""
+def apply_country_timezone_default(user, country_code: str | None, *, force: bool = False) -> None:
+    """
+    Set the user's timezone from their country.
+
+    Default (force=False): only fill it in when the user has not chosen a non-UTC zone
+    (signup / users still on UTC) so an explicit device/user timezone is never clobbered.
+
+    force=True (use when the country itself is being CHANGED and the same request did not
+    also supply an explicit timezone): re-derive from the new country so e.g. a user who
+    registered in Canada and switches to Belgium moves to Europe/Brussels. Guardrail: a
+    country that maps to bare UTC (unmapped / multi-zone like US) will NOT overwrite an
+    already-set zone — we don't downgrade Winnipeg to UTC just because the map has no US row.
+    """
     cc = str(country_code or "").strip().upper() if country_code else ""
-    if not cc or not should_apply_country_default_timezone(user):
+    if not cc:
         return
-    user.timezone = default_timezone_for_country(cc)
+    tz = default_timezone_for_country(cc)
+    if force:
+        if tz != "UTC" or should_apply_country_default_timezone(user):
+            user.timezone = tz
+        return
+    if should_apply_country_default_timezone(user):
+        user.timezone = tz

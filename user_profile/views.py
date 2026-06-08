@@ -444,7 +444,9 @@ def update_profile_users(request):
                 )
             user.country_code = cc
             user_update_fields.append("country_code")
-            apply_country_timezone_default(user, cc)
+            # Re-derive the timezone from the new country unless the client also sent an
+            # explicit timezone in this request (device tz wins when provided).
+            apply_country_timezone_default(user, cc, force=("timezone" not in request.data))
             if "timezone" not in user_update_fields:
                 user_update_fields.append("timezone")
     if user_update_fields:
@@ -1182,7 +1184,8 @@ def my_profile(request):
                         status=422,
                     )
                 user.country_code = cc
-                apply_country_timezone_default(user, cc)
+                # Re-derive tz on country change unless an explicit timezone was sent too.
+                apply_country_timezone_default(user, cc, force=("timezone" not in request.data))
 
         # Profile-level onboarding fields (reuse same validation constants as update_profile_users).
         if "gender" in request.data:
