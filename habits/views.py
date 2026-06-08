@@ -41,7 +41,7 @@ class HabitCatalogView(APIView):
 
 class HabitLogViewSet(viewsets.ViewSet):
     """
-    POST /api/habit-logs — toggle AM/PM/once micro-habit log (Engine 1, cap 6/day).
+    POST /api/habit-logs — toggle AM/PM/once micro-habit log (Engine 1, cap 12/day).
     GET  /api/habit-logs — today's habit state (same shape as habits catalog).
     """
 

@@ -6,25 +6,21 @@ from utils.user_time import user_today
 
 
 def _adult_food_requirement_met(user, day):
-    foods = NutraEntry.objects.filter(
-        session__user=user,
-        session__date=day,
-        food__isnull=False,
-    ).select_related("module")
+    # Part 2 — adult nutrition redesign: requirement is met when the day has both protein
+    # AND hydration logged (the protein+hydration model replaces the old disc/muscle foods).
+    from utils.adult_nutrition import (
+        adult_hydration_points,
+        adult_protein_points,
+        get_adult_nutrition_day,
+    )
 
-    has_disc_or_spine = False
-    has_muscle_or_repair = False
-
-    from utils.adult_nutrition import adult_food_bucket
-
-    for entry in foods:
-        b = adult_food_bucket(entry.module)
-        if b == "disc":
-            has_disc_or_spine = True
-        elif b == "muscle":
-            has_muscle_or_repair = True
-
-    return has_disc_or_spine and has_muscle_or_repair
+    row = get_adult_nutrition_day(user, day)
+    if not row:
+        return False
+    return (
+        adult_protein_points(row.protein_grams) > 0
+        and adult_hydration_points(row.water_ml, row.spine_500ml_count) > 0
+    )
 
 
 def _teen_food_requirement_met(user, day):

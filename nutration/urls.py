@@ -7,6 +7,7 @@ from .views import (
     ModuleViewSet, ModuleFoodViewSet, MyPlanView
 )
 from .views_log import NutraLogViewSet             # ← daily log (NutraSession)
+from .views_adult_nutrition import AdultNutritionView  # Part 2 adult nutrition
 
 # -------------------------------------------------------------------
 # router: all CRUD / read-only sets
@@ -24,6 +25,8 @@ router.register("nutra-logs",   NutraLogViewSet, basename="nutra-log")  # NEW
 urlpatterns = [
     # personalised plan (GET)
     path("my-nutrition-plan", MyPlanView.as_view(), name="my-nutrition-plan"),
+    # Part 2 — adult nutrition redesign (protein + hydration)
+    path("adult-nutrition", AdultNutritionView.as_view(), name="adult-nutrition"),
     # everything registered above
     path("", include(router.urls)),
 ]

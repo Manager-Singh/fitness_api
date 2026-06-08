@@ -15,15 +15,12 @@ def teen_nutrition_dots_from_food_points(food_points: float) -> int:
     return 4
 
 
-def teen_lifestyle_dots_for_day(user, log_date) -> int:
+def teen_lifestyle_channel_scores(user, log_date) -> dict:
     """
-    Section 5.10 — up to four lifestyle dots (one each channel when threshold met):
-    - Sleep: any logged tier 7–8h (5pts), 8–9h (8pts), or 9+h (10pts) → dot if score >= 5.
-    - Sunlight: spec awards 6 pts for 10–20 min outdoor → dot when sun score >= 6
-      (full tier; partial credit below 6 does not earn the dot).
-    - Meditation: morning/afternoon sessions (1 pt each in spec) → dot if any med score >= 1.
-    - Hydration: 2 L daily (1 pt) → dot if hydration score >= 1.
-    Uses NutraEntry module name routing consistent with spec_runtime / scores_summary.
+    Best logged score per lifestyle channel for the day, via NutraEntry module-name
+    routing (consistent with spec_runtime / scores_summary). Returns a dict with keys
+    ``sleep``, ``sun``, ``med``, ``hyd`` (floats). Shared by the dot bar and the Bug 11
+    combined-completion metric so both read the same source of truth.
     """
     from nutration.models_log import NutraEntry
 
@@ -44,14 +41,28 @@ def teen_lifestyle_dots_for_day(user, log_date) -> int:
             med = max(med, sc)
         elif "hydrat" in name or "water" in name:
             hyd = max(hyd, sc)
+    return {"sleep": sleep, "sun": sun, "med": med, "hyd": hyd}
+
+
+def teen_lifestyle_dots_for_day(user, log_date) -> int:
+    """
+    Section 5.10 — up to four lifestyle dots (one each channel when threshold met):
+    - Sleep: any logged tier 7–8h (5pts), 8–9h (8pts), or 9+h (10pts) → dot if score >= 5.
+    - Sunlight: spec awards 6 pts for 10–20 min outdoor → dot when sun score >= 6
+      (full tier; partial credit below 6 does not earn the dot).
+    - Meditation: morning/afternoon sessions (1 pt each in spec) → dot if any med score >= 1.
+    - Hydration: 2 L daily (1 pt) → dot if hydration score >= 1.
+    Uses NutraEntry module name routing consistent with spec_runtime / scores_summary.
+    """
+    scores = teen_lifestyle_channel_scores(user, log_date)
     dots = 0
-    if sleep >= 5.0:
+    if scores["sleep"] >= 5.0:
         dots += 1
-    if sun >= 6.0:
+    if scores["sun"] >= 6.0:
         dots += 1
-    if med >= 1.0:
+    if scores["med"] >= 1.0:
         dots += 1
-    if hyd >= 1.0:
+    if scores["hyd"] >= 1.0:
         dots += 1
     return min(4, dots)
 

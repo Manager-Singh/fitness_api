@@ -1295,12 +1295,34 @@ def my_profile(request):
     # --- today log + points ---
     today = user_today(user)
     daily = DailyLog.objects.filter(user=user, log_date=today).first()
+    # The profile total must count EVERY logged point. DailyLog stores four
+    # non-overlapping source buckets — exercise (posture+HGH), food, lifestyle, habits —
+    # so their sum is the true "all points" total with no double counting. engine1/engine2
+    # are DERIVED (routing + caps + gates) from those buckets and are reported separately
+    # as the points actually applied to height (Bug 5), NOT added into the total.
+    exercise_pts_today = int((daily.exercise_points if daily else 0) or 0)
+    food_pts_today = int((daily.food_points if daily else 0) or 0)
+    lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
+    habit_pts_today = int((daily.habit_points if daily else 0) or 0)
+    engine1_pts_today = int((daily.engine1_points if daily else 0) or 0)
+    engine2_pts_today = int((daily.engine2_points if daily else 0) or 0)
+    total_points_today = exercise_pts_today + food_pts_today + lifestyle_pts_today + habit_pts_today
     today_log = {
         "log_date": str(today),
-        "posture_pts": int((daily.engine1_points if daily else 0) or 0),
-        "hgh_pts": int((daily.engine2_points if daily else 0) or 0),
-        "nutrition_pts": int((daily.food_points if daily else 0) or 0),
-        "lifestyle_pts": int((daily.lifestyle_points if daily else 0) or 0),
+        # True per-source points logged today (no double counting).
+        "exercise_pts": exercise_pts_today,
+        "nutrition_pts": food_pts_today,
+        "lifestyle_pts": lifestyle_pts_today,
+        "habit_pts": habit_pts_today,
+        # Sum of ALL logged points today.
+        "total_points": total_points_today,
+        # Engine numbers = points applied to height (gain reconciliation, Bug 5).
+        "engine1_points": engine1_pts_today,
+        "engine2_points": engine2_pts_today,
+        "points_behind_gain": engine1_pts_today,
+        # Back-compat aliases (clients historically read engine1/engine2 here).
+        "posture_pts": engine1_pts_today,
+        "hgh_pts": engine2_pts_today,
         "validated": bool(daily.validated) if daily else False,
     }
 
@@ -1308,8 +1330,27 @@ def my_profile(request):
         exercise=Sum("exercise_points"),
         food=Sum("food_points"),
         lifestyle=Sum("lifestyle_points"),
+        habit=Sum("habit_points"),
+        engine1=Sum("engine1_points"),
+        engine2=Sum("engine2_points"),
     )
-    all_time_points = int((totals.get("exercise") or 0) + (totals.get("food") or 0) + (totals.get("lifestyle") or 0))
+    ex_all = int(totals.get("exercise") or 0)
+    food_all = int(totals.get("food") or 0)
+    life_all = int(totals.get("lifestyle") or 0)
+    habit_all = int(totals.get("habit") or 0)
+    # All-time total = sum of EVERY logged source point (the "all points" number the
+    # profile shows). Engine-applied points are reported separately in the breakdown.
+    all_time_points = ex_all + food_all + life_all + habit_all
+    all_time_points_breakdown = {
+        "exercise": ex_all,
+        "food": food_all,
+        "lifestyle": life_all,
+        "habit": habit_all,
+        "total": all_time_points,
+        # Points actually applied to height (after routing/caps/gates).
+        "engine1": int(totals.get("engine1") or 0),
+        "engine2": int(totals.get("engine2") or 0),
+    }
 
     # --- streaks + leaderboard snapshot ---
     streaks = {}
@@ -1385,6 +1426,7 @@ def my_profile(request):
                 "local_calendar": local_calendar,
                 "today_log": today_log,
                 "all_time_points": all_time_points,
+                "all_time_points_breakdown": all_time_points_breakdown,
                 "streaks": streaks,
                 "streak_history": streak_history,
                 "my_plan": {

@@ -6,10 +6,17 @@ from workouts.exercise_assignment_data import (
     apply_spec_to_exercise_dict,
     spec_key_for_name,
 )
-from workouts.models import Exercise
 
 
-def run_backfill(*, stdout=None) -> dict:
+def run_backfill(*, stdout=None, exercise_model=None) -> dict:
+    # When called from a data migration, pass the HISTORICAL model
+    # (apps.get_model("workouts", "Exercise")) so the ORM only references columns that
+    # exist at that migration point — never columns added by later migrations such as
+    # seconds_per_rep. Defaults to the live model for the management command.
+    if exercise_model is None:
+        from workouts.models import Exercise as exercise_model
+
+    Exercise = exercise_model
     updated = 0
     created = 0
     unmatched = []

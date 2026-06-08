@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
 from habits.models import MicroHabit, MicroHabitLog
 from utils.user_time import user_localize_dt, user_today
 
-DAILY_HABIT_CAP = 6
+# Part 3: habits cap raised 6 -> 12. The math: Puppet 6 (3pt x2 slots) + Desk 2 + Doorway 2
+# + Tech-Neck 2 = 12. Routes to Engine 1 / posture recovery for both teens and adults.
+DAILY_HABIT_CAP = 12
 ENGINE_CM_PER_POINT = 0.001
 
 
@@ -60,12 +63,27 @@ def _validate_slot(habit: MicroHabit, slot: str) -> str:
     return slot
 
 
+def _habit_points_for_habit_on_date(user, log_date: date, habit: MicroHabit) -> int:
+    """Points already logged for a single habit on a date (for per-habit cap checks)."""
+    return int(
+        MicroHabitLog.objects.filter(user=user, log_date=log_date, habit=habit).aggregate(
+            total=Sum("points")
+        )["total"]
+        or 0
+    )
+
+
 def log_habit(user, log_date: date, habit_code: str, slot: str):
     """
     Toggle one log row per (user, date, habit, slot).
 
     - If no row exists: create it and return ``(log, "created")``.
     - If a row already exists: delete it and return ``(None, "removed")``.
+
+    Part 7.4 — server-side enforcement at POST time (not just at scoring time):
+    - reject a new log that would push this habit past its ``daily_max_points``;
+    - reject a new log that would push the day past the global ``DAILY_HABIT_CAP``;
+    - tolerate a concurrent duplicate create (unique constraint) as an idempotent toggle.
     """
     habit = MicroHabit.objects.filter(code=habit_code, is_active=True).first()
     if not habit:
@@ -84,14 +102,36 @@ def log_habit(user, log_date: date, habit_code: str, slot: str):
         existing.delete()
         return None, "removed"
 
-    log = MicroHabitLog.objects.create(
-        user=user,
-        log_date=log_date,
-        habit=habit,
-        slot=slot,
-        points=pts,
-    )
-    return log, "created"
+    # Per-habit daily cap (e.g. Puppet max 6 = 3pts x 2 slots).
+    habit_max = int(habit.daily_max_points or 0)
+    if habit_max > 0 and (_habit_points_for_habit_on_date(user, log_date, habit) + pts) > habit_max:
+        raise ValidationError(
+            f"Daily limit reached for '{habit.name}' ({habit_max} pts)."
+        )
+
+    # Global daily habits cap.
+    if (total_raw_habit_points(user, log_date) + pts) > DAILY_HABIT_CAP:
+        raise ValidationError(
+            f"Daily habit points limit reached ({DAILY_HABIT_CAP} pts)."
+        )
+
+    try:
+        with transaction.atomic():
+            log = MicroHabitLog.objects.create(
+                user=user,
+                log_date=log_date,
+                habit=habit,
+                slot=slot,
+                points=pts,
+            )
+        return log, "created"
+    except IntegrityError:
+        # Concurrent duplicate create for the same (user, date, habit, slot): treat the
+        # already-present row as the result of this toggle rather than 500-ing.
+        log = MicroHabitLog.objects.filter(
+            user=user, log_date=log_date, habit=habit, slot=slot
+        ).first()
+        return log, "created"
 
 
 def build_habits_plan_payload(user, log_date: date | None = None) -> dict:

@@ -2,9 +2,76 @@
 
 DEFAULT_COUNTRY_CODE = "CA"
 DEFAULT_TIMEZONE = "UTC"
-# Product default for Canada (Central); Canada spans multiple zones — client requested Central.
+# Bug 7a: country -> representative IANA timezone. DST is applied automatically by
+# zoneinfo (see utils/user_time.get_user_tz) for these named zones, e.g. Belgium
+# resolves to CET (UTC+1) in winter and CEST (UTC+2) in summer.
+# Multi-timezone countries (US, AU, RU, ...) are intentionally omitted so they keep the
+# UTC fallback rather than guessing a wrong zone; Canada keeps the client-requested
+# Central representative.
 DEFAULT_TIMEZONE_BY_COUNTRY = {
     "CA": "America/Winnipeg",
+    # --- Western / Central Europe (CET / CEST: UTC+1 / +2) ---
+    "BE": "Europe/Brussels",
+    "NL": "Europe/Amsterdam",
+    "LU": "Europe/Luxembourg",
+    "FR": "Europe/Paris",
+    "DE": "Europe/Berlin",
+    "ES": "Europe/Madrid",
+    "IT": "Europe/Rome",
+    "AT": "Europe/Vienna",
+    "CH": "Europe/Zurich",
+    "SE": "Europe/Stockholm",
+    "NO": "Europe/Oslo",
+    "DK": "Europe/Copenhagen",
+    "PL": "Europe/Warsaw",
+    "CZ": "Europe/Prague",
+    "SK": "Europe/Bratislava",
+    "HU": "Europe/Budapest",
+    "HR": "Europe/Zagreb",
+    "SI": "Europe/Ljubljana",
+    "RS": "Europe/Belgrade",
+    # --- Eastern Europe (EET / EEST: UTC+2 / +3) ---
+    "FI": "Europe/Helsinki",
+    "GR": "Europe/Athens",
+    "RO": "Europe/Bucharest",
+    "BG": "Europe/Sofia",
+    "EE": "Europe/Tallinn",
+    "LV": "Europe/Riga",
+    "LT": "Europe/Vilnius",
+    "UA": "Europe/Kyiv",
+    # --- Western Europe (GMT / BST: UTC+0 / +1) ---
+    "GB": "Europe/London",
+    "IE": "Europe/Dublin",
+    "PT": "Europe/Lisbon",
+    "IS": "Atlantic/Reykjavik",
+    # --- Middle East / Africa ---
+    "TR": "Europe/Istanbul",
+    "IL": "Asia/Jerusalem",
+    "AE": "Asia/Dubai",
+    "SA": "Asia/Riyadh",
+    "EG": "Africa/Cairo",
+    "ZA": "Africa/Johannesburg",
+    "NG": "Africa/Lagos",
+    "KE": "Africa/Nairobi",
+    "MA": "Africa/Casablanca",
+    # --- Asia / Pacific (single-zone) ---
+    "IN": "Asia/Kolkata",
+    "PK": "Asia/Karachi",
+    "BD": "Asia/Dhaka",
+    "CN": "Asia/Shanghai",
+    "HK": "Asia/Hong_Kong",
+    "SG": "Asia/Singapore",
+    "MY": "Asia/Kuala_Lumpur",
+    "TH": "Asia/Bangkok",
+    "PH": "Asia/Manila",
+    "JP": "Asia/Tokyo",
+    "KR": "Asia/Seoul",
+    "NZ": "Pacific/Auckland",
+    # --- Latin America (representative) ---
+    "MX": "America/Mexico_City",
+    "BR": "America/Sao_Paulo",
+    "AR": "America/Argentina/Buenos_Aires",
+    "CL": "America/Santiago",
 }
 
 

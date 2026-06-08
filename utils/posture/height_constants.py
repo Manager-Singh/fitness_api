@@ -130,6 +130,46 @@ def clamp_current_loss_to_segment_max(current_loss_cm: float, max_loss_cm: float
     return max(0.0, min(float(max_loss_cm), float(current_loss_cm)))
 
 
+def apportion_by_ratio(weights: Dict[Any, float], total_amount: int, caps: Dict[Any, int]) -> Dict[Any, int]:
+    """
+    Distribute an integer ``total_amount`` across keys by their ``weights`` using the
+    largest-remainder (Hamilton) method, capping each key at ``caps[key]``.
+
+    Bug 3 fix: naive ``int(round(total * ratio / Σratio))`` per segment systematically
+    starves the smallest-ratio segment (Legs & Hamstring = 0.10), leaving it frozen at
+    0.00% while larger segments accrue. Largest-remainder guarantees the integer shares
+    sum to ``total_amount`` (subject to caps) and that every active segment — including
+    Legs — receives its fair slice.
+    """
+    total_amount = max(0, int(total_amount or 0))
+    active = {k: float(w) for k, w in weights.items() if float(w) > 0 and int(caps.get(k, 0) or 0) > 0}
+    if total_amount <= 0 or not active:
+        return {}
+    ratio_sum = sum(active.values())
+    if ratio_sum <= 0:
+        return {}
+
+    ideal = {k: total_amount * (w / ratio_sum) for k, w in active.items()}
+    shares = {k: min(int(ideal[k]), int(caps[k])) for k in active}
+    remaining = total_amount - sum(shares.values())
+
+    # Hand out the leftover units to the largest fractional remainders first, never
+    # exceeding a key's cap. Loop because capping can free units for others.
+    order = sorted(active.keys(), key=lambda k: (ideal[k] - int(ideal[k])), reverse=True)
+    while remaining > 0:
+        progressed = False
+        for k in order:
+            if remaining <= 0:
+                break
+            if shares[k] < int(caps[k]):
+                shares[k] += 1
+                remaining -= 1
+                progressed = True
+        if not progressed:
+            break
+    return shares
+
+
 def normalize_sex(value: Any) -> str | None:
     """Map UI gender to 'male' | 'female' for Section 2 / 5.6 formulas."""
     if value in (None, ""):

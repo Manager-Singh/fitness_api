@@ -73,3 +73,36 @@ class NutraEntry(models.Model):
     def __str__(self):
         item = self.food or self.activity
         return f"{self.session} – {item}"
+
+
+class AdultNutritionDay(models.Model):
+    """
+    Part 2 — adult (21+) nutrition redesign. One server-authoritative row per user per
+    local day capturing measurable protein + hydration (replaces the old 13-food list).
+
+    Scoring (see utils/adult_nutrition):
+        protein_points   = min(9, protein_grams // 10)
+        hydration_points = min(6, water_500ml + 2 * spine_500ml)
+        nutrition_points = min(15, protein_points + hydration_points)
+    Spine drinks are worth double on purpose (electrolytes/collagen for spinal discs).
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="adult_nutrition_days",
+    )
+    log_date = models.DateField(db_index=True)
+    protein_grams = models.PositiveIntegerField(default=0)
+    water_ml = models.PositiveIntegerField(default=0)
+    # Number of 500 ml spine-drink servings logged today (each worth 2 hydration pts).
+    spine_500ml_count = models.PositiveIntegerField(default=0)
+    # Optional per-type breakdown, e.g. [{"type": "bone_broth", "count": 2}].
+    spine_drinks = models.JSONField(default=list, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "log_date")
+        ordering = ("-log_date",)
+
+    def __str__(self):
+        return f"AdultNutritionDay({self.user_id} · {self.log_date})"

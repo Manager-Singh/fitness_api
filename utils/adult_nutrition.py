@@ -162,10 +162,124 @@ def adult_disc_muscle_food_id_sets(entries: Iterable) -> tuple[set[int], set[int
 
 
 def adult_engine_nutrition_points(posture_pts: float, disc_ids: set[int], muscle_ids: set[int]) -> float:
-    """Traceable engine nutrition points for adults (flat 1 per unique food per side)."""
+    """Traceable engine nutrition points for adults (flat 1 per unique food per side).
+
+    DEPRECATED (Part 2): retained only for legacy/back-compat. The adult engine now uses
+    the protein+hydration model (adult_nutrition_points_today). Kept so old data and
+    tooling don't break during the transition.
+    """
     if posture_pts <= 0:
         return 0.0
     return float(len(disc_ids) + len(muscle_ids))
+
+
+# ===========================================================================
+# Part 2 — adult nutrition redesign (protein + hydration). Server-authoritative.
+# ===========================================================================
+
+ADULT_PROTEIN_POINTS_CAP = 9
+ADULT_HYDRATION_POINTS_CAP = 6
+ADULT_NUTRITION_POINTS_CAP = 15
+ADULT_PROTEIN_GRAMS_PER_POINT = 10
+ADULT_PROTEIN_GRAMS_CAP = 90  # 9 pts
+ADULT_WATER_ML_PER_UNIT = 500  # 1 pt per 500 ml
+ADULT_SPINE_POINTS_PER_UNIT = 2  # 2 pts per 500 ml spine drink
+
+# §2.2 quick-add protein chips (one tap = add grams, no math).
+ADULT_PROTEIN_CHIPS = [
+    {"key": "chicken_breast", "label": "Chicken breast", "grams": 30},
+    {"key": "steak", "label": "Steak", "grams": 26},
+    {"key": "two_eggs", "label": "2 Eggs", "grams": 12},
+    {"key": "beans_lentils", "label": "Beans/lentils", "grams": 18},
+    {"key": "greek_yogurt", "label": "Greek yogurt", "grams": 17},
+    {"key": "tofu", "label": "Tofu", "grams": 17},
+    {"key": "whey_scoop", "label": "Whey scoop", "grams": 24},
+    {"key": "salmon", "label": "Salmon", "grams": 25},
+]
+
+# §2.3 the six spine drinks (all support discs / connective tissue), worth 2 pts / 500 ml.
+ADULT_SPINE_DRINK_TYPES = [
+    {"key": "bone_broth", "label": "Bone Broth"},
+    {"key": "watermelon_juice", "label": "Watermelon Juice"},
+    {"key": "coconut_water", "label": "Coconut Water"},
+    {"key": "cucumber_juice", "label": "Cucumber Juice"},
+    {"key": "celery_juice", "label": "Celery Juice"},
+    {"key": "beet_juice", "label": "Beet Juice"},
+]
+ADULT_SPINE_DRINK_KEYS = {d["key"] for d in ADULT_SPINE_DRINK_TYPES}
+
+
+def adult_protein_points(protein_grams: int) -> int:
+    """§2.1: 1 pt per 10 g protein, capped at 9 (90 g)."""
+    grams = max(0, int(protein_grams or 0))
+    return min(ADULT_PROTEIN_POINTS_CAP, grams // ADULT_PROTEIN_GRAMS_PER_POINT)
+
+
+def adult_hydration_points(water_ml: int, spine_500ml_count: int) -> int:
+    """§2.1: water 1 pt/500 ml + spine drink 2 pts/500 ml, capped at 6."""
+    water_units = max(0, int(water_ml or 0)) // ADULT_WATER_ML_PER_UNIT
+    spine_units = max(0, int(spine_500ml_count or 0))
+    raw = (water_units * 1) + (spine_units * ADULT_SPINE_POINTS_PER_UNIT)
+    return min(ADULT_HYDRATION_POINTS_CAP, raw)
+
+
+def adult_nutrition_points(protein_grams: int, water_ml: int, spine_500ml_count: int) -> int:
+    """§2.1: nutrition_points = min(15, protein_points + hydration_points)."""
+    return min(
+        ADULT_NUTRITION_POINTS_CAP,
+        adult_protein_points(protein_grams) + adult_hydration_points(water_ml, spine_500ml_count),
+    )
+
+
+def get_adult_nutrition_day(user, log_date):
+    """Fetch (without creating) the AdultNutritionDay row for a user/day, or None."""
+    from nutration.models_log import AdultNutritionDay
+
+    return AdultNutritionDay.objects.filter(user=user, log_date=log_date).first()
+
+
+def adult_nutrition_points_today(user, log_date) -> int:
+    """Server-authoritative adult nutrition points for the day (0..15)."""
+    row = get_adult_nutrition_day(user, log_date)
+    if not row:
+        return 0
+    return adult_nutrition_points(row.protein_grams, row.water_ml, row.spine_500ml_count)
+
+
+def adult_nutrition_state(user, log_date) -> dict:
+    """Full server-authoritative state for the adult nutrition screen / API."""
+    row = get_adult_nutrition_day(user, log_date)
+    protein_grams = int(getattr(row, "protein_grams", 0) or 0)
+    water_ml = int(getattr(row, "water_ml", 0) or 0)
+    spine_500ml = int(getattr(row, "spine_500ml_count", 0) or 0)
+    spine_drinks = list(getattr(row, "spine_drinks", []) or [])
+
+    p_pts = adult_protein_points(protein_grams)
+    h_pts = adult_hydration_points(water_ml, spine_500ml)
+    n_pts = min(ADULT_NUTRITION_POINTS_CAP, p_pts + h_pts)
+    return {
+        "log_date": str(log_date),
+        "protein": {
+            "grams": protein_grams,
+            "points": p_pts,
+            "grams_cap": ADULT_PROTEIN_GRAMS_CAP,
+            "points_cap": ADULT_PROTEIN_POINTS_CAP,
+            "chips": ADULT_PROTEIN_CHIPS,
+        },
+        "hydration": {
+            "water_ml": water_ml,
+            "water_500ml_units": water_ml // ADULT_WATER_ML_PER_UNIT,
+            "spine_500ml_count": spine_500ml,
+            "spine_drinks": spine_drinks,
+            "points": h_pts,
+            "points_cap": ADULT_HYDRATION_POINTS_CAP,
+            "spine_drink_types": ADULT_SPINE_DRINK_TYPES,
+        },
+        "nutrition_points": n_pts,
+        "nutrition_points_cap": ADULT_NUTRITION_POINTS_CAP,
+        "engine": "engine1",
+        "cm_per_point": 0.001,
+    }
 
 
 def adult_nutrition_bar_percent(disc_ids: set[int], muscle_ids: set[int]) -> int:

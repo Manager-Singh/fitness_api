@@ -109,7 +109,11 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         )
         nutrition_dots = teen_nutrition_dots_from_food_points(raw_food)
         lifestyle_dots = teen_lifestyle_dots_for_day(user, log_date)
-        nutrition_pct = min(100, int(round((nutrition_dots + lifestyle_dots) * 12.5)))
+        # Bug 11 — shared Lifestyle+Habits completion (teen 29+12).
+        from utils.combined_completion import teen_combined_completion
+
+        combined = teen_combined_completion(user, log_date)
+        nutrition_pct = int(combined["percent"])
         return {
             "cta": "Start Today's Routine",
             "posture_exercises_fraction": f"{completed_total}/{assigned_total or 0}",
@@ -120,15 +124,14 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
             "habits_logged": int(min(8, nutrition_dots + lifestyle_dots)),
             "posture_exercises_percent": int(round((completed_total / max(1, assigned_total)) * 100)),
             "nutrition_percent": nutrition_pct,
+            "completion_percent": nutrition_pct,
+            "completion_breakdown": combined,
             "teen_nutrition_dots": nutrition_dots,
             "teen_lifestyle_dots": lifestyle_dots,
             "streak_days": 0,
             "daily_points": _embed_daily_points(user, subscription_data=None),
             "rank": None,
         }
-
-    from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_nutrition_bar_percent
-    from nutration.models_log import NutraEntry
 
     assigned_total = UserRoutineExercise.objects.filter(
         routine__user=user,
@@ -146,13 +149,15 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         .distinct()
         .count()
     )
-    entries = NutraEntry.objects.filter(
-        session__user=user, session__date=log_date, food__isnull=False
-    ).select_related("module")
-    disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(entries)
-    nutrition_pct = adult_nutrition_bar_percent(disc_ids, muscle_ids)
-    food_entry_count = entries.count()
-    unique_food_count = len({int(e.food_id) for e in entries if e.food_id})
+    # Part 2 — adult nutrition is now protein + hydration points (13-food list retired).
+    from utils.adult_nutrition import adult_nutrition_points_today
+
+    adult_nutrition_pts = int(adult_nutrition_points_today(user, log_date))
+    # Bug 11 — shared Nutrition+Habits completion for adults (15+12).
+    from utils.combined_completion import adult_combined_completion
+
+    combined = adult_combined_completion(user, log_date)
+    nutrition_pct = int(combined["percent"])
     return {
         "cta": "Start Today's Routine",
         "posture_exercises_fraction": f"{completed_total}/{assigned_total or 0}",
@@ -161,11 +166,12 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         "exercises_done": completed_total,
         "total_exercises": assigned_total,
         "habits_logged": count_habits_logged(user, log_date),
-        "nutrition_items_logged_count": food_entry_count,
-        "nutrition_foods_unique_count": unique_food_count,
-        "nutrition_traceable_points": int(len(disc_ids) + len(muscle_ids)),
+        "nutrition_points": adult_nutrition_pts,
+        "nutrition_traceable_points": adult_nutrition_pts,
         "posture_exercises_percent": int(round((completed_total / max(1, assigned_total)) * 100)),
         "nutrition_percent": int(nutrition_pct),
+        "completion_percent": int(nutrition_pct),
+        "completion_breakdown": combined,
         "teen_nutrition_dots": None,
         "teen_lifestyle_dots": None,
         "streak_days": 0,

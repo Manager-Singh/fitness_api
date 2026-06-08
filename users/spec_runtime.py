@@ -16,6 +16,7 @@ from utils.posture.height_constants import (
     POINTS_TO_CM_ENGINE1,
     POINTS_TO_CM_ENGINE2,
     POSTURE_SEGMENT_DISTRIBUTION_RATIO,
+    apportion_by_ratio,
 )
 from utils.user_time import user_today
 from utils.posture.teen_genetic_average import (
@@ -270,22 +271,19 @@ def compute_engine1_gain_shares(state, engine1_gain_um) -> dict[str, int]:
     if gain_um <= 0 or not state:
         return {f: 0 for f in seg_defs}
 
-    active = []
+    active = {}
     for field in seg_defs:
         cur = max(0, int(getattr(state, field, 0) or 0))
         if cur > 0:
-            active.append((field, cur))
+            active[field] = cur
     if not active:
         return {f: 0 for f in seg_defs}
 
-    total_ratio = sum(SEGMENT_FIELD_RATIO[field] for field, _ in active)
-    if total_ratio <= 0:
-        return {f: 0 for f in seg_defs}
+    weights = {field: SEGMENT_FIELD_RATIO[field] for field in active}
+    apportioned = apportion_by_ratio(weights, gain_um, active)
 
     shares = {f: 0 for f in seg_defs}
-    for field, cur in active:
-        raw_share = int(round(gain_um * (SEGMENT_FIELD_RATIO[field] / total_ratio)))
-        shares[field] = min(raw_share, cur)
+    shares.update(apportioned)
     return shares
 
 
@@ -507,14 +505,15 @@ def _interpolated_teen_bio_gain_cm(user, base_height_cm, on_date=None):
     return max(0.0, float(base_height_cm) * (interp_rate / 100.0) / 365.0)
 
 
-def _daily_engine_points(user, log_date, age, subscription_data):
+def _daily_raw_source_points(user, log_date):
     """
-    Section 11 routing/caps on current day data.
-    Returns (engine1_points, engine2_points, exercise_points, food_points, lifestyle_points, habit_points)
+    Bug 14 — single source of truth for the day's RAW (pre-cap, pre-engine-routing) points
+    per source. Used by both the engine-point compute and the audit breakdown so the two
+    can never drift. Returns a dict of floats:
+        posture, hgh, food, sleep, sun, meditation, hydration
+    The Section 11.3 per-exercise teen HGH spam guard (>2 logs of one exercise ignored)
+    is applied here so it is reflected consistently everywhere.
     """
-    from habits.services import capped_habit_points_for_engine
-
-    habit_pts = float(capped_habit_points_for_engine(user, log_date))
     workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
         "session__user_routine"
     )
@@ -530,7 +529,6 @@ def _daily_engine_points(user, log_date, age, subscription_data):
             ex_id = int(getattr(w, "exercise_id", 0) or 0)
             hgh_exercise_counts[ex_id] = hgh_exercise_counts.get(ex_id, 0) + 1
             if hgh_exercise_counts[ex_id] > 2:
-                # Section 11.3 per-exercise teen HGH spam guard.
                 continue
             hgh_pts += pts
         else:
@@ -546,7 +544,6 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         pts = float(n.score or 0)
         module = getattr(n, "module", None)
         module_name = str(getattr(module, "name", "") or "").lower()
-        module_cat = str(getattr(module, "nutrition_category", "") or "").lower()
         if n.food_id:
             food_pts += pts
             continue
@@ -559,22 +556,53 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         elif ("hydrat" in module_name) or ("water" in module_name):
             hyd_pts += pts
 
+    return {
+        "posture": posture_pts,
+        "hgh": hgh_pts,
+        "food": food_pts,
+        "sleep": sleep_pts,
+        "sun": sun_pts,
+        "meditation": med_pts,
+        "hydration": hyd_pts,
+    }
+
+
+def _daily_engine_points(user, log_date, age, subscription_data):
+    """
+    Section 11 routing/caps on current day data.
+    Returns (engine1_points, engine2_points, exercise_points, food_points, lifestyle_points, habit_points)
+    """
+    from habits.services import capped_habit_points_for_engine
+
+    habit_pts = float(capped_habit_points_for_engine(user, log_date))
+    raw = _daily_raw_source_points(user, log_date)
+    posture_pts = raw["posture"]
+    hgh_pts = raw["hgh"]
+    food_pts = raw["food"]
+    sleep_pts = raw["sleep"]
+    sun_pts = raw["sun"]
+    med_pts = raw["meditation"]
+    hyd_pts = raw["hydration"]
+
     exercise_points = int(round(posture_pts + hgh_pts))
     lifestyle_points = int(round(sleep_pts + sun_pts + med_pts + hyd_pts))
     food_points = int(round(food_pts))
 
     if age >= 21:
-        # Adult Engine 1 nutrition: flat 1 pt per unique Disc + Muscle food / day; gated by posture work.
-        from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+        # Part 2 — adult Engine 1 nutrition = protein + hydration points (cap 15),
+        # server-authoritative from AdultNutritionDay. Gated by posture work exactly as
+        # adult nutrition routes today.
+        from utils.adult_nutrition import adult_nutrition_points_today
 
-        adult_food_rows = [n for n in nutra_qs if n.food_id]
-        disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(adult_food_rows)
-        nutrition_for_engine = adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
+        nutrition_for_engine = (
+            int(adult_nutrition_points_today(user, log_date)) if posture_pts > 0 else 0
+        )
         return (
             posture_pts + nutrition_for_engine + habit_pts,
             0.0,
             exercise_points,
-            food_points,
+            # Display "nutrition" bucket reflects the adult protein+hydration points.
+            int(nutrition_for_engine),
             lifestyle_points,
             int(habit_pts),
         )
@@ -604,6 +632,103 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         + min(hyd_pts, 1.0)
     )
     return engine1, engine2, exercise_points, food_points, lifestyle_points, int(habit_pts)
+
+
+def daily_points_source_breakdown(user, log_date, age, subscription_data) -> dict:
+    """
+    Bug 14 — full per-source accounting for a day's points so a reported total (e.g. the
+    "137 points / 0.091 cm" case) can be reconciled: which source produced each point,
+    which engine it routes to, which caps applied, and the resulting cm before the
+    lifetime / deficit / pre-assessment gates in compute_daily_height_for_user().
+
+    The engine1_points / engine2_points here are taken straight from _daily_engine_points,
+    so this audit can never disagree with the values actually written to the ledger.
+    """
+    from habits.services import (
+        DAILY_HABIT_CAP,
+        capped_habit_points_for_engine,
+        total_raw_habit_points,
+    )
+
+    raw = _daily_raw_source_points(user, log_date)
+    habits_raw = int(total_raw_habit_points(user, log_date))
+    habits_capped = int(capped_habit_points_for_engine(user, log_date))
+    e1, e2, exercise_points, food_points, lifestyle_points, habit_points = _daily_engine_points(
+        user=user, log_date=log_date, age=age, subscription_data=subscription_data
+    )
+    is_adult = age >= 21
+
+    adult_nutrition_engine_pts = 0
+    if is_adult:
+        # Part 2 — adult nutrition (protein+hydration) gated by posture work.
+        from utils.adult_nutrition import adult_nutrition_points_today
+
+        adult_nutrition_engine_pts = (
+            int(adult_nutrition_points_today(user, log_date)) if raw["posture"] > 0 else 0
+        )
+
+    # Traceable daily-points total (the user-facing "points today", like the dashboard):
+    # everything logged, before engine caps. For adults the food/lifestyle NutraEntry
+    # buckets are retired, so their nutrition is the protein+hydration points instead.
+    adult_nutrition_logged = 0
+    if is_adult:
+        from utils.adult_nutrition import adult_nutrition_points_today
+
+        adult_nutrition_logged = int(adult_nutrition_points_today(user, log_date))
+    daily_points_total = int(round(
+        raw["posture"] + raw["hgh"] + raw["food"]
+        + raw["sleep"] + raw["sun"] + raw["meditation"] + raw["hydration"]
+        + habits_raw + adult_nutrition_logged
+    ))
+
+    engine1_cm = round(float(e1) * POINTS_TO_CM_ENGINE1, 6)
+    engine2_cm = round(float(e2) * POINTS_TO_CM_ENGINE2, 6)
+
+    return {
+        "log_date": str(log_date),
+        "age": int(age),
+        "tier": "adult" if is_adult else "teen",
+        "raw_sources": {k: round(float(v), 3) for k, v in raw.items()},
+        "habits": {"raw": habits_raw, "capped": habits_capped, "cap": int(DAILY_HABIT_CAP)},
+        "engine1": {
+            "points": int(round(float(e1))),
+            "cm_per_point": POINTS_TO_CM_ENGINE1,
+            "cm": engine1_cm,
+            "contributors": (
+                ["posture", "adult_nutrition_flat", "habits"] if is_adult else ["posture", "habits"]
+            ),
+            "adult_nutrition_engine_points": adult_nutrition_engine_pts if is_adult else None,
+        },
+        "engine2": {
+            "points": int(round(float(e2))),
+            "cm_per_point": POINTS_TO_CM_ENGINE2,
+            "cm": engine2_cm,
+            "caps": (
+                {} if is_adult else {"hgh": 30, "food": 35, "sleep": 10, "sun": 6, "meditation": 2, "hydration": 1}
+            ),
+        },
+        "daily_points_total": daily_points_total,
+        "engine_cm_uncapped_total": round(engine1_cm + engine2_cm, 6),
+        "notes": [
+            "engine_cm_uncapped_total is BEFORE the teen 5.5cm lifetime cap, the adult "
+            "remaining-deficit carry-over cap, and the pre-assessment gates; the ledger "
+            "row's engine1_delta_um/engine2_delta_dm reflect those.",
+            "Adult lifestyle (sleep/sun/meditation/hydration) and raw food are diary-only "
+            "(not Engine-1); adult nutrition uses a flat 1 pt per unique disc/muscle food.",
+        ],
+    }
+
+
+def _safe_daily_points_breakdown(user, log_date, age, subscription_data) -> dict:
+    """Never let the audit breakdown break the daily compute / ledger write."""
+    try:
+        return daily_points_source_breakdown(user, log_date, age, subscription_data)
+    except Exception:
+        logger.exception(
+            "daily_points_source_breakdown failed",
+            extra={"user_id": getattr(user, "id", None), "log_date": str(log_date)},
+        )
+        return {}
 
 
 def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
@@ -794,6 +919,8 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             "bio_delta_um": int(bio_delta_um),
             "scan_completed": bool(state and state.scan_completed),
             "engine1_segment_shares_um": engine1_segment_shares_um,
+            # Bug 14 — per-source audit so any day's points total can be reconciled.
+            "daily_points_breakdown": _safe_daily_points_breakdown(user, log_date, age, subscription_data),
         },
     )
     if 13 <= age <= 20 and pending_engine1_um > 0:

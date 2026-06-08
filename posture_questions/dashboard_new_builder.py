@@ -10,6 +10,7 @@ from utils.user_time import user_today
 from utils.teen_dashboard_dots import (
     teen_lifestyle_nutrition_combined_percent,
 )
+from utils.combined_completion import combined_completion_for_user
 from utils.posture.teen_genetic_average import (
     compute_daily_genetic_average_gain_cm,
     compute_genetic_average_cm,
@@ -99,6 +100,12 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         if is_teen
         else None
     )
+    # Bug 11 — single shared Lifestyle+Habits completion number (teen 29+12, adult 15+12).
+    try:
+        combined_completion = combined_completion_for_user(user, user_today(user), is_teen=is_teen)
+    except Exception:
+        logger.exception("combined_completion failed", extra={"user_id": getattr(user, "id", None)})
+        combined_completion = None
     _pb_src = (teen_map if is_teen else adult_map).get("progress_bars_percent") or {}
     if isinstance(_pb_src, dict) and _pb_src:
         posture_bars = {str(k): int(v) for k, v in _pb_src.items()}
@@ -387,10 +394,20 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
                 else 0
             ),
             "nutrition_percent": (
-                int(teen_lifestyle_nutrition_pct)
-                if is_teen
-                else int(section4.get("posture_nutrition_percent") or 0)
+                int(combined_completion["percent"])
+                if combined_completion is not None
+                else (
+                    int(teen_lifestyle_nutrition_pct)
+                    if is_teen
+                    else int(section4.get("posture_nutrition_percent") or 0)
+                )
             ),
+            # Bug 11 — shared completion number that only hits 100% when BOTH lifestyle
+            # (or adult nutrition) AND habits are fully done.
+            "completion_percent": (
+                int(combined_completion["percent"]) if combined_completion is not None else None
+            ),
+            "completion_breakdown": combined_completion,
             "teen_nutrition_dots": teen_nutrition_dots if is_teen else None,
             "teen_lifestyle_dots": teen_lifestyle_dots if is_teen else None,
             "streak_days": today_streak,

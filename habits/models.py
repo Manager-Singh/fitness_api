@@ -7,7 +7,7 @@ class MicroHabit(models.Model):
     AM_PM = "am_pm"
     ONCE_DAILY = "once_daily"
     LOGGING_MODES = [
-        (AM_PM, "AM and PM (1 pt each)"),
+        (AM_PM, "AM and PM"),
         (ONCE_DAILY, "Once per day"),
     ]
 

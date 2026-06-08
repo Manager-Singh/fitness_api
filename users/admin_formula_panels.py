@@ -183,7 +183,7 @@ def daily_points_formula_html(user, log_date=None) -> str:
         e2_formula = "<code>E2 = 0</code> (adults — Engine 2 disabled)"
     elif is_teen:
         e1_formula = format_html(
-            "<code>E1 = posture_work + habits</code> (capped by habits max 6/day)<br>"
+            "<code>E1 = posture_work + habits</code> (capped by habits max 12/day)<br>"
             "= posture + {} habits → <strong>{} pts</strong>",
             habit_i,
             e1_i,
@@ -209,7 +209,7 @@ def daily_points_formula_html(user, log_date=None) -> str:
         ["Exercise (posture+HGH logs)", str(ex_i), "—", "Feeds posture_pts / hgh_pts"],
         ["Food", str(food_i), "—", "Teen → E2 cap; adult → E1 gate"],
         ["Lifestyle", str(life_i), "—", "Teen → E2 components"],
-        ["Habits (micro)", str(habit_i), "—", "Engine 1, max 6/day"],
+        ["Habits (micro)", str(habit_i), "—", "Engine 1, max 12/day"],
         ["Engine 1 total", str(e1_i), fmt_um_line(e1_um), f"× {POINTS_TO_CM_ENGINE1} cm/pt"],
         ["Engine 2 total", str(e2_i), fmt_um_line(e2_um), f"× {POINTS_TO_CM_ENGINE2} cm/pt (via dμm÷10)"],
     ]

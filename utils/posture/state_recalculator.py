@@ -6,7 +6,10 @@ from django.utils import timezone
 
 from posture.models import PostureAssessment
 from users.models import HeightLedger, PostureState
-from utils.posture.height_constants import POSTURE_SEGMENT_DISTRIBUTION_RATIO
+from utils.posture.height_constants import (
+    POSTURE_SEGMENT_DISTRIBUTION_RATIO,
+    apportion_by_ratio,
+)
 
 SEGMENTS = ("spinal", "collapse", "pelvic", "legs")
 PRIMARY_WEIGHT = 0.70
@@ -50,14 +53,8 @@ def _distribute_recovery_over_baseline(baseline_um: dict, recovered_um: int) -> 
     active = {attr: base for attr, base in baseline_um.items() if base > 0}
     if recovered_um <= 0 or not active:
         return {}
-    total_ratio = sum(_STATE_ATTR_RATIO[attr] for attr in active)
-    if total_ratio <= 0:
-        return {}
-    shares = {}
-    for attr, base in active.items():
-        raw = int(round(recovered_um * (_STATE_ATTR_RATIO[attr] / total_ratio)))
-        shares[attr] = min(raw, base)
-    return shares
+    weights = {attr: _STATE_ATTR_RATIO[attr] for attr in active}
+    return apportion_by_ratio(weights, recovered_um, active)
 
 
 def _derive_assessment_baseline_um(user, state) -> dict | None:
