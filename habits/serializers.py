@@ -10,6 +10,7 @@ class MicroHabitSerializer(serializers.ModelSerializer):
             "code",
             "name",
             "ui_prompt",
+            "image",
             "daily_max_points",
             "logging_mode",
             "points_per_log",

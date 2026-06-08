@@ -1,0 +1,696 @@
+THE HEIGHT APP
+COMPLETE BUILD DOC
+SUPER MASTER — Single Source of Truth
+Everything in one file: bugs, nutrition, habits, lifestyle, onboarding, and the new screen redesigns. Nothing referenced elsewhere.
+For: Cursor + Nano Banana (image gen) + Ankit (UI assembly)
+
+GLOBAL DO-NOT-TOUCH (entire doc):
+Point-to-cm conversion (1 pt = 0.001 cm), Engine-1 / Engine-2 routing, the height ledger, workout logging / reps_done.
+The exercise catalog values (2 sets, the rep counts, seconds_per_rep).
+Unless a task explicitly says otherwise, this is UI / content / display work only.
+
+TABLE OF CONTENTS
+PART 1 — Bug fixes (now 14: the original 9 + 5 new teen dashboard bugs)
+PART 2 — Adult nutrition redesign
+PART 3 — Habits redesign (adults + teens) — REBUILT with progress bar, no orb
+PART 4 — Lifestyle page redesign (TEEN only) — NEW
+PART 5 — Onboarding flow & order (teen + adult)
+PART 6 — Onboarding per-screen build specs
+PART 7 — Asset map, Cursor build prompts, compliance, definition of done
+
+
+
+WORK ORDER:
+Part 1 (bugs) first — they hurt live users. Then Parts 2-4 (nutrition, habits, lifestyle). Then Parts 5-6 (the onboarding rebuild — biggest job).
+
+WHAT CHANGED IN THIS VERSION:
+Merged the teen dashboard bug fixes directly into Part 1 (Bugs 10-14).
+Habits page (Part 3): DELETED the orb concept. Now uses a clean high-quality progress bar.
+Added Part 4: the teen Lifestyle page redesign with provided 3D icons.
+Reconciled the combined Lifestyle+Habits completion math to use the correct habits cap of 12.
+Both Lifestyle and Habits screens are now specified as DYNAMIC / responsive — fit every device, no scroll.
+Part 6 marks the BUILD STATUS of every onboarding screen. Most already exist. Only a handful are fresh builds.
+
+ACTUAL BUILD SCOPE — READ THIS FIRST:
+Most of the app already exists. Only these 7 screens are FRESH BUILDS (they do not exist on the app yet), plus 1 image swap. Build ONLY these. Do not touch anything else.
+
+THE 7 FRESH BUILDS (do not exist on the app — build from scratch):
+Teen S6 — 'Your growth window is closing' (knee X-ray + 13-21 age arc, 'YOU ARE HERE').
+Teen S7 — 'Genetics only dictate 80% of your height' (knee + 4 call-out nodes: HGH, Spinal Decompression, Nutrient Synthesis, Postural Habits).
+Teen S8 — 'Everything you need to hit your max height' (rising-chart hero + 5 pillars).
+Adult A7 — 'Everything you need to grow — in one app' (5 pillars, emoji icons).
+Adult A9 — 'Stand Taller, Feel More Confident' (three-people photo).
+Lifestyle tracking page (teen) — full build (Part 4).
+Habits tracking page — full build (Part 3).
+
+THE 1 IMAGE SWAP (not a build):
+Teen S9 — 'This is what is holding you back' reveal. The screen EXISTS. Just swap the picture: younger kid → older kid. No layout/code work, only the image asset.
+
+EVERYTHING ELSE ALREADY EXISTS — DO NOT BUILD OR REBUILD:
+All data + assessment screens: Splash, Biological Sex, DOB, Height, Parent heights, the 8 Posture Questions, Sign up, Paywall.
+The other hype screens that already exist: Teen S5 Hook ('Still growing'), Teen S12 Social Proof, Adult A5 Hook ('Recover'), Adult A6 The Problem, Adult A8 Reveal ('Locked away').
+These are listed in Part 6 for REFERENCE ONLY (copy/sequence) — they are already on the app. Do not rebuild them.
+
+In Part 6, each screen is tagged [FRESH BUILD], [IMAGE SWAP], or [ALREADY EXISTS — reference only] so there is zero ambiguity about what to build.
+
+PART 1
+Bug Fixes
+
+
+Fourteen bugs. The first nine are the original live-user bugs. Bugs 10-14 are the newly found teen dashboard issues. Fix all of them before the redesign work.
+
+Bug 1 — Splash still shows the OLD design after update
+Problem: After installing the new build, the first screen is still the old splash.
+Fix: Ship the new splash (single logo, Start Now lower on screen, 'Already have an account? Login'). Remove the duplicate logo/tagline/arrow. Confirm the old splash widget isn't referenced anywhere; bump the build so the store serves it. (Same screen as Onboarding S1 — build once.)
+Done when: Fresh install opens the new splash.
+Bug 2 — Posture Optimization labels cut off (dashboard)
+Problem: 'Spinal Com…', 'Postural C…', 'Legs & Ha…' are truncated.
+Fix: Shorten the progress bars and put the % on the same line as the bar (label left; short bar + % right; one row each). Full labels must fit. Adult + teen dashboards.
+Done when: All four segment labels show in full on one clean row each.
+Bug 3 — Legs & Hamstring bar frozen at 0.00% (TEENS TOO)
+Problem: Day started Spinal 59.33 / Collapse 9.60 / Pelvic 9.33 / Legs 0.00. After a full day every segment moved EXCEPT Legs — stuck at exactly 0.00%. Always stuck at 0 by default, adults and teens.
+Why (likely): Legs & Hamstring is getting zero daily recovery (not the sub-1% rounding issue) — weight is 0, segment missing from the recovery loop, or recovery is keyed to leg exercises not in the routine.
+Fix: Daily Engine-1 recovery must credit all four segments by the fixed split — Legs included — regardless of which exercises were done. Find why Legs gets nothing and make it accrue like the others. Pair with decimal display so small gains are visible.
+Done when: After a normal day, Legs % rises from its start value on both an adult and a teen account — never frozen at 0.00%.
+Bug 4 — Glute Bridges still shows '3 sets × 15' (should be 2 × 20)
+Problem: Workouts page still shows 3 × 15; catalog says 2 × 20.
+Fix: Re-verify every exercise's displayed sets/reps against the live catalog. Re-run/confirm routine regeneration for existing users; confirm 0 stale rows remain.
+Done when: Glute Bridges and all exercises match the catalog exactly, existing + new accounts.
+Bug 5 — Points mismatch: gain says 84, profile says 78
+Problem: A full day showed +0.084 cm (= 84 pts) but profile shows 78 pts. Should be identical.
+Fix: Reconcile the profile points total with the points applied to height. Find the 6-pt divergence (a cap applied in one place only, a category excluded from the profile total, or a sync lag) and make profile points = points behind the gain.
+Done when: Profile points equal the points behind the day's gain (0.084 cm = 84 pts), every time.
+Bug 6 — Profile height rounded (shows 175.1, want 175.084)
+Fix: Show profile height to 3 decimals (175.084 cm), matching precise tracking elsewhere.
+Done when: Profile shows 3-decimal height.
+Bug 7 — Two Settings issues
+7a — Belgium timezone wrong. Shows UTC; Belgium is CET = UTC+1 (winter) / CEST = UTC+2 (summer DST). Fix the country-to-timezone mapping so Belgium (and others) resolve correctly with DST, not bare UTC.
+7b — Account email cramped. The email sits too low and touches the neon-blue field border. Fix padding/vertical centering so the text sits clean inside the box.
+Done when: Belgium = UTC+1/+2 per season; email properly padded.
+Bug 8 — Exercise player needs THREE distinct sounds
+Fix: Three separate sounds — (1) the 3-2-1 countdown ticks, (2) the 'GO'/start beep, (3) each rep/second increment tick. All audibly different. Header speaker toggle controls all; default ON.
+Done when: Countdown, start, and rep-tick are three clearly different sounds.
+Bug 9 — Adult rep counter restyle
+Request: Rep counter reads N/20 (2/20, 3/20…) in a glowing purple color; the two circles (rep + set) are bigger so they fit the timer/rep readout better.
+Fix: Update the rep-mode display: current/target format, glowing purple number, larger rep + set circles. Hold/timer exercises keep their existing style.
+Done when: Reps show 2/20, 3/20… in glowing purple with enlarged circles.
+
+
+NEW TEEN DASHBOARD BUGS (10-14)
+
+Bug 10 — True Optimized Height: fix the unlock path
+The 'True Optimized' value in the top-right of the teen dashboard is the user's height prediction based on the 20-point prediction model (per the prediction model spec). Right now the unlock path is not wired correctly.
+Correct behavior:
+Before paywall: True Optimized shows locked state (??? with gold LOCKED badge).
+After paywall: the user unlocks ACCESS to the 20-point test.
+After completing the 20-point test: True Optimized populates with their most accurate prediction.
+Until the test is done (even if paid), keep showing ??? — never show it as a guess.
+What to build:
+1. Keep True Optimized locked (???) until the user has paid AND completed the 20-point prediction test.
+2. After paywall, surface a prompt/button: 'Take the 20-point assessment to unlock your True Optimized Height.'
+3. Once the 20-point test is complete, populate True Optimized with the predicted value from the model.
+Done when: True Optimized stays ??? until paid + 20-point test done, then shows the predicted value.
+Bug 11 — Lifestyle 100% must include Habits (combined completion)
+Currently, logging all foods + sleep + water + sunlight + meditation shows Lifestyle as 100% complete. That is wrong — it does not account for the Habits points. The completion percentage must combine BOTH Lifestyle items and Habits items into one shared number.
+Correct behavior:
+The completion % is a SINGLE shared number across Lifestyle + Habits.
+It only reaches 100% when ALL lifestyle items are logged AND all habit points are earned.
+Applies to BOTH teen and adult flows (note: adults have no Lifestyle tab, so for adults this combines their nutrition/hydration completion with habits — see Part 2 and Part 3).
+The math (use the CORRECT habits cap of 12 — see Part 3):
+total_possible = lifestyle_max_points + habits_max_points
+earned         = lifestyle_earned + habits_earned
+completion_pct = (earned / total_possible) * 100
+
+Worked example (teen):
+Lifestyle max: sleep 10 + water 10 + sunlight 7 + meditation 2 = 29.
+Habits max: 12 (the corrected daily habits cap from Part 3).
+Total possible = 41.
+If user logged all lifestyle (29) but no habits (0): completion = 29/41 = 71%, NOT 100%.
+Only when habits are also maxed (12) does it hit 41/41 = 100%.
+What to build:
+1. Change the lifestyle completion calculation to include habits points in both numerator and denominator.
+2. The dashboard '% Optimized' / completion indicator must reflect this combined number.
+3. Apply identically to adult and teen flows.
+Done when: Logging everything in Lifestyle but nothing in Habits shows less than 100% (about 71% for a teen).
+Bug 12 — Add margin to the top stat boxes
+The Mid-Parental / Genetic / True Optimized boxes at the top of the teen dashboard sit too close to the chart below them — basically touching it. They look cramped.
+What to build:
+1. Add 12-16dp of vertical margin between the top stat boxes and the chart below them.
+2. Verify on Samsung S9 (smallest screen) that the spacing looks balanced and nothing overflows.
+Done when: There is clear breathing room between the stat boxes and the chart on all devices.
+Bug 13 — Rename 'Re-Scan Now' to 'Re-Assess Now'
+Since camera scanning is left out for now (we use the posture questionnaire only), the 'Re-Scan' label is misleading.
+What to build:
+1. Rename the button to 'Re-Assess Now' (preferred), or 'Re-Evaluate Now'.
+2. Update the cooldown text: 'Re-Assess in 7 days' instead of 'Re-Scan in 7 days'.
+3. The button triggers the posture questionnaire flow (not a camera scan).
+4. Use the new label consistently everywhere it appears (dashboard, settings, anywhere else).
+Done when: No 'Re-Scan' text remains anywhere; it reads 'Re-Assess' and opens the posture questionnaire.
+Bug 14 — Verify 137 points / 0.091 cm daily gain accuracy
+A user reported earning 137 points in one day with daily gains of +0.091 cm. This needs verification.
+The math check:
+Engine 1 rate = 0.001 cm per point
+137 points x 0.001 = 0.137 cm  (if all 137 were Engine 1)
+But the reported gain was 0.091 cm, not 0.137 cm. So either not all 137 points are Engine 1 (some are Engine 2/HGH or capped lifestyle), caps are reducing the effective gain, or the conversion is inconsistent.
+What to check:
+1. Break down the 137 points by source: exercise, food, lifestyle, habits, HGH.
+2. Confirm which points feed Engine 1 (0.001 cm each) vs Engine 2 vs capped.
+3. Verify daily caps are applied correctly (lifestyle cap, habits cap of 12, etc).
+4. Confirm 0.091 cm is the correct result of all caps and engine splits on those 137 points.
+5. If 137 itself exceeds the realistic daily max, find the double-count.
+Context — realistic daily max:
+A realistic full day should cap around 90-110 points now (with the 12-point habits cap). 137 is suspicious and may indicate double-counting. Show the per-source breakdown to confirm 137 is even possible under the caps.
+Done when: The 137 points are fully accounted for by source, all caps verified, and the resulting cm gain is confirmed correct (or the double-count is found and fixed).
+
+PART 2
+Adult Nutrition Redesign
+
+
+Applies to ADULT accounts only. (Teen nutrition unchanged.) Replaces the old 13-food logging system with two clean, measurable sections. Almost no typing.
+
+2.1 Points
+Protein: 1 pt per 10 g. Cap 9. Caps out at 90 g.
+Hydration: Water 1 pt / 500 ml · Spine drink 2 pts / 500 ml. Cap 6. Caps out at 3 spine drinks (or 3 L water).
+Total nutrition cap: 15.
+
+protein_points   = min(9, floor(total_protein_grams / 10))
+hydration_points = min(6, (water_500ml x 1) + (spine_drink_500ml x 2))
+nutrition_points = protein_points + hydration_points   # max 15
+Routes to Engine 1 exactly as adult nutrition does today. Spine drinks are worth double on purpose — do not equalize.
+
+2.2 Section A — Protein
+UI: one horizontal progress bar (Protein 40 / 90 g · +4 pts) + quick-add chips (one tap = add grams, no math):
+Chicken breast +30 g · Steak +26 g
+2 Eggs +12 g · Beans/lentils +18 g
+Greek yogurt +17 g · Tofu +17 g
+Whey scoop +24 g · + Custom (manual grams)
+Salmon +25 g
+Each tap advances the bar + points; an undo (minus) removes the last add. Bar caps at 90 g / 9 pts (extra grams log but don't add points past 9).
+Copy (subtitle): Protein rebuilds the back, core, and glute muscles that hold your spine tall. Log what you eat through the day — aim for 90 g.
+
+2.3 Section B — Hydration (Spinal)
+UI: one points meter (0-6), two log methods — Water (row of 500 ml bottle icons, +1 each) and Spine Drinks ('+ Add spine drink' → 6-item picker, +2 each).
+The six spine drinks (all support discs/connective tissue): Bone Broth (collagen+glycine, highest value), Watermelon Juice (water+electrolytes), Coconut Water (electrolytes), Cucumber Juice (water+silica), Celery Juice (hydration+anti-inflammatory), Beet Juice (circulation+nutrients). Any combination counts.
+Copy (subtitle): Your spinal discs are nearly 80% water and slowly compress as they lose fluid through the day — it's part of why you're shorter at night. Refill them daily. Water counts — and spine drinks like bone broth, watermelon, or celery juice do more for your discs and connective tissue, so they're worth double. · Water +1 pt / 500 ml · Spine drinks +2 pts / 500 ml · 6 pts a day.
+
+2.4 Why spine drinks are worth double (for the team)
+Water gets ~90% of the spine benefit (rehydration). Spine drinks add electrolytes (water stays in the discs), collagen+glycine (broth — the building blocks of discs), and silica/anti-inflammatory compounds. So 500 ml of broth/watermelon does more than 500 ml of water — the 2:1 ratio encodes that.
+
+2.5 Data model
+Per-day adult nutrition log: protein_grams (int), water_ml (int), spine_drinks (array {type, ml} or count of 500 ml units + type). Derived/served: protein_points, hydration_points, nutrition_points (server-authoritative — never trust a client total). Retire the 13-food list + chocolate.
+Cross-check: adults no longer have a Lifestyle tab and water now lives here — make sure no old Lifestyle code still awards water/sleep points to adults (double-count risk).
+
+2.6 Acceptance tests
+1. 90 g protein → 9 pts; 50 g → 5; 200 g → 9 (capped).
+2. 3 spine drinks → 6; 6 water → 6; 1 spine + 2 water → 4; 4 spine → 6 (capped).
+3. Nutrition never exceeds 15.
+4. Chips add exact grams + update live; undo works.
+5. No chocolate / no 13-food list.
+6. Points still flow to Engine 1 + ledger as before.
+
+PART 3
+Habits Redesign (Adults + Teens)
+
+
+Cap is 12 (was 6). Tap-to-check cards. Identical for both tiers — do not fork. This page must match the mockup habits_design.jpg EXCEPT the orb at the bottom is REMOVED and replaced with a clean high-quality progress bar (see 3.6).
+
+3.1 Points
+1. Puppet String Walk — 5-10 min conscious posture walk — 3 pts each — 2x/day (morning & night) — max 6.
+2. Desk Slouch Correction — 60-sec posture hold — 1 pt each — 2x/day — max 2.
+3. Doorway Posture Reset — open-chest reset in a doorway — 1 pt each — 2x/day (default) — max 2.
+4. Tech Neck Lift — 10 min neck/upper-back work — 2 pts each — 1x/day (default) — max 2.
+Daily cap: 12.
+
+habit_points = min(12, sum of completed-slot points)
+Change DAILY_HABIT_CAP 6 → 12. Routes to Engine 1 / posture recovery for both tiers. (Frequencies for #3 and #4 are defaults — keep unless told otherwise.)
+
+NOTE ON THE CAP — this resolves an earlier question:
+The math works because Puppet String Walk is worth 3 pts per slot (not 1). So: Puppet 6 + Desk 2 + Doorway 2 + Tech-Neck 2 = 12. The cap is 12. Do not use 6 or 8. The progress bar denominator is 12.
+
+3.2 UI
+Vertical list of habit cards + a section progress bar at top (Habits 7 / 12 pts). Each card: name, one-line instruction, points badge. Slots as tappable pills — 2x/day habits show two pills (Morning / Night), 1x/day shows one (Mark done). Tapping fills + awards points immediately; tapping again un-does it. Honor-system check-offs (the walk happens away from the phone); Tech Neck Lift may optionally launch a 10-min guided timer.
+
+3.3 Microcopy (exact)
+Puppet String Walk: 'Walk for 5-10 minutes imagining a string gently pulling the crown of your head toward the sky. This trains your spine to lengthen and your posture to stay tall — do it consciously, morning and night.'
+Desk Slouch Correction: 'Sit tall, roll your shoulders back, and hold perfect posture for 60 seconds. A quick reset that retrains how you sit. Twice a day.'
+Doorway Posture Reset: 'Stand in a doorway, forearms on the frame, and lean gently through to open your chest. Resets the rounded shoulders that build up from sitting.'
+Tech Neck Lift: '10 minutes of gentle neck and upper-back work to undo forward-head tech neck and lift your head back over your shoulders.'
+
+3.4 Data model
+Per-day counts: puppet_walk_done (0-2), desk_slouch_done (0-2), doorway_reset_done (0-2), tech_neck_done (0-1). Served habit_points via 3.1 (server-authoritative). Update cap 6 → 12.
+
+3.5 Acceptance tests
+1. All done → 12 pts.
+2. Puppet both → 6; one → 3.
+3. Desk 2, Doorway 2, Tech Neck 2.
+4. Un-tap removes points.
+5. Never exceeds 12; flows to Engine 1 for adult AND teen.
+6. Old DAILY_HABIT_CAP = 6 gone.
+
+3.6 PROGRESS BAR (replaces the orb)
+DELETE the orb concept entirely. No glowing sphere at the bottom. Instead:
+A clean horizontal progress bar, either pinned at the top of the Habits tab or directly under the tab row.
+Label above or beside it: 'Habit Points Today: X / 12'.
+Bar fill is teal gradient (#00BFB3 to #4EE6E6), on a dark track.
+Fill width = (habit_points / 12) * 100%.
+Smooth fill animation when points change (250ms).
+When 12/12 reached: bar shows a subtle complete state (full teal + a small check icon at the end).
+Keep it minimal and premium — no 3D, no orb, no constellation gimmick. Just a crisp bar.
+
+This progress bar is the SAME combined-completion concept from Bug 11 if you choose to show the combined number here. At minimum it shows the habits 0-12. Confirm with MPO whether this bar shows habits-only (X/12) or the full combined Lifestyle+Habits number. Default: habits-only X/12 on the Habits tab; the combined number lives on the dashboard.
+
+
+PART 4
+Lifestyle Page Redesign (Teen Only)
+
+
+TEEN accounts only — adults have no Lifestyle tab (their water lives in nutrition, see Part 2). Rebuild the teen Lifestyle tab to match the mockup lifestyle_design.jpg. Premium A-level design using the provided 3D icon assets.
+
+4.1 Overall look
+Pure black background (#0A0A0A).
+Each lifestyle item is a horizontal card, full width minus 16dp margins, ~16dp radius.
+Dark grey card fill. The TOP/active card (Sleep) has a teal glow border for focus.
+3D icon on the left in its own darker rounded tile (~80x80dp).
+Title in CAPS, bold white, right of the icon.
+Target text below the title in grey (white number + grey 'Target' word).
+A horizontal progress bar showing completion.
+Points pill (teal fill) + status pill (green Logged/Done).
+
+4.2 The 4 lifestyle cards
+Card 1 — SLEEP
+Icon: 3D moon + stars (sleep1.jpg). Title: SLEEP. Target: '10 HRS Target'.
+Points: +10 PTS. Status: green Logged + check. Edit pencil top-right when logged.
+Card 2 — HYDRATION
+Icon: 3D blue bottle + droplet (water1.jpg). Title: HYDRATION. Target: '2 LITRE Target' + droplet icon.
+Points: +2 PTS. Status: green Logged.
+Card 3 — SUNLIGHT
+Icon: 3D sunrise (sun1.jpg). Title: SUNLIGHT. Target: '30 MIN Target'.
+Points: +7 PTS. Status: green Logged.
+Card 4 — DAILY MEDITATION
+Icon: lotus figure (meditate1.jpg). Title: DAILY MEDITATION. Target: '10 MIN Session Target'.
+Points: +1 PTS. A.M./P.M. toggle slider (log morning OR afternoon session). Status: green Done.
+
+4.3 Consistency rules (lock these down)
+1. Pill ORDER identical on every card: points pill on the LEFT, status pill on the RIGHT. Same on all 4.
+2. Use ONE word for the completed state across all cards. Pick 'Logged' (preferred) and use it everywhere, including meditation.
+3. When an item is fully logged, the progress bar must be FULL. No partial bar on a completed item.
+4. All point pills use the same teal fill and same corner radius.
+
+4.4 Combined completion (ties to Bug 11)
+The teen Lifestyle completion feeds the combined Lifestyle + Habits number from Bug 11. Do NOT show 100% until both lifestyle items AND habits are fully done. Lifestyle-only maxed = about 71% (29 of 41).
+
+
+PART 5
+Onboarding Flow & Order
+
+
+5.1 Shared rules
+Splash + Sex + DOB + Height are shared. After DOB the app knows age → branch to Teen or Adult track.
+Progress bar / 'Step X of 5': ONLY on data-collection steps (sex, DOB, height, and each tier's remaining data steps). NEVER on hype screens or the 8 posture questions.
+The 8 posture questions (the '1-8' block) are the posture-loss assessment; placement marked below.
+Order below is the recommended sequence — confirm before final build.
+
+IMPORTANT — Gender-first ordering:
+Per the latest requirement, biological sex is collected at step 2 (before DOB), because age tiers differ by sex (female teen 13-17 / adult 18+; male teen 13-20 / adult 21+). The order below already reflects this: Splash → Sex → DOB → Height → branch.
+
+5.2 TEEN flow (order)
+T1 Splash — logo, Start Now, 'Already have an account? Login'.
+T2 Biological sex (data) — 'What is your biological sex?' / 'Affects your recovery calculations' / Male · Female (fix placeholder silhouettes → clean teal line-icons or text cards).
+T3 Date of birth (data) — 'When were you born?' / 'We use this to personalize your routine' / NEXT (branch teen here).
+T4 Current height (data) — 'How tall are you currently?' / 'Be precise — this is your baseline' / CM·FT toggle / NEXT.
+T5 Hook — 'You are still growing. Are you growing as tall as you should?'
+T6 Growth window closing — bone_image.png.
+T7 You control the rest — 'Genetics only dictate 80%'.
+T8 The system (5 pillars) — 'Everything you need to hit your max height'.
+T9 The reveal — older_teen_to_use.jpg.
+T10 Parent heights (data) — 'Mom and Dad heights'.
+T11 8 Posture Questions (assessment).
+T12 Social proof — 'Join 30,000+ teens unlocking their full height'.
+T13 Sign up.
+T14 Paywall (existing).
+
+5.3 ADULT flow (order)
+A1 Splash — same as T1.
+A2 Biological sex (data) — same as T2.
+A3 Date of birth (data) — 'When were you born?' / 'We use this to personalize your routine' / NEXT (branch adult).
+A4 Current height (data) — same as T4.
+A5 Hook — 'Recover the height you have lost to posture and aging'.
+A6 The problem — 'Spinal compression… stolen 2-6 cm'.
+A7 The system (5 pillars) — 'Everything you need to grow — in one app'.
+A8 The reveal — two-men image (in build).
+A9 Aspiration — clean_people_shot.png.
+A10 Daily activity (data) — 'How would you describe your daily activity?'
+A11 Desk question (assessment) — 'Do you sit at a desk more than 6 hours a day?'
+A12 8 Posture Questions (assessment).
+A13 Sign up.
+A14 Paywall (existing).
+
+PART 6
+Onboarding Per-Screen Build Specs
+
+
+Format per screen: Nano Banana Prompt (or PROVIDED asset) → UI Build-Out.
+
+Shared style tokens (every screen)
+Background pitch-black #050706 + faint cyan spine/particle edge motif · Headline white bold italic centered · Subhead/body cyan #38D6E5 regular centered · CTA full-width teal pill #15C9BE, dark #022B29 bold italic UPPERCASE · back button teal-outlined circle top-left · feature/overlay cards #0E1E1B fill + thin cyan border, cascade-in on load · no 'Step X of 5' on these screens.
+
+
+TEEN · S5 — Hook ('Still growing')  [ALREADY EXISTS — reference only]
+Hero: none needed — ambient black + cyan spine-edge background.
+Headline: You are still growing. Are you growing as tall as you should?
+Subhead: Find out what your real genetic height is — and what is blocking you from reaching it.
+CTA: SHOW ME
+
+TEEN · S6 — Growth window closing  [FRESH BUILD]
+Hero: PROVIDED — bone_image.png (knee X-ray with the 13→21 age arc + 'YOU ARE HERE' node). Top ~55%.
+STATUS: FRESH BUILD — does not exist on the app yet. Build to match the design mockup (teen panel 1).
+Optional high-impact: overlay the age arc in code and set the marker to the user's actual age (from DOB) for personalization.
+Headline: Your growth window is closing.
+Subhead: Most guys stop growing by 18-21, and girls by 16-18. What you do during your window decides your final height — once it closes, it's locked for life.
+CTA: I DON'T WANT TO MISS IT
+
+TEEN · S7 — 'Genetics only dictate 80%'  [FRESH BUILD]
+STATUS: FRESH BUILD — does not exist on the app yet. Build to match the design mockup (teen panel 2): knee/joint with 4 call-out nodes.
+Nano Banana Prompt (Hero):
+A glowing anatomical 3D human figure standing front-on, pitch-black background, with four pulsing cyan node points highlighted at the head, the spine, the core/abdomen, and the shoulders, connected by faint neon teal lines. Sleek medical-tech aesthetic, soft glowing neon teal edges, minimalistic mobile app UI asset, high contrast. NO TEXT. NO LETTERS. NO WORDS.
+Overlay tags (floating cyan labels on the four nodes): Head → HGH Production · Spine → Spinal Decompression · Core → Nutrient Synthesis · Shoulders → Postural Habits (subtext: Good posture promotes a perfect structure for full growth.)
+Headline: Genetics only dictate 80% of your height.
+Subhead: You control the rest. Targeted HGH stimulation, spinal decompression, growth-specific nutrition, and daily postural habits can unlock your 100% maximum. We give you the blueprint.
+CTA: HACK MY POTENTIAL →
+
+TEEN · S8 — The system (5 pillars)  [FRESH BUILD]
+STATUS: FRESH BUILD — does not exist on the app yet. Build to match the design mockup (teen panel 3): rising-chart hero + 5 pillar rows with cyan icons.
+Nano Banana Prompt (Hero):
+A sleek 3D isometric icon of a rising line chart merging with a glowing cyan upward arrow. Dark tech aesthetic, pure pitch-black background, soft glowing neon teal edges, minimalistic mobile app UI asset, high contrast. NO TEXT. NO LETTERS. NO WORDS.
+Headline: Everything you need to hit your max height.
+Subhead: The complete daily system — built specifically for teens to hack their growth window.
+Posture Correction — Unlock 2-5 cm of instant gains just from correcting your posture and alignment.
+Daily Growth Routine — 10-minute workouts to decompress your spine and trigger natural growth.
+Sleep & HGH Coaching — Maximize the overnight window when your body releases the most growth hormone.
+Nutrition for Growth — Fuel your bones and discs with exactly what they need to synthesize height.
+Track Every Millimeter — Watch your height climb on your live dashboard, logged day by day.
+CTA: BUILD MY PLAN →
+
+TEEN · S9 — The reveal ('Holding you back')  [IMAGE SWAP ONLY — not a build]
+STATUS: This screen ALREADY EXISTS on the app. The ONLY change is the image: swap the younger kid picture for the older kid picture. No layout, no code, no copy changes. Just replace the asset.
+Hero: PROVIDED — older_teen_to_use.jpg (slouched grey teen vs tall glowing-teal teen + ruler). Top ~55%.
+Headline: This is what is holding you back. Let us fix it.
+Subhead: The right routine unlocks your full height during your growth window.
+CTA: I AM IN
+
+
+ADULT · S5 — Hook ('Recover')  [ALREADY EXISTS — reference only]
+Hero: none needed — ambient black + cyan spine-edge background.
+Headline: Recover the height you have lost to posture and aging.
+Subhead: Most adults lose 2-6 cm by age 30. It is recoverable.
+CTA: SHOW ME HOW
+
+ADULT · S6 — The problem ('Stolen 2-6 cm')  [ALREADY EXISTS — reference only]
+Nano Banana Prompt (Hero):
+A glowing human spine viewed from the side on a pitch-black background, two or three vertebrae and discs subtly highlighted in cyan with faint compression shown in muted red, anatomical and clean, soft neon teal glow, minimalistic mobile app UI asset, high contrast. NO TEXT. NO LETTERS. NO WORDS. (Or keep the existing twin-spine ambient background — then no hero needed.)
+Headline: Spinal compression, muscle imbalances, and bad posture have stolen 2-6 cm of your real height.
+Body 1 (white/grey): Most adults never get it back — because they do not know it is possible.
+Body 2 (cyan): The good news — most of it is recoverable in 90 days.
+CTA: TELL ME MORE
+
+ADULT · S7 — The system (5 pillars)  [FRESH BUILD]
+STATUS: FRESH BUILD — does not exist on the app yet. Build to match the design mockup (adult panel 1): 5 pillar rows with emoji icons.
+Nano Banana Prompt (Hero): (reuse Teen S8 asset — rising chart + cyan arrow).
+Headline: Everything you need to grow — in one app.
+Subhead: The complete height-maximizing system. Nothing else like it exists.
+Daily Custom Routine — exercises that decompress your spine and rebuild the muscles holding you tall.
+Posture Habits — simple daily cues that retrain your body to stand naturally taller and more confident.
+Nutrition & Hydration Coaching — fuel your discs and posture muscles with what actually moves the needle.
+Daily Height Tracking — watch every millimeter come back, logged day by day.
+Streaks & Leaderboard — stay consistent and compete with others maxing their height.
+CTA: BUILD MY PLAN →
+
+ADULT · S8 — The reveal ('Locked away')  [ALREADY EXISTS — reference only]
+Hero: PROVIDED — two-men side-profile image (slouched red vs tall teal — in the build). Top ~55%.
+Headline: This is the version of you that exists right now — locked away by posture.
+Subhead: The right routine unlocks it in 90 days.
+CTA: I WANT THAT BACK
+
+ADULT · S9 — Aspiration ('Stand Taller')  [FRESH BUILD]
+Hero: PROVIDED — clean_people_shot.png (three people, business attire, black bg). Top ~55%.
+STATUS: FRESH BUILD — does not exist on the app yet. Build to match the design mockup (adult panel 2).
+Headline: Stand Taller, Feel More Confident, and Instantly Look More Attractive.
+Subhead: The right routine unlocks it in 90 days.
+CTA: Lets do it
+
+
+DATA & ASSESSMENT SCREENS (build-outs)
+These screens collect data or run the assessment. They use a DIFFERENT style from the hype screens: cleaner, with the 'Step X of 5' progress bar at top (data screens only), on the same pitch-black background. No big hero images — the input is the focus.
+
+SHARED DATA-SCREEN STYLE
+Pitch-black background #050706, same as hype screens.
+'Step X of 5' progress bar pinned at the top (data screens ONLY — never on hype screens or the 8 posture questions).
+Headline white bold, centered, but NOT italic (data screens are calmer than hype screens).
+Subhead cyan #38D6E5, one line, centered.
+Input control centered in the middle of the screen.
+Teal back arrow circle top-left. Teal pill CTA at bottom.
+
+TEEN S2 / ADULT S2 — Biological Sex (data)
+Hero: none — ambient black background.
+Progress: Step 1 of 5.
+Headline: What is your biological sex?
+Subhead: Affects your recovery calculations.
+Two large tappable cards side by side: Male | Female.
+Each card: a clean teal line-icon (NOT the old placeholder silhouettes) + the label. Replace the existing placeholder silhouette images with simple teal line-icons or clean text-only cards.
+Tapping a card selects it (teal border/fill) and auto-advances, OR shows a NEXT button.
+Collected FIRST (before DOB) because age tiers differ by sex: female teen 13-17 / adult 18+; male teen 13-20 / adult 21+.
+
+TEEN S3 / ADULT S3 — Date of Birth (data)
+Hero: none — ambient black background. Use the 3-wheel DOB selector already specced (HeightApp_DOB_Selector_Spec).
+Progress: Step 2 of 5.
+Headline: When were you born?
+Subhead: We use this to personalize your routine.
+Three CupertinoPicker wheels in a row: Month | Day | Year (flex 11/9/12).
+Teal selection band behind all three wheels; 88px fade gradients top/bottom; day wheel auto-clamps for month/leap year.
+Live readout chip: 'Month DD, YYYY · NN yrs'.
+Teal gradient NEXT button. ON NEXT: the app knows the age, so BRANCH to teen or adult track here.
+Save the real birth_date ISO string — do NOT fall back to Jan-1 of the derived year.
+
+TEEN S4 / ADULT S4 — Current Height (data)
+Hero: none — ambient black background.
+Progress: Step 3 of 5.
+Headline: How tall are you currently?
+Subhead: Be precise — this is your baseline.
+A height input: a scroll wheel or numeric entry, with a CM / FT toggle at the top.
+CM mode: single value in cm (e.g. 157). FT mode: feet + inches (e.g. 5 ft 2 in).
+Show the converted value live under the input.
+Teal pill NEXT button.
+
+TEEN S10 — Parent Heights (data)
+Hero: none — ambient black background. Drives the Mid-Parental Height calculation for the teen dashboard.
+Progress: Step 4 of 5.
+Headline: How tall are your parents?
+Subhead: This sets your genetic height target.
+TWO inputs (stacked or side by side): Mother's height and Father's height. Each with a CM / FT toggle (or a small wheel).
+Under EACH input, a small teal text link: 'I don't know'. Tapping it fills that parent with the regional average for the user's country so the calculation can still run. When tapped, label the value as an estimate (e.g. 'Using regional average').
+Microcopy under the inputs (grey): We average your parents' heights to estimate your genetic potential. If you're not sure, an estimate still works.
+Teal pill NEXT button.
+Backend: feed both heights into the MPH formula — Male (dad+mom+13)/2, Female (dad+mom-13)/2.
+
+TEEN S11 / ADULT S12 — The 8 Posture Questions (assessment)
+Hero: none — uses the existing visual questionnaire (ALREADY BUILT). Do not rebuild.
+NO 'Step X of 5' bar — this block uses its own 'Question N of 8' indicator.
+8 image-based questions, auto-advance, teal selection glow, checkmark animation (existing ManualQuestionnaireView).
+On completion, writes segment losses, which drive the posture bars and the reveal.
+Verify the question text matches the spec and all images load. Otherwise leave as-is.
+
+TEEN S12 — Social Proof  [ALREADY EXISTS — reference only]
+Hero: none — ambient black background. Testimonial cards are the focus. This is a hype screen — NO 'Step X of 5' progress bar.
+Headline (white bold italic): Join 30,000+ teens unlocking their full height.
+Subhead (cyan): Real teens. Real growth. During the window that matters most.
+THREE testimonial cards (dark #0E1E1B fill, thin cyan border, cascade-in):
+Each card: a generic avatar icon (teal circle, male/female line-icon) on the left, then Name, Age, country flag emoji, a cm-gained line (e.g. '+5.2 cm in 6 months'), a 5-star row, and a one-line quote.
+Card 1: Jake, 15, US flag — '+5.2 cm in 6 months' — 5 stars — 'I stopped slouching and actually grew.'
+Card 2: Priya, 14, India flag — '+4.1 cm in 5 months' — 5 stars — 'My posture and height both changed.'
+Card 3: Marcus, 17, UK flag — '+3.8 cm in 4 months' — 5 stars — 'Wish I started sooner in my window.'
+Small grey compliance note under the cards: Individual results vary.
+CTA: I'M READY
+Use generic male/female avatar icons + name + age + flag (no AI-generated faces, no stock photos).
+
+ADULT S10 — Daily Activity (data)
+Hero: none — ambient black background.
+Progress: Step 4 of 5.
+Headline: How would you describe your daily activity?
+Subhead: This helps us tailor your recovery routine.
+THREE stacked tappable cards, each with a teal line-icon + title + one-line description:
+Mostly Sedentary — 'I sit most of the day (desk job, driving, screens).'
+Moderately Active — 'I'm on my feet on and off through the day.'
+Very Active — 'I'm moving, lifting, or training most of the day.'
+Tapping a card selects it (teal border) and auto-advances, OR shows a NEXT button.
+
+ADULT S11 — Desk Question (assessment)
+Hero: none — ambient black background.
+NO 'Step X of 5' bar — this is an assessment input, not a data-collection step.
+Headline: Do you sit at a desk more than 6 hours a day?
+Subhead (cyan): Prolonged sitting is one of the biggest drivers of adult height loss.
+Two large buttons: YES | NO.
+Tapping either auto-advances to the 8 posture questions.
+Backend: store the answer; it feeds the adult posture/risk assessment.
+
+PART 7
+Assets, Cursor Prompts, Compliance, Definition of Done
+
+
+7.1 Onboarding asset summary
+Teen S5 / Adult S5 — ambient bg — none.
+Teen S6 — knee + age arc — PROVIDED bone_image.png.
+Teen S7 — body + 4 nodes — GENERATE.
+Teen S8 / Adult S7 — arrow/chart icon — GENERATE (one asset, reused).
+Teen S9 — two teens + ruler — PROVIDED older_teen_to_use.jpg.
+Adult S6 — spine — GENERATE (or keep ambient).
+Adult S8 — two men — PROVIDED (in build).
+Adult S9 — three people — PROVIDED clean_people_shot.png.
+Generate in total: 3 unique heroes — body-with-4-nodes, arrow/chart icon (shared), spine (optional). Everything else is provided or ambient.
+
+7.2 Lifestyle + Habits asset map (NEW)
+Lifestyle page icons (Part 4):
+sleep1.jpg → SLEEP card icon (3D moon + stars).
+water1.jpg → HYDRATION card icon (3D blue bottle + droplet).
+sun1.jpg → SUNLIGHT card icon (3D sunrise).
+meditate1.jpg → DAILY MEDITATION card icon (lotus figure).
+Habits page illustrations (Part 3):
+puppet1.jpg → Puppet String Walk (suit man with string).
+desk1.jpg → Desk Slouch Correction (person at desk, spine arrow).
+tech1.jpg → Tech-Neck Lift (person holding phone at eye level).
+doorway1.jpg → Doorway Posture Reset (person in doorway, zipper spine).
+Reference mockups (match exactly):
+lifestyle_design.jpg → the Lifestyle page target design.
+habits_design.jpg → the Habits page target design (BUT remove the orb, use a progress bar).
+
+
+
+7.3 CURSOR BUILD PROMPT — LIFESTYLE PAGE (teen)
+Copy everything in the box into Cursor. Attach lifestyle_design.jpg + the 4 lifestyle icons.
+
+Build a Flutter Lifestyle screen for a teen height-maximizing fitness app.
+Match the attached mockup (lifestyle_design.jpg) as closely as possible.
+THE SCREEN MUST BE FULLY DYNAMIC / RESPONSIVE: fit every device from
+Samsung S9 (360x640) to S23 Ultra and large iPhones with NO SCROLLING.
+Use flexible sizing (Expanded/Flexible, MediaQuery, FractionallySizedBox)
+so the 4 cards always fill the available height evenly without overflow.
+
+LAYOUT:
+- Pure black background (#0A0A0A).
+- Top app bar: back arrow left, HEIGHT logo center, settings gear right.
+- Tab row: Nutrition | Lifestyle | Habits. Lifestyle active (white bold +
+  teal underline). Others grey.
+- Below tabs: a combined-completion progress bar (see Bug 11) showing the
+  shared Lifestyle+Habits percentage, OR a simple lifestyle progress label.
+- Then 4 horizontal cards that flex to fill remaining height.
+
+EACH CARD (sizes scale with available height):
+- Full width minus 16dp margins, ~16dp radius, dark grey fill (#1C1C1E).
+- Left: ~80x80dp darker rounded tile holding the 3D icon image.
+- Title in CAPS bold white. Below: target text (white number + grey 'Target').
+- A horizontal progress bar (teal fill, dark track) for completion.
+- Bottom row: points pill on LEFT (teal, '+N PTS'), status pill on RIGHT
+  (green 'Logged' + check). PILL ORDER IDENTICAL ON ALL CARDS.
+
+THE 4 CARDS (in order):
+1. SLEEP — sleep1.jpg — '10 HRS Target' — +10 PTS — Logged.
+   Top card has a teal glow border for focus.
+2. HYDRATION — water1.jpg — '2 LITRE Target' + droplet — +2 PTS — Logged.
+3. SUNLIGHT — sun1.jpg — '30 MIN Target' — +7 PTS — Logged.
+4. DAILY MEDITATION — meditate1.jpg — '10 MIN Session Target' — +1 PTS —
+   A.M./P.M. toggle slider — Logged.
+
+STATES: logged = full bar + green Logged pill + edit pencil; unlogged =
+dimmed + empty bar + teal 'Log' button. Use one word 'Logged' everywhere.
+
+BOTTOM NAV: Dashboard | Routine | Wellness (active, teal) | Leaderboard | Profile.
+Tapping a card/Edit opens the existing logging wheel. Read values + points
+from the existing controller/API. Test S9 → S23 Ultra, no scroll, no overflow.
+
+
+
+7.4 CURSOR BUILD PROMPT — HABITS PAGE
+Copy everything in the box into Cursor. Attach habits_design.jpg + the 4 habit illustrations. NOTE: ignore the orb in the mockup — use a progress bar instead.
+
+Build a Flutter Habits screen for a height-maximizing fitness app (adults
+and teens, identical). Match the attached mockup (habits_design.jpg) as
+closely as possible, WITH ONE CHANGE: do NOT build the glowing orb at the
+bottom. Replace it with a clean horizontal progress bar (see below).
+
+THE SCREEN MUST BE FULLY DYNAMIC / RESPONSIVE: fit every device from
+Samsung S9 (360x640) to S23 Ultra and large iPhones with NO SCROLLING.
+Use flexible sizing so the 4 habit cards + the progress bar always fill
+the available height evenly without overflow.
+
+LAYOUT:
+- Dark background with a subtle constellation / connected-dots pattern.
+- Top app bar: back arrow, HEIGHT logo center, settings gear right.
+- Tab row: Nutrition | Lifestyle | Habits. Habits active (teal underline).
+- A progress bar near the top: 'Habit Points Today: X / 12' with a teal
+  gradient fill (#00BFB3 to #4EE6E6) on a dark track. Fill = points/12.
+  Smooth 250ms animation. At 12/12 show a small check at the bar end.
+- Then 4 habit cards that flex to fill remaining height.
+
+EACH HABIT CARD:
+- Full width minus 16dp margins, ~16dp radius, teal-tinted border.
+- Left: habit illustration (~70x70dp).
+- Right: title bold white; green 'Done for today' pill top-right when complete.
+- Description line under title (grey). Points rule text (grey, e.g.
+  '1 pt each, up to 2 pts').
+- Controls: two toggle pills (AM with sun icon, PM with moon icon) OR a
+  single LOG toggle, depending on the habit. Toggled-on = teal fill + check;
+  off = dark outline.
+
+THE 4 HABITS (in order):
+1. Puppet String Walk — puppet1.jpg — '5-10 min conscious posture walk
+   (morning & night)' — '3 pts each, up to 6 pts' — AM + PM toggles.
+2. Desk Slouch Correction — desk1.jpg — '60-sec posture hold' —
+   '1 pt each, up to 2 pts' — AM + PM toggles.
+3. Tech-Neck Lift — tech1.jpg — '10 min neck/upper-back work' —
+   '2 pts each, up to 2 pts' — single LOG toggle.
+4. Doorway Posture Reset — doorway1.jpg — 'open-chest reset in a doorway
+   (default)' — '1 pt each, up to 2 pts' — AM | PM toggle.
+
+RULES:
+- Cap is 12 (Puppet 6 + Desk 2 + Tech-Neck 2 + Doorway 2). Bar denominator 12.
+- Each toggle logs via the existing habits API (POST /api/habits/log with
+  habit_key + habit_slot). Enforce per-slot lockout + daily cap server-side.
+- Re-tapping a logged toggle un-logs it and refunds the point.
+- Habit points feed the combined Lifestyle+Habits completion (Bug 11).
+- Reset at local midnight.
+
+BOTTOM NAV: Dashboard | Routine | Wellness (active) | Leaderboard | Profile.
+Test S9 → S23 Ultra, no scroll, no overflow.
+
+
+
+7.5 Compliance (teens especially)
+Growth-window and sleep/HGH framing is fine. But testimonial figures ('+5.2 cm') and 'Unlock 2-5 cm of instant gains' are specific claims — add a small 'Individual results vary' note near the pillars/testimonials. Keep 'genetic potential / true ceiling' framed as potential, never a guarantee.
+
+7.6 Open confirmations (decide before final build)
+1. Onboarding order is 'recommended' — confirm to make it final.
+2. Habit frequencies — Doorway Reset 2x/day and Tech Neck Lift 1x/day are defaults; confirm or change.
+3. Bug 9 rep-counter screenshot — referenced but not received; send it for exact styling.
+4. Habits progress bar — confirm whether it shows habits-only (X/12) or the full combined Lifestyle+Habits number on the Habits tab.
+
+7.7 Definition of done (full QA pass)
+1. Fresh install → new splash (Bug 1).
+2. Dashboard labels full + % inline (Bug 2).
+3. Legs bar moves on adult AND teen after a day (Bug 3).
+4. Glute Bridges = 2x20 everywhere (Bug 4).
+5. Profile points = gain points (Bug 5); height 3 decimals (Bug 6).
+6. Belgium = UTC+1/+2; email padded (Bug 7).
+7. Three distinct player sounds (Bug 8).
+8. Reps 2/20 glowing purple, bigger circles (Bug 9).
+9. True Optimized stays ??? until paid + 20-pt test, then populates (Bug 10).
+10. Lifestyle never shows 100% until habits done too — about 71% lifestyle-only (Bug 11).
+11. Margin between top stat boxes and chart (Bug 12).
+12. 'Re-Assess Now' everywhere, opens questionnaire (Bug 13).
+13. 137-point day fully accounted for, caps verified (Bug 14).
+14. Adult nutrition = protein + hydration, max 15 (Part 2).
+15. Habits cap 12, progress bar (no orb), matches mockup (Part 3).
+16. Teen Lifestyle page matches mockup, 4 cards, consistent pills, dynamic/no-scroll (Part 4).
+17. Both Lifestyle and Habits fit every device S9 → S23 Ultra with no scroll.
+18. The 7 fresh onboarding/page builds done (Teen S6/S7/S8, Adult A7/A9, Lifestyle, Habits); Teen S9 image swapped (younger→older); NO existing screens rebuilt.
+
+END OF BUILD DOC
+Single source of truth. Everything is in this one file.

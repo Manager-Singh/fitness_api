@@ -14,6 +14,7 @@ class MicroHabit(models.Model):
     code = models.SlugField(max_length=64, unique=True)
     name = models.CharField(max_length=160)
     ui_prompt = models.TextField(blank=True)
+    image = models.ImageField(upload_to="micro_habits/", blank=True, null=True)
     daily_max_points = models.PositiveSmallIntegerField(default=1)
     logging_mode = models.CharField(max_length=16, choices=LOGGING_MODES, default=ONCE_DAILY)
     points_per_log = models.PositiveSmallIntegerField(default=1)
