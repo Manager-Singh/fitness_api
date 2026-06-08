@@ -291,6 +291,22 @@ def adult_nutrition_bar_percent(disc_ids: set[int], muscle_ids: set[int]) -> int
     return 50
 
 
+def adult_food_completion_percent_legacy(user, log_date) -> int:
+    """
+    Legacy disc/muscle food-list completion (0 / 50 / 100) for adults who still log
+    nutrition through the old food-toggle UI (NutraEntry) instead of the Part 2
+    protein+hydration endpoint. Used as a fallback so already-logged food still counts
+    toward dashboard completion until the client migrates to /adult-nutrition.
+    """
+    from nutration.models_log import NutraEntry
+
+    entries = NutraEntry.objects.filter(
+        session__user=user, session__date=log_date, food__isnull=False
+    ).select_related("module")
+    disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(entries)
+    return adult_nutrition_bar_percent(disc_ids, muscle_ids)
+
+
 def is_adult_flat_food_user(user, age) -> bool:
     """
     Adult PosturePlus flat food rules (once per food / day, toggle, 1 pt).

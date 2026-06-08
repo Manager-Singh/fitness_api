@@ -87,13 +87,24 @@ def teen_combined_completion(user, log_date) -> dict:
 
 def _adult_nutrition_completion_earned(user, log_date) -> int:
     """
-    Adult nutrition points earned (0..15) for the day. Uses the Part 2 protein+hydration
-    scoring when available; falls back to 0 if the redesigned model is not yet present.
+    Adult nutrition points earned (0..15) for the day.
+
+    Primary source is the Part 2 protein+hydration model (AdultNutritionDay). When that
+    has no data for the day (e.g. the client still logs via the legacy disc/muscle food
+    UI), fall back to the legacy food-list completion (0/50/100) mapped onto the 15-pt
+    scale so already-logged nutrition still counts toward the dashboard bar.
     """
     try:
-        from utils.adult_nutrition import adult_nutrition_points_today
+        from utils.adult_nutrition import (
+            adult_food_completion_percent_legacy,
+            adult_nutrition_points_today,
+        )
 
-        return int(min(ADULT_NUTRITION_COMPLETION_MAX, adult_nutrition_points_today(user, log_date)))
+        pts = int(adult_nutrition_points_today(user, log_date))
+        if pts > 0:
+            return min(ADULT_NUTRITION_COMPLETION_MAX, pts)
+        legacy_pct = int(adult_food_completion_percent_legacy(user, log_date))
+        return int(round(ADULT_NUTRITION_COMPLETION_MAX * (legacy_pct / 100.0)))
     except Exception:
         return 0
 
