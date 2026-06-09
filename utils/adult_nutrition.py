@@ -238,6 +238,43 @@ def get_adult_nutrition_day(user, log_date):
     return AdultNutritionDay.objects.filter(user=user, log_date=log_date).first()
 
 
+def build_hydration_log_entries(
+    water_ml: int,
+    spine_drinks: list | None = None,
+) -> list[dict]:
+    """
+    Expand stored totals into one UI row per 500 ml tap.
+
+    Example: water_ml=3000 → six entries labelled "500 ml".
+    Spine drinks expand per type (each serving is 500 ml).
+    """
+    spine_label_map = {d["key"]: d["label"] for d in ADULT_SPINE_DRINK_TYPES}
+    entries: list[dict] = []
+    water_units = max(0, int(water_ml or 0)) // ADULT_WATER_ML_PER_UNIT
+    for _ in range(water_units):
+        entries.append(
+            {
+                "type": "water",
+                "ml": ADULT_WATER_ML_PER_UNIT,
+                "label": f"{ADULT_WATER_ML_PER_UNIT} ml",
+            }
+        )
+    for drink in list(spine_drinks or []):
+        dtype = str(drink.get("type") or "").strip().lower()
+        count = max(0, int(drink.get("count", 0) or 0))
+        drink_label = spine_label_map.get(dtype, dtype.replace("_", " ").title())
+        for _ in range(count):
+            entries.append(
+                {
+                    "type": "spine_drink",
+                    "ml": ADULT_WATER_ML_PER_UNIT,
+                    "label": f"{drink_label} {ADULT_WATER_ML_PER_UNIT} ml",
+                    "drink_type": dtype,
+                }
+            )
+    return entries
+
+
 def adult_nutrition_points_today(user, log_date) -> int:
     """Server-authoritative adult nutrition points for the day (0..15)."""
     row = get_adult_nutrition_day(user, log_date)
@@ -271,6 +308,7 @@ def adult_nutrition_state(user, log_date) -> dict:
             "water_500ml_units": water_ml // ADULT_WATER_ML_PER_UNIT,
             "spine_500ml_count": spine_500ml,
             "spine_drinks": spine_drinks,
+            "logs": build_hydration_log_entries(water_ml, spine_drinks),
             "points": h_pts,
             "points_cap": ADULT_HYDRATION_POINTS_CAP,
             "spine_drink_types": ADULT_SPINE_DRINK_TYPES,

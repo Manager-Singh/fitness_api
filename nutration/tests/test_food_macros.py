@@ -128,12 +128,20 @@ class AdultHydrationSummaryTests(TestCase):
         prof.birth_date = date.today() - timedelta(days=int(365.2425 * 25))
         prof.save()
 
+    def test_hydration_log_entries_expand_per_500ml_tap(self):
+        from utils.adult_nutrition import build_hydration_log_entries
+
+        logs = build_hydration_log_entries(3000, [])
+        self.assertEqual(len(logs), 6)
+        self.assertTrue(all(e["label"] == "500 ml" for e in logs))
+
     def test_adult_hydration_ml_totals(self):
         AdultNutritionDay.objects.create(
             user=self.user,
             log_date=date.today(),
             water_ml=1000,
             spine_500ml_count=2,
+            spine_drinks=[{"type": "bone_broth", "count": 2}],
         )
         summary = hydration_summary_for_user(
             self.user, date.today(), adult_nutrition_plan=True
@@ -142,3 +150,6 @@ class AdultHydrationSummaryTests(TestCase):
         self.assertEqual(summary["water_ml"], 1000)
         self.assertEqual(summary["spine_500ml_count"], 2)
         self.assertEqual(summary["total_ml"], 2000)
+        self.assertEqual(len(summary["logs"]), 4)
+        self.assertEqual(summary["today_logged_hydration"][:2], ["500 ml", "500 ml"])
+        self.assertTrue(all("Bone Broth" in label for label in summary["today_logged_hydration"][2:]))

@@ -49,19 +49,26 @@ def hydration_summary_for_user(user, log_date, *, adult_nutrition_plan: bool) ->
     if adult_nutrition_plan:
         from utils.adult_nutrition import ADULT_WATER_ML_PER_UNIT, get_adult_nutrition_day
 
+        from utils.adult_nutrition import build_hydration_log_entries
+
         row = get_adult_nutrition_day(user, log_date)
         water_ml = int(getattr(row, "water_ml", 0) or 0)
         spine_count = int(getattr(row, "spine_500ml_count", 0) or 0)
+        spine_drinks = list(getattr(row, "spine_drinks", []) or [])
         spine_ml = spine_count * ADULT_WATER_ML_PER_UNIT
         total_ml = water_ml + spine_ml
+        logs = build_hydration_log_entries(water_ml, spine_drinks)
         return {
             "tracking": "ml",
             "water_ml": water_ml,
+            "water_500ml_units": water_ml // ADULT_WATER_ML_PER_UNIT,
             "spine_500ml_count": spine_count,
             "spine_ml": spine_ml,
             "total_ml": total_ml,
             "total_liters": round(total_ml / 1000.0, 2),
-            "spine_drinks": list(getattr(row, "spine_drinks", []) or []),
+            "spine_drinks": spine_drinks,
+            "logs": logs,
+            "today_logged_hydration": [e["label"] for e in logs],
         }
 
     from utils.teen_dashboard_dots import teen_lifestyle_channel_scores
