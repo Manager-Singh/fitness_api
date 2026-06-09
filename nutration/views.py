@@ -22,6 +22,10 @@ from .serializers_log import (
 )
 from utils.teen_nutrition_cap import TEEN_CAP_MESSAGE_EXACT
 from utils.user_time import user_today
+from nutration.food_macros import food_macros_from_entries, hydration_summary_for_user
+from utils.adult_nutrition import is_adult_flat_food_user
+from utils.nutrition_plan import account_age_bounds_payload, module_filter_age, modules_for_user_age_q
+from utils.paywall_flags import account_age_bounds
 
 
 
@@ -215,7 +219,8 @@ class MyPlanView(APIView):
             and effective_is_paid(request.user, subscription_data, age_exact=age_exact)
         )
 
-        # ── 2. Fetch modules for the user's age group ─────────────────────────
+        # ── 2. Fetch modules for the user's age group (sex-specific adult band) ─
+        plan_age = module_filter_age(request.user, age, age_exact=age_exact)
         modules = (
             Module.objects
             .select_related("age_group")
@@ -225,11 +230,7 @@ class MyPlanView(APIView):
                 # NEW: fetch media files (audio/video)
                 "module_activities"
             )
-            .filter(age_group__min_age__lte=age)
-            .filter(
-                Q(age_group__max_age__isnull=True) |
-                Q(age_group__max_age__gte=age)
-            )
+            .filter(modules_for_user_age_q(request.user, age, age_exact=age_exact))
             .order_by("age_group__min_age", "type", "sort_order", "name")
         )
 
@@ -239,9 +240,12 @@ class MyPlanView(APIView):
         if not adult_nutrition_plan:
             # Exclude adult-only nutrition buckets for teens.
             adult_cats = ["disc", "muscle"]
+            teen_max = int(account_age_bounds(user=request.user)["teen_max"])
             modules = modules.exclude(
                 type=Module.NUTRITION,
                 nutrition_category__in=adult_cats,
+            ).exclude(
+                age_group__min_age__gt=teen_max,
             )
         else:
             from utils.adult_nutrition import adult_nutrition_plan_module_q
@@ -381,20 +385,31 @@ class MyPlanView(APIView):
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
 
+        macro_totals = food_macros_from_entries(today_entries)
+        hydration_today = hydration_summary_for_user(
+            request.user,
+            log_date,
+            adult_nutrition_plan=is_adult_flat_food_user(request.user, age),
+        )
+
         cleaned_log = [
             {
                 "name": entry["item"]["name"],
                 "score": entry["score"],
                 "short_name": entry["item"].get(
                     "short_name", entry["item"]["short_name"]
-                )
+                ),
+                "calories": entry["item"].get("calories"),
+                "protein": entry["item"].get("protein"),
             }
             for entry in today_log
+            if entry["item"].get("type") == "food"
         ]
 
         # ── 6. Final response ─────────────────────────────────────────────────
         payload = {
-            "age": age,
+            **account_age_bounds_payload(request.user, age, age_exact=age_exact),
+            "plan_age": plan_age,
             "log_date": str(log_date),
             # Same semantics as POST /api/nutra-logs: traceable food points (capped).
             "daily_nutrition_pts_today": int(round(traceable_today_food_points)),
@@ -402,6 +417,9 @@ class MyPlanView(APIView):
             "today_total_nutrition_score_raw": float(raw_today_food_points),
             "today_total_food_score_traceable": float(traceable_today_food_points),
             "today_total_food_score_raw": float(raw_today_food_points),
+            "today_total_calories": macro_totals["today_total_calories"],
+            "today_total_protein": macro_totals["today_total_protein"],
+            "hydration_today": hydration_today,
             "cap_reached": cap_reached,
             "cap_limit": cap_limit,
             "diary_note": diary_note,

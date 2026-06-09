@@ -41,7 +41,16 @@ class NutraEntryReadSerializer(serializers.ModelSerializer):
 
     def get_item(self, obj):
         if obj.food:
-            return {"type": "food", "id": obj.food_id, "name": obj.food.name, "short_name": obj.food.short_name}
+            from nutration.food_macros import food_log_item_macros
+
+            item = {
+                "type": "food",
+                "id": obj.food_id,
+                "name": obj.food.name,
+                "short_name": obj.food.short_name,
+            }
+            item.update(food_log_item_macros(obj.food))
+            return item
         return {"type": "habit", "id": obj.activity_id, "name": obj.activity.name,"short_name": obj.activity.short_name}
 
 

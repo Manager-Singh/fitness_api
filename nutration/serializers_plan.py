@@ -111,11 +111,21 @@ class FoodSlim(serializers.Serializer):
     id          = serializers.IntegerField(source="food.id")
     name        = serializers.CharField(source="food.name")
     short_name  = serializers.CharField(source="food.short_name")
+    calories    = serializers.SerializerMethodField()
+    protein     = serializers.SerializerMethodField()
     image       = serializers.SerializerMethodField()
     serving     = serializers.CharField(source="serving_size")
     score       = serializers.SerializerMethodField()
 
     completed   = serializers.SerializerMethodField()      # ← NEW
+
+    def get_calories(self, obj):
+        return obj.food.calories
+
+    def get_protein(self, obj):
+        if obj.food.protein is None:
+            return None
+        return float(obj.food.protein)
 
     def get_score(self, obj):
         from nutration.scoring import module_food_score_for_user

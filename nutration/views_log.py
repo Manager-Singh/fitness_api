@@ -34,6 +34,7 @@ from utils.teen_nutrition_cap import (
     TEEN_CAP_EVENT_KEY,
     teen_cap_result,
 )
+from nutration.food_macros import food_macros_from_entries, hydration_summary_for_user
 
 
 class NutraLogViewSet(viewsets.ViewSet):
@@ -265,13 +266,24 @@ class NutraLogViewSet(viewsets.ViewSet):
         total_today_food_score = today_entries.filter(food__isnull=False).aggregate(total=Sum('score'))['total'] or 0
         today_log = read_ser.data
 
+        food_entries = today_entries.filter(food__isnull=False)
+        macro_totals = food_macros_from_entries(food_entries)
+        hydration_today = hydration_summary_for_user(
+            request.user,
+            log_date,
+            adult_nutrition_plan=is_adult_flat_food_user(request.user, age),
+        )
+
         cleaned_log = [
             {
                 "name": entry["item"]["name"],
                 "score": entry["score"],
-                "short_name": entry["item"].get("short_name", entry["item"]["short_name"])
+                "short_name": entry["item"].get("short_name", entry["item"]["short_name"]),
+                "calories": entry["item"].get("calories"),
+                "protein": entry["item"].get("protein"),
             }
             for entry in today_log
+            if entry["item"].get("type") == "food"
         ]
         # print(total_today_score)
         # print(cleaned_log)
@@ -372,6 +384,9 @@ class NutraLogViewSet(viewsets.ViewSet):
             "today_total_food_score": total_today_food_score,
             "today_total_food_score_traceable": float(traceable_food_points),
             "today_total_food_score_raw": float(raw_food_points),
+            "today_total_calories": macro_totals["today_total_calories"],
+            "today_total_protein": macro_totals["today_total_protein"],
+            "hydration_today": hydration_today,
             "today_logged_nutrition": cleaned_log,
             "nutrition_items_logged_count": food_entry_count,
             "nutrition_foods_unique_count": len(unique_food_ids),

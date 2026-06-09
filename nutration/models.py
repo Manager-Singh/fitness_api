@@ -66,7 +66,13 @@ class Module(models.Model):
 
     type      = models.CharField(max_length=4, choices=MODULE_TYPES)
     age_group = models.ForeignKey(
-        AgeGroup, on_delete=models.CASCADE, related_name="modules"
+        AgeGroup,
+        on_delete=models.CASCADE,
+        related_name="modules",
+        help_text=(
+            "Catalog bucket (often 21+ for adult modules). API visibility uses "
+            "sex-specific adult age: female 18+, male 21+."
+        ),
     )
 
     # 🆕 UI / Content fields
