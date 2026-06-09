@@ -10,7 +10,7 @@ from workouts.models import WorkoutEntry
 from users.models import DailyLog, HeightLedger, PostureState, User
 from utils.age import get_user_age_exact_on_date, get_user_age_on_date
 from utils.check_payment import check_subscription_or_response
-from utils.paywall_flags import effective_is_paid, teen_paywall_disabled
+from utils.paywall_flags import effective_is_paid, is_adult_age, teen_paywall_disabled
 from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
@@ -588,7 +588,9 @@ def _daily_engine_points(user, log_date, age, subscription_data):
     lifestyle_points = int(round(sleep_pts + sun_pts + med_pts + hyd_pts))
     food_points = int(round(food_pts))
 
-    if age >= 21:
+    # Sex-specific adult band (female 18+, male 21+) so nutrition routing matches
+    # /api/my-nutrition-plan, /api/dashboard-new and /api/adult-nutrition.
+    if is_adult_age(age_years=age, user=user):
         # Part 2 — adult Engine 1 nutrition = protein + hydration points (cap 15),
         # server-authoritative from AdultNutritionDay. Gated by posture work exactly as
         # adult nutrition routes today.
@@ -656,7 +658,7 @@ def daily_points_source_breakdown(user, log_date, age, subscription_data) -> dic
     e1, e2, exercise_points, food_points, lifestyle_points, habit_points = _daily_engine_points(
         user=user, log_date=log_date, age=age, subscription_data=subscription_data
     )
-    is_adult = age >= 21
+    is_adult = is_adult_age(age_years=age, user=user)
 
     adult_nutrition_engine_pts = 0
     if is_adult:

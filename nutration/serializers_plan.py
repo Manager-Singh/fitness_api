@@ -99,8 +99,9 @@ Plan serializers with "completed" flag
 """
 
 from django.apps import apps
-from django.utils import timezone
 from rest_framework import serializers
+
+from utils.user_time import user_today
 
 Module      = apps.get_model("nutration", "Module")
 NutraEntry  = apps.get_model("nutration", "NutraEntry")   # ← daily log
@@ -144,7 +145,7 @@ class FoodSlim(serializers.Serializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        today = timezone.localdate()
+        today = user_today(request.user)
         return NutraEntry.objects.filter(
             session__user=request.user,
             session__date=today,
@@ -187,7 +188,7 @@ class HabitSlim(serializers.Serializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        today = timezone.localdate()
+        today = user_today(request.user)
         return NutraEntry.objects.filter(
             session__user=request.user,
             session__date=today,

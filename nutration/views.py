@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from utils.age import get_user_age, get_user_age_exact
 from utils.check_payment import check_subscription_or_response
-from utils.paywall_flags import effective_is_paid, is_adult_age
+from utils.paywall_flags import effective_is_paid
 
 from .models import AgeGroup, Module, Food, ModuleFood
 from .serializers import (
@@ -212,7 +212,10 @@ class MyPlanView(APIView):
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        adult_nutrition_plan = is_adult_age(age_exact, age, user=request.user)
+        # Unified adult detection across nutrition APIs: respects an explicit
+        # account_tier override and otherwise falls back to the sex-specific adult
+        # age band (female 18+, male 21+). Same helper used for hydration + scoring.
+        adult_nutrition_plan = is_adult_flat_food_user(request.user, age)
         subscription_data = check_subscription_or_response(request.user).data
         adult_paid_lifestyle = bool(
             adult_nutrition_plan
@@ -354,15 +357,13 @@ class MyPlanView(APIView):
         else:
             from workouts.models import WorkoutEntry
             from utils.adult_nutrition import (
-                ADULT_NUTRITION_FOOD_SLOT_MAX,
-                adult_disc_muscle_food_id_sets,
-                adult_engine_nutrition_points,
+                ADULT_NUTRITION_POINTS_CAP,
+                adult_nutrition_points_today,
             )
 
-            exercise_logged = WorkoutEntry.objects.filter(
-                session__user=request.user,
-                session__date=log_date,
-            ).exists()
+            # Part 2 adult nutrition = protein + hydration points from
+            # AdultNutritionDay (server-authoritative), gated by posture work so
+            # this matches users/spec_runtime.py and /api/adult-nutrition exactly.
             posture_pts = float(
                 WorkoutEntry.objects.filter(
                     session__user=request.user,
@@ -371,16 +372,12 @@ class MyPlanView(APIView):
                 ).aggregate(total=Sum("points"))["total"]
                 or 0.0
             )
-            disc_ids, muscle_ids = adult_disc_muscle_food_id_sets(today_entries)
-            traceable_today_food_points = float(
-                adult_engine_nutrition_points(posture_pts, disc_ids, muscle_ids)
-                if exercise_logged
-                else 0.0
-            )
-            cap_limit = float(ADULT_NUTRITION_FOOD_SLOT_MAX)
-            cap_reached = bool(len(disc_ids) + len(muscle_ids) >= int(ADULT_NUTRITION_FOOD_SLOT_MAX))
+            adult_points = int(adult_nutrition_points_today(request.user, log_date))
+            traceable_today_food_points = float(adult_points if posture_pts > 0 else 0.0)
+            cap_limit = float(ADULT_NUTRITION_POINTS_CAP)
+            cap_reached = bool(adult_points >= int(ADULT_NUTRITION_POINTS_CAP))
             diary_note = (
-                f"You've logged all {int(cap_limit)} traceable adult nutrition foods for today."
+                f"You've reached today's nutrition cap ({int(cap_limit)} pts)."
             ) if cap_reached else None
 
         today_log = NutraEntryReadSerializer(today_entries, many=True).data
@@ -389,7 +386,7 @@ class MyPlanView(APIView):
         hydration_today = hydration_summary_for_user(
             request.user,
             log_date,
-            adult_nutrition_plan=is_adult_flat_food_user(request.user, age),
+            adult_nutrition_plan=adult_nutrition_plan,
         )
 
         cleaned_log = [

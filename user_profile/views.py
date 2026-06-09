@@ -1310,6 +1310,21 @@ def my_profile(request):
     engine1_pts_today = int((daily.engine1_points if daily else 0) or 0)
     engine2_pts_today = int((daily.engine2_points if daily else 0) or 0)
     total_points_today = exercise_pts_today + food_pts_today + lifestyle_pts_today + habit_pts_today
+
+    # Diet/hydration detail (calories, protein grams, hydration consumed) — same source
+    # as /api/my-nutrition-plan and /api/dashboard-new so all surfaces stay in sync.
+    from nutration.food_macros import food_macros_from_entries, hydration_summary_for_user
+    from nutration.models_log import NutraEntry as _NutraEntry
+
+    _profile_is_teen = is_teen_age(age_years=get_user_age(user), user=user)
+    _food_entries_today = _NutraEntry.objects.filter(
+        session__user=user, session__date=today, food__isnull=False
+    ).select_related("food")
+    _macros_today = food_macros_from_entries(_food_entries_today)
+    _hydration_today = hydration_summary_for_user(
+        user, today, adult_nutrition_plan=not _profile_is_teen
+    )
+
     today_log = {
         "log_date": str(today),
         # True per-source points logged today (no double counting).
@@ -1317,6 +1332,10 @@ def my_profile(request):
         "nutrition_pts": food_pts_today,
         "lifestyle_pts": lifestyle_pts_today,
         "habit_pts": habit_pts_today,
+        # Diet/hydration detail.
+        "today_total_calories": _macros_today["today_total_calories"],
+        "today_total_protein": _macros_today["today_total_protein"],
+        "hydration_today": _hydration_today,
         # Sum of ALL logged points today.
         "total_points": total_points_today,
         # Engine numbers = points applied to height (gain reconciliation, Bug 5).

@@ -80,6 +80,20 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
     from workouts.models import RoutineType, UserRoutineExercise, WorkoutEntry
 
     daily = DailyLog.objects.filter(user=user, log_date=log_date).first()
+
+    # Diet/hydration detail (calories, protein grams, hydration consumed) — same
+    # source as /api/my-nutrition-plan so home + diary stay in sync.
+    from nutration.food_macros import food_macros_from_entries, hydration_summary_for_user
+    from nutration.models_log import NutraEntry as _NutraEntry
+
+    _food_entries = _NutraEntry.objects.filter(
+        session__user=user, session__date=log_date, food__isnull=False
+    ).select_related("food")
+    _macros = food_macros_from_entries(_food_entries)
+    _hydration_today = hydration_summary_for_user(
+        user, log_date, adult_nutrition_plan=not is_teen
+    )
+
     if is_teen:
         from utils.teen_dashboard_dots import teen_lifestyle_dots_for_day, teen_nutrition_dots_from_food_points
         from nutration.models_log import NutraEntry
@@ -128,6 +142,9 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
             "completion_breakdown": combined,
             "teen_nutrition_dots": nutrition_dots,
             "teen_lifestyle_dots": lifestyle_dots,
+            "today_total_calories": _macros["today_total_calories"],
+            "today_total_protein": _macros["today_total_protein"],
+            "hydration_today": _hydration_today,
             "streak_days": 0,
             "daily_points": _embed_daily_points(user, subscription_data=None),
             "rank": None,
@@ -174,6 +191,9 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         "completion_breakdown": combined,
         "teen_nutrition_dots": None,
         "teen_lifestyle_dots": None,
+        "today_total_calories": _macros["today_total_calories"],
+        "today_total_protein": _macros["today_total_protein"],
+        "hydration_today": _hydration_today,
         "streak_days": 0,
         "daily_points": _embed_daily_points(user, subscription_data=None),
         "rank": None,

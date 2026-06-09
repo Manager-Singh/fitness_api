@@ -153,3 +153,46 @@ class AdultHydrationSummaryTests(TestCase):
         self.assertEqual(len(summary["logs"]), 4)
         self.assertEqual(summary["today_logged_hydration"][:2], ["500 ml", "500 ml"])
         self.assertTrue(all("Bone Broth" in label for label in summary["today_logged_hydration"][2:]))
+
+    @patch("nutration.views.check_subscription_or_response")
+    def test_my_nutrition_plan_adult_points_use_adult_nutrition_day(self, mock_sub):
+        """Adult my-nutrition-plan points come from AdultNutritionDay (cap 15), posture-gated."""
+        mock_sub.return_value.data = {"is_paid": True, "expired": False}
+
+        from workouts.models import Exercise, UserRoutine, WorkoutEntry, WorkoutSession
+
+        log_date = date.today()
+        # protein 30g -> 3 pts, water 1500ml -> 3 pts = 6 nutrition pts
+        AdultNutritionDay.objects.create(
+            user=self.user,
+            log_date=log_date,
+            protein_grams=30,
+            water_ml=1500,
+            spine_500ml_count=0,
+        )
+
+        factory = APIRequestFactory()
+
+        # Without posture work the nutrition points are gated to 0, but the cap is the
+        # Part 2 points cap (15), not the legacy 13-food slot cap.
+        req = factory.get("/api/my-nutrition-plan?type=nutrition")
+        force_authenticate(req, user=self.user)
+        resp = MyPlanView.as_view()(req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["cap_limit"], 15.0)
+        self.assertEqual(resp.data["daily_nutrition_pts_today"], 0)
+
+        # With posture work logged, the AdultNutritionDay points (6) count.
+        routine = UserRoutine.objects.create(user=self.user, routine_type="POSTURE")
+        session = WorkoutSession.objects.create(
+            user=self.user, user_routine=routine, date=log_date
+        )
+        exercise = Exercise.objects.create(name="Chin Tuck")
+        WorkoutEntry.objects.create(session=session, exercise=exercise, points=5)
+
+        req2 = factory.get("/api/my-nutrition-plan?type=nutrition")
+        force_authenticate(req2, user=self.user)
+        resp2 = MyPlanView.as_view()(req2)
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.data["daily_nutrition_pts_today"], 6)
+        self.assertEqual(resp2.data["today_total_nutrition_score"], 6.0)
