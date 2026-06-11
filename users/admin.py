@@ -362,20 +362,29 @@ class UserAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path(
-                "<id>/generate-routine/",
+                "<object_id>/generate-routine/",
                 self.admin_site.admin_view(self.generate_routine_view),
                 name="users_user_generate_routine",
             ),
             path(
-                "<id>/generate-ultimate-height/",
+                "<object_id>/generate-ultimate-height/",
                 self.admin_site.admin_view(self.generate_ultimate_height_view),
                 name="users_user_generate_ultimate_height",
             ),
         ]
         return custom + urls
 
-    def generate_ultimate_height_view(self, request, object_id):
-        user = get_object_or_404(self.model, pk=object_id)
+    def _user_from_admin_kwargs(self, kwargs):
+        """Custom admin URLs may capture the pk as ``object_id`` or ``id``."""
+        pk = kwargs.get("object_id") or kwargs.get("id")
+        if not pk:
+            return None
+        return get_object_or_404(self.model, pk=pk)
+
+    def generate_ultimate_height_view(self, request, *args, **kwargs):
+        user = self._user_from_admin_kwargs(kwargs)
+        if user is None:
+            return HttpResponseNotAllowed(["POST"])
         if not self.has_change_permission(request, user):
             return HttpResponseForbidden()
         if request.method != "POST":
@@ -405,8 +414,10 @@ class UserAdmin(admin.ModelAdmin):
             )
         return HttpResponseRedirect(reverse("admin:users_user_change", args=[user.pk]))
 
-    def generate_routine_view(self, request, object_id):
-        user = get_object_or_404(self.model, pk=object_id)
+    def generate_routine_view(self, request, *args, **kwargs):
+        user = self._user_from_admin_kwargs(kwargs)
+        if user is None:
+            return HttpResponseNotAllowed(["POST"])
         if not self.has_change_permission(request, user):
             return HttpResponseForbidden()
         if request.method != "POST":
