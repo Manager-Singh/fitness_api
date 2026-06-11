@@ -796,6 +796,26 @@ def get_user_score_summary(user, subscription_data, mode=None):
     # explicit exercise count (number of workout entries today)
     today_summary["exercise_count"] = WorkoutEntry.objects.filter(session__user=user, session__date=today).count()
 
+    # Part 2 — adult nutrition (protein + hydration) is server-authoritative from
+    # AdultNutritionDay. When it has data for today it REPLACES the legacy NutraEntry
+    # food score (mirrors _adult_nutrition_completion_earned: new model wins, legacy
+    # food logging is the fallback), so dashboard daily_points matches daily_gains_cm.
+    from utils.paywall_flags import is_adult_age
+
+    if is_adult_age(age_years=age, user=user):
+        from utils.adult_nutrition import adult_nutrition_points_today
+
+        adult_nutrition_pts = int(adult_nutrition_points_today(user, today))
+        if adult_nutrition_pts > 0:
+            today_summary["food_score"] = adult_nutrition_pts
+            today_summary["total_score"] = int(
+                adult_nutrition_pts
+                + (today_summary.get("activity_score") or 0)
+                + (today_summary.get("workout_score") or 0)
+                + (today_summary.get("habit_score") or 0)
+            )
+            today_summary["posture_gain_cm"] = round(today_summary["total_score"] * 0.001, 4)
+
     if age >= 21 and today_summary["workout_score"] == 0:
         today_summary["posture_gain_cm"] = 0.000
 
