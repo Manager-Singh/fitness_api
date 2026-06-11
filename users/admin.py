@@ -20,6 +20,9 @@ from workouts.models import WorkoutEntry, WorkoutSession, UserRoutine, UserRouti
 
 from chatbot.models import ChatMessage
 from height_analysis.models import GeneticHeightEstimate, HeightGrowthProjection
+from height_predictor.admin_ui import ultimate_height_section_html
+from height_predictor.models import UltimateHeightPrediction
+from height_predictor.services import compute_and_store_prediction
 from posture_analysis.models import UserPosturalOptimizationData, PosturalRecommendation
 
 from posture_questions.services.routine_service import RoutineService
@@ -285,12 +288,56 @@ class HeightLedgerInline(admin.TabularInline):
     def bio_delta_cm(self, obj):
         return f"{fmt_cm(obj.bio_delta_um)} cm"
 
+
+class UltimateHeightPredictionInline(admin.TabularInline):
+    """Ultimate Height Predictor history for this user (read-only)."""
+    model = UltimateHeightPrediction
+    fk_name = "user"
+    extra = 0
+    max_num = 0
+    can_delete = False
+    ordering = ("-computed_at",)
+    readonly_fields = (
+        "computed_at",
+        "band",
+        "true_optimized_cm",
+        "genetic_potential_cm",
+        "posture_recovery_cm",
+        "completed",
+        "model_version",
+        "open_record",
+    )
+    fields = readonly_fields
+    verbose_name = "Prediction"
+    verbose_name_plural = "Ultimate Height Predictor — history (last 10)"
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        user_id = _inline_parent_user_id(self, request)
+        if not user_id:
+            return qs.none()
+        qs = qs.filter(user_id=user_id).order_by("-computed_at")
+        pks = list(qs.values_list("pk", flat=True)[:10])
+        if not pks:
+            return qs.none()
+        return qs.model.objects.filter(pk__in=pks).order_by("-computed_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Record")
+    def open_record(self, obj):
+        url = reverse("admin:height_predictor_ultimateheightprediction_change", args=[obj.pk])
+        return format_html('<a href="{}">#{}</a>', url, obj.pk)
+
+
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "email",
         "tier_badge",
+        "ultimate_height_cm_display",
         "cumulative_height_display",
         "today_engines_display",
         "pipeline_status",
@@ -319,8 +366,44 @@ class UserAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.generate_routine_view),
                 name="users_user_generate_routine",
             ),
+            path(
+                "<id>/generate-ultimate-height/",
+                self.admin_site.admin_view(self.generate_ultimate_height_view),
+                name="users_user_generate_ultimate_height",
+            ),
         ]
         return custom + urls
+
+    def generate_ultimate_height_view(self, request, object_id):
+        user = get_object_or_404(self.model, pk=object_id)
+        if not self.has_change_permission(request, user):
+            return HttpResponseForbidden()
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        try:
+            prediction, err = compute_and_store_prediction(user, source="admin_user_change")
+            if err:
+                missing = ", ".join(err.get("missing") or [])
+                self.message_user(
+                    request,
+                    f"Predictor failed for {user.email}: {err.get('error', 'missing data')}"
+                    + (f" ({missing})" if missing else ""),
+                    level=messages.ERROR,
+                )
+            else:
+                self.message_user(
+                    request,
+                    f"Ultimate Height Predictor for {user.email}: "
+                    f"{prediction.true_optimized_cm} cm (band {prediction.band}, id #{prediction.pk}).",
+                    level=messages.SUCCESS,
+                )
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Predictor failed for {user.email}: {e}",
+                level=messages.ERROR,
+            )
+        return HttpResponseRedirect(reverse("admin:users_user_change", args=[user.pk]))
 
     def generate_routine_view(self, request, object_id):
         user = get_object_or_404(self.model, pk=object_id)
@@ -359,7 +442,17 @@ class UserAdmin(admin.ModelAdmin):
         if user is not None:
             extra_context["hm_progress_section"] = progress_dashboard_html(user)
             extra_context["hm_routine_section"] = routine_section_html(user, request)
+            extra_context["hm_ultimate_height_section"] = ultimate_height_section_html(user, request)
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
+
+    @admin.display(description="True Opt.")
+    def ultimate_height_cm_display(self, obj):
+        from height_predictor.services import get_latest_prediction
+
+        pred = get_latest_prediction(obj)
+        if not pred or pred.true_optimized_cm is None:
+            return badge("—")
+        return badge(f"{pred.true_optimized_cm} cm", color="#166534", bg="#dcfce7")
 
     class UserProfileInline(admin.StackedInline):
         model = UserProfile
@@ -379,6 +472,7 @@ class UserAdmin(admin.ModelAdmin):
         PostureStateInline,
         DailyLogInline,
         HeightLedgerInline,
+        UltimateHeightPredictionInline,
         UserProfileInline,
         PostureQuestionInline,
     )

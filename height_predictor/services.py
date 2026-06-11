@@ -85,6 +85,127 @@ def defaults_from_profile(user) -> dict:
 
 
 _RECOMPUTE_CORE_FIELDS = ("sex", "age_years", "current_height_cm", "father_height_cm", "mother_height_cm")
+REQUIRED_CORE_FIELDS = _RECOMPUTE_CORE_FIELDS
+
+
+def _merge_prediction_inputs(user, client_inputs=None) -> dict:
+    """Profile defaults + prior assessment answers + optional client overrides."""
+    merged = defaults_from_profile(user)
+    try:
+        from .models import UltimateHeightPrediction
+
+        latest = (
+            UltimateHeightPrediction.objects.filter(user=user, completed=True)
+            .order_by("-computed_at")
+            .first()
+        )
+        if latest and latest.raw_inputs:
+            prior = {
+                k: v
+                for k, v in (latest.raw_inputs or {}).items()
+                if k not in ("recomputed_from", "source")
+            }
+            for key, val in prior.items():
+                if val not in (None, "") and key not in (client_inputs or {}):
+                    merged.setdefault(key, val)
+    except Exception:
+        pass
+    if client_inputs:
+        merged.update({k: v for k, v in client_inputs.items() if v is not None})
+    return merged
+
+
+def _inputs_from_merged(merged: dict):
+    from .predictor import PredictorInputs
+
+    return PredictorInputs(
+        sex=merged["sex"],
+        age_years=float(merged["age_years"]),
+        current_height_cm=float(merged["current_height_cm"]),
+        father_height_cm=float(merged["father_height_cm"]),
+        mother_height_cm=float(merged["mother_height_cm"]),
+        voice_depth=int(merged.get("voice_depth", 0) or 0),
+        facial_hair=int(merged.get("facial_hair", 0) or 0),
+        body_hair=int(merged.get("body_hair", 0) or 0),
+        adams_apple=int(merged.get("adams_apple", 0) or 0),
+        menarche_status=int(merged.get("menarche_status", 0) or 0),
+        growth_spurt_status=int(merged.get("growth_spurt_status", 0) or 0),
+        recent_growth_cm=merged.get("recent_growth_cm"),
+        wingspan_cm=merged.get("wingspan_cm"),
+        wrist_circumference_cm=merged.get("wrist_circumference_cm"),
+        weight_kg=merged.get("weight_kg"),
+        shoe_size=merged.get("shoe_size"),
+    )
+
+
+def compute_and_store_prediction(user, client_inputs=None, *, source: str = "api"):
+    """
+    Run the Ultimate Height Predictor and persist a completed row.
+
+    Returns ``(prediction, None)`` on success or ``(None, error_dict)`` when required
+    profile fields are missing. Used by the API and Django admin generate action.
+    """
+    from .models import UltimateHeightPrediction
+    from .predictor import MODEL_VERSION, predict_optimized_height
+
+    merged = _merge_prediction_inputs(user, client_inputs)
+    missing = [f for f in _RECOMPUTE_CORE_FIELDS if merged.get(f) in (None, "")]
+    if missing:
+        return None, {
+            "error": "Missing required values for the prediction.",
+            "missing": missing,
+            "hint": "Collect sex, age, current height, and parent heights on the user profile first.",
+        }
+
+    posture_cm = get_user_posture_recovery_cm(user)
+    inputs = _inputs_from_merged(merged)
+    breakdown = predict_optimized_height(inputs, posture_cm)
+    raw_inputs = {**merged}
+    if source:
+        raw_inputs["source"] = source
+
+    prediction = UltimateHeightPrediction.objects.create(
+        user=user,
+        sex=inputs.sex,
+        age_years=inputs.age_years,
+        current_height_cm=inputs.current_height_cm,
+        father_height_cm=inputs.father_height_cm,
+        mother_height_cm=inputs.mother_height_cm,
+        voice_depth=inputs.voice_depth,
+        facial_hair=inputs.facial_hair,
+        body_hair=inputs.body_hair,
+        adams_apple=inputs.adams_apple,
+        menarche_status=inputs.menarche_status,
+        growth_spurt_status=inputs.growth_spurt_status,
+        recent_growth_cm=inputs.recent_growth_cm,
+        wingspan_cm=inputs.wingspan_cm,
+        wrist_circumference_cm=inputs.wrist_circumference_cm,
+        weight_kg=inputs.weight_kg,
+        shoe_size=inputs.shoe_size,
+        posture_recovery_cm=breakdown["posture_recovery_cm"],
+        genetic_potential_cm=breakdown["genetic_potential_cm"],
+        true_optimized_cm=breakdown["true_optimized_cm"],
+        band=breakdown["band"],
+        model_version=MODEL_VERSION,
+        completed=True,
+        raw_inputs=raw_inputs,
+        breakdown=breakdown,
+    )
+    return prediction, None
+
+
+def get_latest_prediction(user):
+    """Latest completed Ultimate Height prediction for a user, or None."""
+    try:
+        from .models import UltimateHeightPrediction
+
+        return (
+            UltimateHeightPrediction.objects.filter(user=user, completed=True)
+            .order_by("-computed_at")
+            .first()
+        )
+    except Exception:
+        return None
 
 
 def recompute_from_profile(user):
@@ -101,7 +222,7 @@ def recompute_from_profile(user):
     """
     try:
         from .models import UltimateHeightPrediction
-        from .predictor import MODEL_VERSION, PredictorInputs, predict_optimized_height
+        from .predictor import MODEL_VERSION, predict_optimized_height
     except Exception:
         return None
 
@@ -124,25 +245,7 @@ def recompute_from_profile(user):
 
         posture_cm = get_user_posture_recovery_cm(user)
 
-        inputs = PredictorInputs(
-            sex=merged["sex"],
-            age_years=float(merged["age_years"]),
-            current_height_cm=float(merged["current_height_cm"]),
-            father_height_cm=float(merged["father_height_cm"]),
-            mother_height_cm=float(merged["mother_height_cm"]),
-            voice_depth=int(merged.get("voice_depth", 0) or 0),
-            facial_hair=int(merged.get("facial_hair", 0) or 0),
-            body_hair=int(merged.get("body_hair", 0) or 0),
-            adams_apple=int(merged.get("adams_apple", 0) or 0),
-            menarche_status=int(merged.get("menarche_status", 0) or 0),
-            growth_spurt_status=int(merged.get("growth_spurt_status", 0) or 0),
-            recent_growth_cm=merged.get("recent_growth_cm"),
-            wingspan_cm=merged.get("wingspan_cm"),
-            wrist_circumference_cm=merged.get("wrist_circumference_cm"),
-            weight_kg=merged.get("weight_kg"),
-            shoe_size=merged.get("shoe_size"),
-        )
-
+        inputs = _inputs_from_merged(merged)
         breakdown = predict_optimized_height(inputs, posture_cm)
 
         # Skip writing a new row when nothing meaningful changed (avoids row spam on every save).

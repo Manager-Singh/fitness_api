@@ -24,5 +24,13 @@
   </div>
 </fieldset>
 {% endif %}
+{% if hm_ultimate_height_section %}
+<fieldset class="module hm-ultpred-fieldset wide">
+  <h2>Ultimate Height Predictor</h2>
+  <div class="hm-ultpred-fieldset-body">
+    {{ hm_ultimate_height_section|safe }}
+  </div>
+</fieldset>
+{% endif %}
 {{ block.super }}
 {% endblock %}
