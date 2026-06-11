@@ -452,6 +452,16 @@ def update_profile_users(request):
     if user_update_fields:
         user.save(update_fields=list(dict.fromkeys(user_update_fields)))
 
+    # Ultimate Height Predictor (sealed box): if the user already has a completed prediction,
+    # refresh it from the just-saved profile values (height / parent heights / DOB / sex). This is
+    # best-effort and never affects the profile-update response if it fails.
+    try:
+        from height_predictor.services import recompute_from_profile
+
+        recompute_from_profile(user)
+    except Exception:
+        pass
+
     profile_data = model_to_dict(profile)
     onboarding_extra = {}
     sex_r = normalize_sex(profile.gender)

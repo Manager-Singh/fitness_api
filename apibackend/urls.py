@@ -45,6 +45,7 @@ urlpatterns = [
     path("api/", include("workouts.urls")),
     path("api/", include("nutration.urls")),
     path("api/", include("habits.urls")),
+    path("api/predictor/", include("height_predictor.urls")),
     path("api/", include("apibackend.spec_urls")),
     path('api/posture/', include('posture.urls')),
     path("api/packages/", include("payment_packages.urls")),

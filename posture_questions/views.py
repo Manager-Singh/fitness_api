@@ -1269,7 +1269,23 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         canonical_scan_completed = False
         optimized_height_for_ui = None
     elif can_view_true_optimized:
+        # Ultimate Height Predictor (Model v2): if the user has completed the new 20-point
+        # assessment, that number fills the True Optimized slot. Otherwise fall back to the
+        # existing optimized-height calculation unchanged. This is the ONLY integration point;
+        # no other engine/dashboard logic is affected.
         optimized_height_for_ui = optimized_result.get("optimized_height_cm")
+        try:
+            from height_predictor.models import UltimateHeightPrediction
+
+            _pred = (
+                UltimateHeightPrediction.objects.filter(user=user, completed=True)
+                .order_by("-computed_at")
+                .first()
+            )
+            if _pred and _pred.true_optimized_cm:
+                optimized_height_for_ui = _pred.true_optimized_cm
+        except Exception:
+            pass
     else:
         optimized_height_for_ui = None
 
