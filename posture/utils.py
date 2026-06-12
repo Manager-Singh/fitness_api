@@ -1,29 +1,42 @@
-import cv2
-import numpy as np
-import mediapipe as mp
+"""
+MediaPipe-based posture analysis from uploaded images.
+
+Imports mediapipe/opencv lazily inside ``AdvancedPoseDetector`` — this module is only
+loaded when ``POSTURE_IMAGE_SCAN_ENABLED`` is True and ``scan_gateway.analyze_posture_image``
+is called.
+"""
+from __future__ import annotations
 
 
 class AdvancedPoseDetector:
     def __init__(self):
+        import cv2
+        import mediapipe as mp
+
+        self._cv2 = cv2
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             static_image_mode=True,
             model_complexity=2,
             enable_segmentation=False,
-            min_detection_confidence=0.7
+            min_detection_confidence=0.7,
         )
 
         self.THRESHOLDS = {
-            'forward_head_angle': 45,
-            'pelvic_tilt_angle': 15,
-            'height_loss_neck_factor': 0.47,
-            'height_loss_pelvis_factor': 0.32
+            "forward_head_angle": 45,
+            "pelvic_tilt_angle": 15,
+            "height_loss_neck_factor": 0.47,
+            "height_loss_pelvis_factor": 0.32,
         }
 
     def _get_coords(self, landmark):
+        import numpy as np
+
         return np.array([landmark.x, landmark.y])
 
     def _calculate_angle(self, a, b, c):
+        import numpy as np
+
         ba = a - b
         bc = c - b
         cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
@@ -32,17 +45,18 @@ class AdvancedPoseDetector:
     def _determine_pose_type(self, landmarks):
         left_eye = landmarks[self.mp_pose.PoseLandmark.LEFT_EYE.value]
         right_eye = landmarks[self.mp_pose.PoseLandmark.RIGHT_EYE.value]
-        nose = landmarks[self.mp_pose.PoseLandmark.NOSE.value]
         left_ear = landmarks[self.mp_pose.PoseLandmark.LEFT_EAR.value]
         right_ear = landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR.value]
         left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value]
         right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
 
-        # Visibility check
         visibilities = [
-            left_eye.visibility, right_eye.visibility,
-            left_ear.visibility, right_ear.visibility,
-            left_shoulder.visibility, right_shoulder.visibility
+            left_eye.visibility,
+            right_eye.visibility,
+            left_ear.visibility,
+            right_ear.visibility,
+            left_shoulder.visibility,
+            right_shoulder.visibility,
         ]
         if sum(v < 0.4 for v in visibilities) >= 4:
             return "unknown"
@@ -51,12 +65,7 @@ class AdvancedPoseDetector:
         shoulder_width = abs(left_shoulder.x - right_shoulder.x)
         ear_diff = abs(left_ear.visibility - right_ear.visibility)
 
-        is_side_profile = (
-            x_eye_diff < 0.02 or
-            ear_diff > 0.5 or
-            shoulder_width < 0.1
-        )
-
+        is_side_profile = x_eye_diff < 0.02 or ear_diff > 0.5 or shoulder_width < 0.1
         return "side" if is_side_profile else "front"
 
     def _analyze_front_view(self, landmarks, shape):
@@ -66,12 +75,14 @@ class AdvancedPoseDetector:
         return {"head_position": "forward"}, ["Strengthen neck extensors"], 78
 
     def _calculate_height_loss(self, landmarks, image_shape, pose_type, user_height_inches):
+        import numpy as np
+
         h, _ = image_shape[:2]
         height_loss = {
-            'total_inches': 0.0,
-            'forward_head_inches': 0.0,
-            'pelvic_tilt_inches': 0.0,
-            'other_inches': 0.0
+            "total_inches": 0.0,
+            "forward_head_inches": 0.0,
+            "pelvic_tilt_inches": 0.0,
+            "other_inches": 0.0,
         }
 
         try:
@@ -82,7 +93,7 @@ class AdvancedPoseDetector:
                     hip = self._get_coords(landmarks[self.mp_pose.PoseLandmark.LEFT_HIP.value])
                     knee = self._get_coords(landmarks[self.mp_pose.PoseLandmark.LEFT_KNEE.value])
                     heel = self._get_coords(landmarks[self.mp_pose.PoseLandmark.LEFT_HEEL.value])
-                except:
+                except Exception:
                     ear = self._get_coords(landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR.value])
                     shoulder = self._get_coords(landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value])
                     hip = self._get_coords(landmarks[self.mp_pose.PoseLandmark.RIGHT_HIP.value])
@@ -96,27 +107,31 @@ class AdvancedPoseDetector:
                 neck_angle = self._calculate_angle(ear, shoulder, shoulder + np.array([0.0, 0.01]))
                 neck_length_px = np.linalg.norm(ear - shoulder) * h
 
-                if neck_angle > self.THRESHOLDS['forward_head_angle']:
+                if neck_angle > self.THRESHOLDS["forward_head_angle"]:
                     forward_loss = (
-                        neck_length_px * (1 - np.cos(np.radians(neck_angle))) *
-                        self.THRESHOLDS['height_loss_neck_factor'] *
-                        user_height_inches / current_height_px
+                        neck_length_px
+                        * (1 - np.cos(np.radians(neck_angle)))
+                        * self.THRESHOLDS["height_loss_neck_factor"]
+                        * user_height_inches
+                        / current_height_px
                     )
-                    height_loss['forward_head_inches'] = round(forward_loss, 2)
+                    height_loss["forward_head_inches"] = round(forward_loss, 2)
 
                 pelvic_angle = self._calculate_angle(shoulder, hip, knee)
                 torso_length_px = np.linalg.norm(shoulder - hip) * h
 
-                if pelvic_angle > self.THRESHOLDS['pelvic_tilt_angle']:
+                if pelvic_angle > self.THRESHOLDS["pelvic_tilt_angle"]:
                     pelvic_loss = (
-                        torso_length_px * np.sin(np.radians(pelvic_angle - self.THRESHOLDS['pelvic_tilt_angle'])) *
-                        self.THRESHOLDS['height_loss_pelvis_factor'] *
-                        user_height_inches / current_height_px
+                        torso_length_px
+                        * np.sin(np.radians(pelvic_angle - self.THRESHOLDS["pelvic_tilt_angle"]))
+                        * self.THRESHOLDS["height_loss_pelvis_factor"]
+                        * user_height_inches
+                        / current_height_px
                     )
-                    height_loss['pelvic_tilt_inches'] = round(pelvic_loss, 2)
+                    height_loss["pelvic_tilt_inches"] = round(pelvic_loss, 2)
 
-                height_loss['total_inches'] = round(
-                    height_loss['forward_head_inches'] + height_loss['pelvic_tilt_inches'], 2
+                height_loss["total_inches"] = round(
+                    height_loss["forward_head_inches"] + height_loss["pelvic_tilt_inches"], 2
                 )
 
             elif pose_type == "front":
@@ -126,15 +141,23 @@ class AdvancedPoseDetector:
 
                 if spine_length > 0 and user_height_inches:
                     compression_loss = (spine_length * 0.12 * user_height_inches) / (spine_length * 1.2)
-                    height_loss['other_inches'] = round(compression_loss, 2)
-                    height_loss['total_inches'] = round(compression_loss, 2)
+                    height_loss["other_inches"] = round(compression_loss, 2)
+                    height_loss["total_inches"] = round(compression_loss, 2)
 
         except Exception as e:
             print(f"[ERROR] Height loss calculation failed: {e}")
 
         return height_loss
 
-    def analyze_posture(self, image_path: str, user_height_inches: float = None, expected_pose_type: str = None) -> dict:
+    def analyze_posture(
+        self,
+        image_path: str,
+        user_height_inches: float | None = None,
+        expected_pose_type: str | None = None,
+    ) -> dict:
+        import numpy as np
+
+        cv2 = self._cv2
         try:
             image = cv2.imread(image_path)
             if image is None:
@@ -152,7 +175,7 @@ class AdvancedPoseDetector:
                     "error": "Uploaded type mismatch",
                     "detected_type": detected_pose_type,
                     "expected_type": expected_pose_type,
-                    "suggestion": "Ensure your photo matches the selected pose type"
+                    "suggestion": "Ensure your photo matches the selected pose type",
                 }
 
             if detected_pose_type == "front":
@@ -165,7 +188,9 @@ class AdvancedPoseDetector:
                 for lm in self.mp_pose.PoseLandmark
             }
 
-            height_loss = self._calculate_height_loss(landmarks, image.shape, detected_pose_type, user_height_inches)
+            height_loss = self._calculate_height_loss(
+                landmarks, image.shape, detected_pose_type, user_height_inches
+            )
 
             h, _ = image.shape[:2]
             biomech = {}
@@ -188,22 +213,20 @@ class AdvancedPoseDetector:
                     "pelvic_tilt_angle_degrees": round(pelvic_angle, 2),
                     "neck_length_pixels": round(neck_len, 2),
                     "torso_length_pixels": round(torso_len, 2),
-                    "image_height_pixels": round(image_height, 2)
+                    "image_height_pixels": round(image_height, 2),
                 }
 
             elif detected_pose_type == "front":
                 shoulder = self._get_coords(landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value])
                 hip = self._get_coords(landmarks[self.mp_pose.PoseLandmark.LEFT_HIP.value])
                 spine_len = abs(shoulder[1] - hip[1]) * h
-                biomech = {
-                    "spine_length_pixels": round(spine_len, 2)
-                }
+                biomech = {"spine_length_pixels": round(spine_len, 2)}
 
             details = {
                 "pose_type": detected_pose_type,
                 "landmarks": landmark_coords,
                 "biomechanics": biomech,
-                "height_loss_inches": height_loss
+                "height_loss_inches": height_loss,
             }
             details.update(basic_details)
 
@@ -212,15 +235,22 @@ class AdvancedPoseDetector:
                 "posture_score": score,
                 "height_loss_inches": height_loss,
                 "details": details,
-                "recommendations": recommendations
+                "recommendations": recommendations,
             }
 
         except Exception as e:
             return {"error": f"Posture analysis failed: {str(e)}"}
 
 
-# Public function to run
-pose_analyzer = AdvancedPoseDetector()
+_analyzer: AdvancedPoseDetector | None = None
 
-def analyze_posture(image_path: str, user_height: float = None, expected_pose_type: str = None) -> dict:
-    return pose_analyzer.analyze_posture(image_path, user_height, expected_pose_type)
+
+def analyze_posture(
+    image_path: str,
+    user_height: float | None = None,
+    expected_pose_type: str | None = None,
+) -> dict:
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = AdvancedPoseDetector()
+    return _analyzer.analyze_posture(image_path, user_height, expected_pose_type)

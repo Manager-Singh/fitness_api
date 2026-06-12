@@ -13,7 +13,6 @@ from django.forms.models import model_to_dict
 import re
 import json
 import logging
-from posture.serializers import PostureImageSerializer
 from utils.chatgpt_service import generate_chatgpt_response
 import calendar
 from utils.age import get_user_age, age_years_days_since_last_birthday, format_age_exact_years_days
@@ -953,6 +952,8 @@ def save_payment_intent(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_report(request):
+    from posture.serializers import PostureImageSerializer
+
     try:
         postures = PostureImage.objects.filter(user=request.user)
         if not postures.exists():

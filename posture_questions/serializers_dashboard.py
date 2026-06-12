@@ -33,6 +33,8 @@ class DashboardNewRoutineSerializer(serializers.Serializer):
     habits_logged = serializers.IntegerField(required=False, allow_null=True)
     posture_exercises_percent = serializers.IntegerField(required=False, allow_null=True)
     nutrition_percent = serializers.IntegerField(required=False, allow_null=True)
+    completion_percent = serializers.IntegerField(required=False, allow_null=True)
+    completion_breakdown = serializers.DictField(required=False, allow_null=True)
     teen_nutrition_dots = serializers.IntegerField(required=False, allow_null=True)
     teen_lifestyle_dots = serializers.IntegerField(required=False, allow_null=True)
     streak_days = serializers.IntegerField()
@@ -49,6 +51,14 @@ class DashboardNewPostureOptimizationSerializer(serializers.Serializer):
     raw_segments = serializers.DictField()
 
 
+class DashboardHeightLossBoxSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    remaining_cm = serializers.FloatField()
+    initial_recoverable_cm = serializers.FloatField()
+    recovered = serializers.BooleanField()
+    sub_label = serializers.CharField()
+
+
 class DashboardNewCoreSerializer(serializers.Serializer):
     variant = serializers.ChoiceField(choices=["adult", "teen"])
     profile = serializers.DictField(required=False)
@@ -59,10 +69,12 @@ class DashboardNewCoreSerializer(serializers.Serializer):
     # Section 5.1b — teen Genetic_Average curve (yellow dot / legend); null for adults.
     genetic_average_cm = serializers.FloatField(required=False, allow_null=True)
     daily_genetic_average_gain_cm = serializers.FloatField(required=False, allow_null=True)
+    predictor_completed = serializers.BooleanField(required=False, allow_null=True)
     scan = DashboardNewScanSerializer()
     top_graph = DashboardNewTopGraphSerializer()
     routine_progress = DashboardNewRoutineSerializer()
     posture_optimization = DashboardNewPostureOptimizationSerializer()
+    height_loss_box = DashboardHeightLossBoxSerializer(required=False)
     ai_analysis = serializers.DictField(required=False)
     chart_breakdown = serializers.DictField(required=False, allow_null=True)
     subscription = serializers.DictField(required=False)

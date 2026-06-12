@@ -806,15 +806,16 @@ def get_user_score_summary(user, subscription_data, mode=None):
         from utils.adult_nutrition import adult_nutrition_points_today
 
         adult_nutrition_pts = int(adult_nutrition_points_today(user, today))
+        # Adults: no legacy lifestyle channel in optimization % or daily_points food slot.
+        today_summary["activity_score"] = 0
         if adult_nutrition_pts > 0:
             today_summary["food_score"] = adult_nutrition_pts
-            today_summary["total_score"] = int(
-                adult_nutrition_pts
-                + (today_summary.get("activity_score") or 0)
-                + (today_summary.get("workout_score") or 0)
-                + (today_summary.get("habit_score") or 0)
-            )
-            today_summary["posture_gain_cm"] = round(today_summary["total_score"] * 0.001, 4)
+        today_summary["total_score"] = int(
+            (today_summary.get("food_score") or 0)
+            + (today_summary.get("workout_score") or 0)
+            + (today_summary.get("habit_score") or 0)
+        )
+        today_summary["posture_gain_cm"] = round(today_summary["total_score"] * 0.001, 4)
 
     if age >= 21 and today_summary["workout_score"] == 0:
         today_summary["posture_gain_cm"] = 0.000

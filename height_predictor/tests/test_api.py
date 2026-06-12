@@ -72,10 +72,59 @@ class PredictorApiTests(_Base):
         self.assertEqual(resp.data["result"]["posture_recovery_cm"], 0.0)
 
     def test_missing_core_inputs_returns_422(self):
-        # No profile, and request omits parent heights -> cannot compute.
-        resp = self.client.post(self.url, {"age_years": 15.0, "sex": "male", "current_height_cm": 165}, format="json")
+        # Auto-created profile has regional parent fallbacks; still need sex/age/height.
+        from user_profile.models import UserProfile
+
+        prof = UserProfile.objects.get(user=self.user)
+        prof.gender = ""
+        prof.age = None
+        prof.current_height_cm = None
+        prof.base_height_cm = None
+        prof.save()
+        resp = self.client.post(self.url, {"voice_depth": 1}, format="json")
         self.assertEqual(resp.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
-        self.assertIn("father_height_cm", resp.data["missing"])
+        missing = set(resp.data.get("missing") or [])
+        self.assertTrue(missing & {"sex", "age_years", "current_height_cm"})
+
+    def test_null_parents_use_regional_fallback(self):
+        self.user.country_code = "US"
+        self.user.save(update_fields=["country_code"])
+        self._make_profile(father_height_cm=None, mother_height_cm=None)
+        self._make_posture(20000)
+        resp = self.client.post(self.url, {"age_years": 14.5, "voice_depth": 1}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        pred = UltimateHeightPrediction.objects.get(user=self.user)
+        self.assertAlmostEqual(pred.father_height_cm, 175.0, delta=0.1)
+        self.assertAlmostEqual(pred.mother_height_cm, 162.0, delta=0.1)
+
+    def test_band_b_requires_recent_growth(self):
+        self._make_profile(age="19")
+        self._make_posture(20000)
+        resp = self.client.post(self.url, {"age_years": 19.0}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        self.assertIn("recent_growth_cm", resp.data["missing"])
+
+    def test_band_b_with_recent_growth_succeeds(self):
+        self._make_profile(age="19")
+        self._make_posture(20000)
+        resp = self.client.post(
+            self.url,
+            {"age_years": 19.0, "recent_growth_cm": 2.0},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["result"]["band"], "B")
+
+    def test_assessment_prefill_endpoint(self):
+        self._make_profile()
+        self._make_posture(42000)
+        url = reverse("ultimate-height-prefill")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["sex"], "Male")
+        self.assertIn("exact_age", resp.data)
+        self.assertAlmostEqual(resp.data["posture_recovery_cm"], 4.2, delta=0.1)
+        self.assertFalse(resp.data["predictor_completed"])
 
     def test_client_values_override_profile(self):
         self._make_profile(current_height_cm="160")
@@ -110,30 +159,28 @@ class PredictorApiTests(_Base):
 
 
 class FallbackSelectionTests(_Base):
-    def _branch_value(self, existing_value):
-        """Replicate the exact selection used in posture_questions.views fallback branch."""
-        optimized_height_for_ui = existing_value
-        pred = (
-            UltimateHeightPrediction.objects.filter(user=self.user, completed=True)
-            .order_by("-computed_at")
-            .first()
-        )
-        if pred and pred.true_optimized_cm:
+    def _branch_value(self):
+        """Replicate green-line selection in posture_questions.views (predictor-only)."""
+        from height_predictor.services import get_latest_prediction
+
+        optimized_height_for_ui = None
+        pred = get_latest_prediction(self.user)
+        if pred and pred.completed and pred.true_optimized_cm:
             optimized_height_for_ui = pred.true_optimized_cm
         return optimized_height_for_ui
 
-    def test_uses_existing_value_when_no_prediction(self):
-        self.assertEqual(self._branch_value(170.0), 170.0)
+    def test_no_prediction_returns_none(self):
+        self.assertIsNone(self._branch_value())
 
     def test_uses_prediction_when_completed(self):
         UltimateHeightPrediction.objects.create(user=self.user, true_optimized_cm=181.6, completed=True)
-        self.assertEqual(self._branch_value(170.0), 181.6)
+        self.assertEqual(self._branch_value(), 181.6)
 
     def test_ignores_incomplete_prediction(self):
         UltimateHeightPrediction.objects.create(user=self.user, true_optimized_cm=999.0, completed=False)
-        self.assertEqual(self._branch_value(170.0), 170.0)
+        self.assertIsNone(self._branch_value())
 
     def test_latest_completed_wins(self):
         UltimateHeightPrediction.objects.create(user=self.user, true_optimized_cm=175.0, completed=True)
         UltimateHeightPrediction.objects.create(user=self.user, true_optimized_cm=182.0, completed=True)
-        self.assertEqual(self._branch_value(170.0), 182.0)
+        self.assertEqual(self._branch_value(), 182.0)

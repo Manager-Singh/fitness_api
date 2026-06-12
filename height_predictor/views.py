@@ -17,7 +17,7 @@ from .serializers import (
     UltimatePredictionResultSerializer,
     UltimatePredictorInputSerializer,
 )
-from .services import compute_and_store_prediction, get_latest_prediction
+from .services import build_assessment_prefill, compute_and_store_prediction, get_latest_prediction
 
 
 class UltimateHeightPredictorView(APIView):
@@ -45,3 +45,12 @@ class UltimateHeightPredictorView(APIView):
             {"completed": True, "result": UltimatePredictionResultSerializer(prediction).data},
             status=status.HTTP_201_CREATED,
         )
+
+
+class UltimateHeightAssessmentPrefillView(APIView):
+    """GET /api/predictor/assessment-prefill — known data for Task 2A intro screen."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_assessment_prefill(request.user))

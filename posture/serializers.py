@@ -3,7 +3,11 @@ from .models import PostureImage
 from django.core.files.uploadedfile import UploadedFile
 from tempfile import NamedTemporaryFile
 import os
-from .utils import analyze_posture
+from posture.scan_gateway import (
+    SCAN_DISABLED_ERROR,
+    analyze_posture_image,
+    is_posture_image_scan_enabled,
+)
 
 
 class PostureImageSerializer(serializers.ModelSerializer):
@@ -80,6 +84,18 @@ class PostureImageSerializer(serializers.ModelSerializer):
         if not uploaded_file:
             raise serializers.ValidationError({'error': 'Image not found in request'})
 
+        if not is_posture_image_scan_enabled():
+            raise serializers.ValidationError(
+                {
+                    "error": SCAN_DISABLED_ERROR,
+                    "message": (
+                        "Server-side posture image upload/analysis is disabled. "
+                        "Enable it in Django admin (Posture → Posture scan settings) "
+                        "or use the scan API with client landmark JSON."
+                    ),
+                }
+            )
+
         ext = os.path.splitext(uploaded_file.name)[1].lower()
         with NamedTemporaryFile(delete=True, suffix=ext) as temp_file:
             for chunk in uploaded_file.chunks():
@@ -87,7 +103,7 @@ class PostureImageSerializer(serializers.ModelSerializer):
             temp_file.flush()
 
             try:
-                result = analyze_posture(temp_file.name, expected_pose_type=uploaded_type)
+                result = analyze_posture_image(temp_file.name, expected_pose_type=uploaded_type)
 
                 if "error" in result:
                     raise serializers.ValidationError(result)

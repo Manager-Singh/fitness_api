@@ -1268,26 +1268,24 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         canonical_total_recoverable_cm = 0.0
         canonical_scan_completed = False
         optimized_height_for_ui = None
+        predictor_completed = False
     elif can_view_true_optimized:
-        # Ultimate Height Predictor (Model v2): if the user has completed the new 20-point
-        # assessment, that number fills the True Optimized slot. Otherwise fall back to the
-        # existing optimized-height calculation unchanged. This is the ONLY integration point;
-        # no other engine/dashboard logic is affected.
-        optimized_height_for_ui = optimized_result.get("optimized_height_cm")
+        # Ultimate Height Predictor (Model v2): green True Optimized shows ONLY when
+        # GET /api/predictor/ultimate-height would return completed=true. No legacy fallback.
+        predictor_completed = False
+        optimized_height_for_ui = None
         try:
-            from height_predictor.models import UltimateHeightPrediction
+            from height_predictor.services import get_latest_prediction
 
-            _pred = (
-                UltimateHeightPrediction.objects.filter(user=user, completed=True)
-                .order_by("-computed_at")
-                .first()
-            )
-            if _pred and _pred.true_optimized_cm:
+            _pred = get_latest_prediction(user)
+            if _pred and _pred.completed and _pred.true_optimized_cm:
+                predictor_completed = True
                 optimized_height_for_ui = _pred.true_optimized_cm
         except Exception:
             pass
     else:
         optimized_height_for_ui = None
+        predictor_completed = False
 
     # ── 14. FINAL RESPONSE ──────────────────────────────
     return {
@@ -1522,8 +1520,12 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                         if is_teen_track else None
                     ),
                     "green_true_optimized_cm": optimized_height_for_ui if is_teen_track else None,
-                    "green_true_optimized_locked": bool(is_teen_track and not can_view_true_optimized),
+                    "green_true_optimized_locked": bool(
+                        is_teen_track and (not can_view_true_optimized or not predictor_completed)
+                    ),
+                    "predictor_completed": bool(predictor_completed) if is_teen_track else None,
                 },
+                "predictor_completed": bool(predictor_completed) if is_teen_track else None,
             },
             "section7_contract": {
                 "adult": {

@@ -1,6 +1,29 @@
 from django.contrib import admin
+from django.shortcuts import redirect
+from django.urls import reverse
 
-from posture.models import PostureAssessment, PostureImage, PostureReport
+from posture.models import PostureAssessment, PostureImage, PostureReport, PostureScanSettings
+
+
+@admin.register(PostureScanSettings)
+class PostureScanSettingsAdmin(admin.ModelAdmin):
+    """Single admin page to enable/disable server-side MediaPipe image scan."""
+
+    list_display = ("image_scan_enabled", "updated_at")
+    fields = ("image_scan_enabled", "updated_at")
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
+        return not PostureScanSettings.objects.filter(pk=1).exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        obj, _ = PostureScanSettings.objects.get_or_create(
+            pk=1, defaults={"image_scan_enabled": False}
+        )
+        return redirect(reverse("admin:posture_posturescansettings_change", args=[obj.pk]))
 
 
 @admin.register(PostureAssessment)

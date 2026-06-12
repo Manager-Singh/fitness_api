@@ -1043,7 +1043,6 @@ from utils.check_payment import check_subscription_or_response
 from utils.ai_analysis import save_ai_analysis_full_scan
 from datetime import timedelta, datetime, date
 import uuid
-from .utils import analyze_posture as analyze_image_posture
 from users.models import HeightLedger, PostureState
 from users.spec_runtime import apply_pending_pre_scan_engine1
 from utils.age import get_user_age_exact
@@ -1212,6 +1211,23 @@ class FullPostureAnalysisAPIView(APIView):
                 t_pose={"landmarks": t_pose_data},
             )
         else:
+            from posture.scan_gateway import (
+                SCAN_DISABLED_ERROR,
+                is_posture_image_scan_enabled,
+            )
+
+            if not is_posture_image_scan_enabled():
+                return Response(
+                    {
+                        "error": SCAN_DISABLED_ERROR,
+                        "message": (
+                            "Server-side image scan is disabled. "
+                            "Enable it in Django admin (Posture → Posture scan settings) "
+                            "or send front_data, side_data, back_data, and t_pose_data landmark JSON."
+                        ),
+                    },
+                    status=503,
+                )
             try:
                 front_res = _analyze_uploaded_image(front)
                 side_res = _analyze_uploaded_image(side)
@@ -1479,11 +1495,13 @@ def _scan_scores_from_real_result(scan_result):
 
 
 def _analyze_uploaded_image(file_obj):
+    from posture.scan_gateway import analyze_posture_image
+
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=True) as tmp_file:
         for chunk in file_obj.chunks():
             tmp_file.write(chunk)
         tmp_file.flush()
-        return analyze_image_posture(tmp_file.name)
+        return analyze_posture_image(tmp_file.name)
 
 
 def _metrics_from_multiview_results(front_res, side_res, back_res, tpose_res):
@@ -1592,6 +1610,20 @@ class ScanAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        from posture.scan_gateway import SCAN_DISABLED_ERROR, is_posture_image_scan_enabled
+
+        if not is_posture_image_scan_enabled():
+            return Response(
+                {
+                    "error": SCAN_DISABLED_ERROR,
+                    "message": (
+                        "Server-side posture image scan is disabled on this API. "
+                        "Enable it in Django admin (Posture → Posture scan settings) "
+                        "or use client landmark JSON."
+                    ),
+                },
+                status=503,
+            )
         gate_error, gate_status = _enforce_scan_access(request.user)
         if gate_error:
             return Response(gate_error, status=gate_status)

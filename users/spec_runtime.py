@@ -605,7 +605,7 @@ def _daily_engine_points(user, log_date, age, subscription_data):
             exercise_points,
             # Display "nutrition" bucket reflects the adult protein+hydration points.
             int(nutrition_for_engine),
-            lifestyle_points,
+            0,  # adults have no Lifestyle tab — water/sleep live in AdultNutritionDay
             int(habit_pts),
         )
 

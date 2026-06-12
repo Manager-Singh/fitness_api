@@ -74,12 +74,18 @@ def defaults_from_profile(user) -> dict:
     if current:
         out["current_height_cm"] = current
 
-    father = _safe_float(getattr(profile, "father_height_cm", None))
-    if father:
-        out["father_height_cm"] = father
-    mother = _safe_float(getattr(profile, "mother_height_cm", None))
-    if mother:
-        out["mother_height_cm"] = mother
+    from utils.regional_parent_height import resolve_parent_height_cm
+
+    father_cm, father_est = resolve_parent_height_cm(profile, user, "father")
+    if father_cm:
+        out["father_height_cm"] = father_cm
+        if father_est:
+            out["father_height_is_estimate"] = True
+    mother_cm, mother_est = resolve_parent_height_cm(profile, user, "mother")
+    if mother_cm:
+        out["mother_height_cm"] = mother_cm
+        if mother_est:
+            out["mother_height_is_estimate"] = True
 
     return out
 
@@ -157,6 +163,16 @@ def compute_and_store_prediction(user, client_inputs=None, *, source: str = "api
             "hint": "Collect sex, age, current height, and parent heights on the user profile first.",
         }
 
+    from .predictor import _band_for_age
+
+    age_years = float(merged["age_years"])
+    if _band_for_age(age_years) == "B" and merged.get("recent_growth_cm") in (None, ""):
+        return None, {
+            "error": "Recent growth (cm in last 12 months) is required for your age band.",
+            "missing": ["recent_growth_cm"],
+            "hint": "Band B (17.5–20) uses recent growth as the primary maturity signal.",
+        }
+
     posture_cm = get_user_posture_recovery_cm(user)
     inputs = _inputs_from_merged(merged)
     breakdown = predict_optimized_height(inputs, posture_cm)
@@ -206,6 +222,63 @@ def get_latest_prediction(user):
         )
     except Exception:
         return None
+
+
+def _exact_age_parts(profile) -> dict:
+    """Years / months / days from profile DOB for assessment prefill UI."""
+    dob = getattr(profile, "birth_date", None) or getattr(profile, "date_of_birth", None)
+    if not dob:
+        age = _profile_age_years(profile)
+        if age is None:
+            return {"years": 0, "months": 0, "days": 0}
+        years = int(age)
+        frac = age - years
+        months = int(round(frac * 12))
+        return {"years": years, "months": min(months, 11), "days": 0}
+    today = date.today()
+    years = today.year - dob.year
+    months = today.month - dob.month
+    days = today.day - dob.day
+    if days < 0:
+        months -= 1
+        days += 30
+    if months < 0:
+        years -= 1
+        months += 12
+    return {"years": max(0, years), "months": max(0, months), "days": max(0, days)}
+
+
+def build_assessment_prefill(user) -> dict:
+    """Known data points for Task 2A data-confirmed intro screen."""
+    merged = defaults_from_profile(user)
+    latest = get_latest_prediction(user)
+    predictor_completed = bool(latest and latest.completed and latest.true_optimized_cm)
+
+    sex_raw = str(merged.get("sex") or "").strip().lower()
+    sex_display = {"male": "Male", "female": "Female"}.get(sex_raw, sex_raw.title() or None)
+
+    try:
+        from user_profile.models import UserProfile
+
+        profile = UserProfile.objects.filter(user=user).first()
+    except Exception:
+        profile = None
+
+    exact_age = _exact_age_parts(profile) if profile else {"years": 0, "months": 0, "days": 0}
+    posture_cm = get_user_posture_recovery_cm(user)
+
+    return {
+        "sex": sex_display,
+        "exact_age": exact_age,
+        "current_height_cm": merged.get("current_height_cm"),
+        "father_height_cm": merged.get("father_height_cm"),
+        "mother_height_cm": merged.get("mother_height_cm"),
+        "father_height_is_estimate": bool(merged.get("father_height_is_estimate")),
+        "mother_height_is_estimate": bool(merged.get("mother_height_is_estimate")),
+        "posture_recovery_cm": round(posture_cm, 2),
+        "predictor_completed": predictor_completed,
+        "band": latest.band if latest else None,
+    }
 
 
 def recompute_from_profile(user):

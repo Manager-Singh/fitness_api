@@ -46,6 +46,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     streaks = payload.get("streaks") or {}
 
     display_lines = section5.get("display_lines") or {}
+    predictor_completed = bool(section5.get("predictor_completed") or display_lines.get("predictor_completed"))
     base_height_cm = float(section4.get("base_height_cm") or growth_projection.get("current_height_cm") or 0.0)
     teen_genetic_cumulative_cm = float(section5.get("genetic_cumulative_cm") or 0.0)
     teen_posture_cumulative_cm = float(section5.get("postureplus_cumulative_cm") or 0.0)
@@ -100,7 +101,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         if is_teen
         else None
     )
-    # Bug 11 — single shared Lifestyle+Habits completion number (teen 29+12, adult 15+12).
+    # Task 1 — daily optimization % (teen pool 68, adult pool 27).
     try:
         combined_completion = combined_completion_for_user(user, user_today(user), is_teen=is_teen)
     except Exception:
@@ -157,7 +158,11 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     # Spec (Section 5.6 / 7.2): True Optimized Height is revealed ONLY when paid (not during trial).
     can_view_true_optimized = bool(is_teen and paid)
     teen_scan_required = bool(scan_access.get("teen_scan_required", False))
-    true_optimized_locked = bool(display_lines.get("green_true_optimized_locked", False) or teen_locked_post_day7)
+    true_optimized_locked = bool(
+        display_lines.get("green_true_optimized_locked", False)
+        or teen_locked_post_day7
+        or (can_view_true_optimized and not predictor_completed)
+    )
     teen_scan_completed = bool(scan_access.get("scan_completed"))
     anomalies = []
     # Build target metrics from growth projection (forecast model).
@@ -306,12 +311,23 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         except Exception:
             canonical_chart = payload.get("chart_breakdown")
 
+    remaining_loss_cm = float(diagnostics.get("total_current_loss_cm") or 0.0)
+    initial_recoverable_cm = float(diagnostics.get("total_recoverable_loss_cm") or remaining_loss_cm or 0.0)
+    height_loss_box = {
+        "label": "Height Lost to Posture",
+        "remaining_cm": round(remaining_loss_cm, 2),
+        "initial_recoverable_cm": round(initial_recoverable_cm, 2),
+        "recovered": remaining_loss_cm <= 0.0,
+        "sub_label": "Recoverable — shrinks as you train.",
+    }
+
     dashboard = {
         "variant": "teen" if is_teen else "adult",
         "calculation_mode": teen_display_mode if is_teen else "adult_live",
         "anomalies": anomalies if is_teen else [],
         "genetic_average_cm": teen_ga_cm,
         "daily_genetic_average_gain_cm": teen_daily_ga_gain,
+        "predictor_completed": predictor_completed if is_teen else None,
         "profile": {
             'user_id': user.id,
             'username': user.username,
@@ -422,6 +438,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             "bars_percent_precise": posture_bars_precise,
             "raw_segments": segments,
         },
+        "height_loss_box": height_loss_box,
         "ai_analysis": payload.get("ai_analysis") or {},
         "chart_breakdown": canonical_chart,
         "subscription": payload.get("subscription") or {},

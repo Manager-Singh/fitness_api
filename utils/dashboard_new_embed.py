@@ -123,7 +123,7 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
         )
         nutrition_dots = teen_nutrition_dots_from_food_points(raw_food)
         lifestyle_dots = teen_lifestyle_dots_for_day(user, log_date)
-        # Bug 11 — shared Lifestyle+Habits completion (teen 29+12).
+        # Task 1 — daily optimization % (teen pool 68).
         from utils.combined_completion import teen_combined_completion
 
         combined = teen_combined_completion(user, log_date)
@@ -170,7 +170,7 @@ def _routine_progress_snapshot(user, log_date, *, is_teen: bool):
     from utils.adult_nutrition import adult_nutrition_points_today
 
     adult_nutrition_pts = int(adult_nutrition_points_today(user, log_date))
-    # Bug 11 — shared Nutrition+Habits completion for adults (15+12).
+    # Task 1 — daily optimization % (adult pool 27).
     from utils.combined_completion import adult_combined_completion
 
     combined = adult_combined_completion(user, log_date)

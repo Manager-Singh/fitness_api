@@ -80,3 +80,43 @@ class PostureAssessment(models.Model):
 
     def __str__(self):
         return f"{self.user_id} {self.source} ({self.completed_at:%Y-%m-%d})"
+
+
+class PostureScanSettings(models.Model):
+    """
+    Singleton row (pk=1) — toggle server-side MediaPipe image scan from Django admin.
+    When disabled, mediapipe/opencv are never loaded on the API workers.
+    """
+
+    image_scan_enabled = models.BooleanField(
+        default=False,
+        help_text=(
+            "Enable server-side posture analysis from uploaded scan images (MediaPipe). "
+            "When off, workers do not load MediaPipe; clients must send landmark JSON."
+        ),
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Posture scan settings"
+        verbose_name_plural = "Posture scan settings"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("posture_image_scan_enabled")
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={"image_scan_enabled": False})
+        return obj
+
+    @classmethod
+    def is_image_scan_enabled(cls) -> bool:
+        return bool(cls.load().image_scan_enabled)
+
+    def __str__(self):
+        state = "ON" if self.image_scan_enabled else "OFF"
+        return f"Posture image scan ({state})"
