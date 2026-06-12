@@ -3,6 +3,17 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 
+def validate_instruction_steps(value):
+    """instruction_steps must be a JSON array of strings."""
+    if value in (None, ""):
+        return
+    if not isinstance(value, list):
+        raise ValidationError("Instruction steps must be a JSON array.")
+    for i, item in enumerate(value):
+        if item is not None and not isinstance(item, str):
+            raise ValidationError(f"Step {i + 1} must be a string.")
+
+
 class MicroHabit(models.Model):
     AM_PM = "am_pm"
     ONCE_DAILY = "once_daily"
@@ -18,6 +29,13 @@ class MicroHabit(models.Model):
         blank=True,
         help_text="Expanded 'How to' panel copy for the habits screen (Friday Task 5).",
     )
+    instruction_steps = models.JSONField(
+        default=list,
+        blank=True,
+        validators=[validate_instruction_steps],
+        verbose_name="Instruction steps",
+        help_text="Ordered steps for the app. In admin, use one box per step (Add more / Remove).",
+    )
     image = models.ImageField(upload_to="micro_habits/", blank=True, null=True)
     daily_max_points = models.PositiveSmallIntegerField(default=1)
     logging_mode = models.CharField(max_length=16, choices=LOGGING_MODES, default=ONCE_DAILY)
@@ -30,6 +48,21 @@ class MicroHabit(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_instruction_steps(self) -> list[str]:
+        """Ordered step strings for API (prefers instruction_steps JSON)."""
+        steps = self.instruction_steps
+        if isinstance(steps, list) and steps:
+            return [str(s).strip() for s in steps if str(s).strip()]
+        text = (self.how_to_detail or self.ui_prompt or "").strip()
+        if not text:
+            return []
+        parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+        return parts if parts else [text]
+
+    def get_instruction_lines(self) -> list[str]:
+        """Alias for app clients that use the exercise-style key name."""
+        return self.get_instruction_steps()
 
 
 class MicroHabitLog(models.Model):

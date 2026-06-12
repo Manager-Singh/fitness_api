@@ -5,6 +5,7 @@ from django.test import TestCase
 
 from habits.models import MicroHabit
 from habits.services import (
+    build_habits_plan_payload,
     capped_habit_points_for_engine,
     log_habit,
     total_raw_habit_points,
@@ -21,6 +22,12 @@ class HabitLoggingTests(TestCase):
 
     def test_seed_habits_exist(self):
         self.assertEqual(MicroHabit.objects.filter(is_active=True).count(), 4)
+
+    def test_instruction_steps_on_plan_payload(self):
+        payload = build_habits_plan_payload(self.user, self.log_date)
+        habit = next(h for h in payload["items"] if h["code"] == "puppet_string_walk")
+        self.assertGreaterEqual(len(habit["instruction_steps"]), 1)
+        self.assertEqual(habit["instruction_steps"], habit["instruction_lines"])
 
     def test_toggle_same_slot_removes_entry(self):
         log_habit(self.user, self.log_date, "puppet_string_walk", "am")

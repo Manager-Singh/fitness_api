@@ -1,11 +1,13 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from habits.forms import MicroHabitAdminForm
 from habits.models import MicroHabit, MicroHabitLog
 
 
 @admin.register(MicroHabit)
 class MicroHabitAdmin(admin.ModelAdmin):
+    form = MicroHabitAdminForm
     list_display = (
         "sort_order",
         "code",
@@ -24,6 +26,8 @@ class MicroHabitAdmin(admin.ModelAdmin):
         "code",
         "name",
         "ui_prompt",
+        "how_to_detail",
+        "instruction_steps",
         "image",
         "image_preview",
         "daily_max_points",

@@ -171,6 +171,8 @@ def build_habits_plan_payload(user, log_date: date | None = None) -> dict:
                 "name": habit.name,
                 "ui_prompt": habit.ui_prompt,
                 "how_to_detail": habit.how_to_detail or habit.ui_prompt,
+                "instruction_steps": habit.get_instruction_steps(),
+                "instruction_lines": habit.get_instruction_lines(),
                 "image_url": habit.image.url if habit.image else None,
                 "daily_max": int(habit.daily_max_points),
                 "logging_mode": habit.logging_mode,

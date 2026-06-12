@@ -4,6 +4,9 @@ from habits.models import MicroHabit, MicroHabitLog
 
 
 class MicroHabitSerializer(serializers.ModelSerializer):
+    instruction_steps = serializers.SerializerMethodField()
+    instruction_lines = serializers.SerializerMethodField()
+
     class Meta:
         model = MicroHabit
         fields = (
@@ -11,12 +14,20 @@ class MicroHabitSerializer(serializers.ModelSerializer):
             "name",
             "ui_prompt",
             "how_to_detail",
+            "instruction_steps",
+            "instruction_lines",
             "image",
             "daily_max_points",
             "logging_mode",
             "points_per_log",
             "sort_order",
         )
+
+    def get_instruction_steps(self, obj):
+        return obj.get_instruction_steps()
+
+    def get_instruction_lines(self, obj):
+        return obj.get_instruction_lines()
 
 
 class HabitLogWriteSerializer(serializers.Serializer):
