@@ -204,6 +204,7 @@ class ModulePlanSerializer(serializers.ModelSerializer):
 
     background_image = serializers.SerializerMethodField()
     icon_image = serializers.SerializerMethodField()
+    info_popup = serializers.SerializerMethodField()
 
     class Meta:
         model = Module
@@ -217,6 +218,7 @@ class ModulePlanSerializer(serializers.ModelSerializer):
             "background_image",
             "icon_image",
             "tag_line",
+            "info_popup",
             "foods",
             "habits",
         )
@@ -232,6 +234,13 @@ class ModulePlanSerializer(serializers.ModelSerializer):
             return None
         file = obj.icon_image
         return file.url if file else None
+
+    def get_info_popup(self, obj):
+        title = str(getattr(obj, "info_popup_title", "") or "").strip()
+        body = str(getattr(obj, "info_popup_body", "") or "").strip()
+        if not title and not body:
+            return None
+        return {"title": title, "body": body}
 
     # ensure nested serializers inherit request
     def to_representation(self, instance):

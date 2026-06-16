@@ -46,6 +46,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="exercise.name")
     short_name = serializers.CharField(source="exercise.short_name")
     category = serializers.CharField(source="exercise.category")
+    category_label = serializers.SerializerMethodField()
     points = serializers.IntegerField(source="exercise.points")
 
     image = serializers.SerializerMethodField()
@@ -90,6 +91,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "name",
             "short_name",
             "category",
+            "category_label",
             "points",
             "image",
             "description",
@@ -163,6 +165,16 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
 
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
+
+    def get_category_label(self, obj):
+        from workouts.exercise_display_labels import exercise_category_label
+
+        routine_type = None
+        try:
+            routine_type = getattr(getattr(obj, "routine", None), "routine_type", None)
+        except Exception:
+            routine_type = None
+        return exercise_category_label(obj.exercise, routine_type=routine_type)
 
     @staticmethod
     def _dosage_source(obj):

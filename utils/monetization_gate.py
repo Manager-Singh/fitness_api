@@ -1,6 +1,7 @@
 from utils.paywall_flags import (
     adult_paywall_disabled,
     apply_monetization_qa_overlay,
+    effective_is_paid,
     is_adult_age,
     is_teen_age,
     teen_paywall_disabled,
@@ -63,3 +64,36 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None, use
         result["conversion_enabled"] = True
         result["full_access_trial_expired"] = False
     return result
+
+
+def is_logging_locked(user) -> bool:
+    """
+    Monday A2 — strict paywall: unpaid teen and adult accounts cannot log via API.
+    QA bypass flags (TEEN_PAYWALL_DISABLED / ADULT_PAYWALL_DISABLED) unlock logging.
+    """
+    from utils.age import get_user_age_exact
+    from utils.check_payment import check_subscription_or_response
+
+    try:
+        ae = float(get_user_age_exact(user) or 0)
+    except Exception:
+        ae = 0.0
+    in_band = is_teen_age(ae, user=user) or is_adult_age(ae, user=user)
+    if not in_band:
+        tier = getattr(user, "account_tier", None)
+        in_band = tier in ("teen", "adult")
+    if not in_band:
+        return False
+    sub = check_subscription_or_response(user).data
+    return not effective_is_paid(user, sub, age_exact=ae)
+
+
+def logging_locked_payload(user, *, detail: str | None = None) -> dict | None:
+    """Return a 403 body dict when logging is locked, else None."""
+    if not is_logging_locked(user):
+        return None
+    return {
+        "detail": detail or "Logging is locked. Subscribe to unlock full access.",
+        "paywall_required": True,
+        "gate": "subscription_required",
+    }

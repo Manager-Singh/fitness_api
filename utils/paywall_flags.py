@@ -115,9 +115,14 @@ def qa_paid_bypass_for_user(user, *, age_exact=None) -> bool:
     ae = age_exact
     if ae is None:
         ae = get_user_age_exact(user)
-    if is_teen_age(ae, user=user) and teen_paywall_disabled():
+    tier = getattr(user, "account_tier", None)
+    if teen_paywall_disabled() and (
+        is_teen_age(ae, user=user) or tier == "teen"
+    ):
         return True
-    if is_adult_age(ae, user=user) and adult_paywall_disabled():
+    if adult_paywall_disabled() and (
+        is_adult_age(ae, user=user) or tier == "adult"
+    ):
         return True
     return False
 

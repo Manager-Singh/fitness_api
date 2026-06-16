@@ -311,12 +311,21 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         except Exception:
             canonical_chart = payload.get("chart_breakdown")
 
-    remaining_loss_cm = float(diagnostics.get("total_current_loss_cm") or 0.0)
-    initial_recoverable_cm = float(diagnostics.get("total_recoverable_loss_cm") or remaining_loss_cm or 0.0)
+    from utils.posture.height_loss_display import height_loss_display_cm
+
+    hl = height_loss_display_cm(user)
+    remaining_loss_cm = float(hl.get("remaining_cm") or 0.0)
+    initial_recoverable_cm = float(
+        hl.get("starting_cm")
+        or diagnostics.get("total_recoverable_loss_cm")
+        or remaining_loss_cm
+        or 0.0
+    )
     height_loss_box = {
         "label": "Height Lost to Posture",
-        "remaining_cm": round(remaining_loss_cm, 2),
-        "initial_recoverable_cm": round(initial_recoverable_cm, 2),
+        "remaining_cm": remaining_loss_cm,
+        "initial_recoverable_cm": round(initial_recoverable_cm, 3),
+        "posture_plus_cumulative_cm": hl.get("posture_plus_cumulative_cm"),
         "recovered": remaining_loss_cm <= 0.0,
         "sub_label": "Recoverable — shrinks as you train.",
     }

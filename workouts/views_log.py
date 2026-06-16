@@ -6,7 +6,6 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Count, Sum
 from django.db import transaction
-from django.conf import settings
 
 from .models import WorkoutSession, UserRoutine
 from .serializers_log import (
@@ -17,6 +16,7 @@ from .serializers_log import (
 from utils.age import get_user_age 
 from utils.engine_routing import apply_engine_routing
 from utils.check_payment import check_subscription_or_response
+from utils.monetization_gate import logging_locked_payload
 from users.models import DailyLog
 from utils.user_time import user_localize_dt, user_today
 from workouts.models import UserRoutineExercise
@@ -97,15 +97,12 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         except Exception:
             age = 0
         subscription_data = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
-            return Response(
-                {
-                    "detail": "Exercise logging is locked for free adult accounts.",
-                    "paywall_required": True,
-                    "gate": "adult_diagnosis_gate",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        locked = logging_locked_payload(
+            request.user,
+            detail="Exercise logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
 
         # Spec alignment: no hard per-day logging cap here.
 

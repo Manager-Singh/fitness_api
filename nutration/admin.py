@@ -305,6 +305,8 @@ class ModuleAdmin(admin.ModelAdmin):
             "fields": (
                 "tag_line",
                 "action_btn",
+                "info_popup_title",
+                "info_popup_body",
             )
         }),
         ("Images", {

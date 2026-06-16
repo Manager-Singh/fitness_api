@@ -98,6 +98,9 @@ class AdultNutritionDay(models.Model):
     spine_500ml_count = models.PositiveIntegerField(default=0)
     # Optional per-type breakdown, e.g. [{"type": "bone_broth", "count": 2}].
     spine_drinks = models.JSONField(default=list, blank=True)
+    # Monday F6 — per-drink/item counts (authoritative for scoring).
+    tier1_log = models.JSONField(default=dict, blank=True)
+    tier2_log = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

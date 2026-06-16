@@ -182,10 +182,48 @@ ADULT_HYDRATION_POINTS_CAP = 6
 ADULT_NUTRITION_POINTS_CAP = 15
 ADULT_PROTEIN_GRAMS_PER_POINT = 10
 ADULT_PROTEIN_GRAMS_CAP = 90  # 9 pts
-ADULT_WATER_ML_PER_UNIT = 500  # 1 pt per 500 ml
-ADULT_SPINE_POINTS_PER_UNIT = 2  # 2 pts per 500 ml spine drink
+ADULT_WATER_ML_PER_UNIT = 500  # legacy alias
+ADULT_TIER1_POINTS_EACH = 2
+ADULT_TIER2_POINTS_EACH = 1
 
-# §2.2 quick-add protein chips (one tap = add grams, no math).
+# Monday F4 — Tier 1 spine drinks (+2 pts per serving).
+ADULT_TIER1_ITEMS = [
+    {"key": "bone_broth", "label": "Bone Broth"},
+    {"key": "watermelon", "label": "Watermelon"},
+    {"key": "coconut", "label": "Coconut"},
+    {"key": "cucumber", "label": "Cucumber"},
+    {"key": "celery", "label": "Celery"},
+    {"key": "beet", "label": "Beet"},
+]
+ADULT_TIER1_KEYS = {d["key"] for d in ADULT_TIER1_ITEMS}
+
+# Monday F4 — Tier 2 baseline liquids (+1 pt per serving).
+ADULT_TIER2_ITEMS = [
+    {"key": "water", "label": "Water"},
+    {"key": "milk", "label": "Milk"},
+    {"key": "tea", "label": "Tea"},
+    {"key": "coffee", "label": "Coffee"},
+    {"key": "juice", "label": "Juice"},
+    {"key": "carbonated", "label": "Carbonated"},
+]
+ADULT_TIER2_KEYS = {d["key"] for d in ADULT_TIER2_ITEMS}
+
+# Legacy spine drink keys (alias → tier1 key).
+ADULT_SPINE_DRINK_LEGACY_ALIASES = {
+    "bone_broth": "bone_broth",
+    "watermelon_juice": "watermelon",
+    "watermelon": "watermelon",
+    "coconut_water": "coconut",
+    "coconut": "coconut",
+    "cucumber_juice": "cucumber",
+    "cucumber": "cucumber",
+    "celery_juice": "celery",
+    "celery": "celery",
+    "beet_juice": "beet",
+    "beet": "beet",
+}
+
+# §2.2 quick-add protein chips (UI hints only — logging is grams-only per Monday F2).
 ADULT_PROTEIN_CHIPS = [
     {"key": "chicken_breast", "label": "Chicken breast", "grams": 30},
     {"key": "steak", "label": "Steak", "grams": 26},
@@ -197,16 +235,80 @@ ADULT_PROTEIN_CHIPS = [
     {"key": "salmon", "label": "Salmon", "grams": 25},
 ]
 
-# §2.3 the six spine drinks (all support discs / connective tissue), worth 2 pts / 500 ml.
-ADULT_SPINE_DRINK_TYPES = [
-    {"key": "bone_broth", "label": "Bone Broth"},
-    {"key": "watermelon_juice", "label": "Watermelon Juice"},
-    {"key": "coconut_water", "label": "Coconut Water"},
-    {"key": "cucumber_juice", "label": "Cucumber Juice"},
-    {"key": "celery_juice", "label": "Celery Juice"},
-    {"key": "beet_juice", "label": "Beet Juice"},
-]
-ADULT_SPINE_DRINK_KEYS = {d["key"] for d in ADULT_SPINE_DRINK_TYPES}
+# Backward-compat aliases for older clients.
+ADULT_SPINE_DRINK_TYPES = ADULT_TIER1_ITEMS
+ADULT_SPINE_DRINK_KEYS = ADULT_TIER1_KEYS | set(ADULT_SPINE_DRINK_LEGACY_ALIASES.keys())
+
+
+def _coerce_tier_log(raw, valid_keys: set[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            key = str(k or "").strip().lower()
+            if key in valid_keys:
+                out[key] = max(0, int(v or 0))
+    return out
+
+
+def normalize_tier1_key(key: str) -> str | None:
+    k = str(key or "").strip().lower()
+    if k in ADULT_TIER1_KEYS:
+        return k
+    return ADULT_SPINE_DRINK_LEGACY_ALIASES.get(k)
+
+
+def tier1_log_from_row(row) -> dict[str, int]:
+    if row is None:
+        return {}
+    tier1 = _coerce_tier_log(getattr(row, "tier1_log", None) or {}, ADULT_TIER1_KEYS)
+    if tier1:
+        return tier1
+    # Legacy spine_drinks list.
+    for drink in list(getattr(row, "spine_drinks", None) or []):
+        mapped = normalize_tier1_key(drink.get("type"))
+        if mapped:
+            tier1[mapped] = tier1.get(mapped, 0) + int(drink.get("count", 0) or 0)
+    if not tier1 and int(getattr(row, "spine_500ml_count", 0) or 0) > 0:
+        tier1["bone_broth"] = int(row.spine_500ml_count)
+    return tier1
+
+
+def tier2_log_from_row(row) -> dict[str, int]:
+    if row is None:
+        return {}
+    tier2 = _coerce_tier_log(getattr(row, "tier2_log", None) or {}, ADULT_TIER2_KEYS)
+    if tier2:
+        return tier2
+    water_units = max(0, int(getattr(row, "water_ml", 0) or 0)) // ADULT_WATER_ML_PER_UNIT
+    if water_units:
+        tier2["water"] = water_units
+    return tier2
+
+
+def tier_log_total(log: dict[str, int]) -> int:
+    return sum(max(0, int(v or 0)) for v in (log or {}).values())
+
+
+def adult_fluid_points_raw(tier1_log: dict[str, int], tier2_log: dict[str, int]) -> int:
+    """Uncapped fluid points from tier counts (Monday F1)."""
+    t1 = tier_log_total(tier1_log)
+    t2 = tier_log_total(tier2_log)
+    return (t1 * ADULT_TIER1_POINTS_EACH) + (t2 * ADULT_TIER2_POINTS_EACH)
+
+
+def adult_fluid_points(tier1_log: dict[str, int], tier2_log: dict[str, int]) -> int:
+    return min(ADULT_HYDRATION_POINTS_CAP, adult_fluid_points_raw(tier1_log, tier2_log))
+
+
+def sync_legacy_hydration_fields(row) -> None:
+    """Keep deprecated water_ml / spine_* fields aligned with tier logs."""
+    tier1 = tier1_log_from_row(row)
+    tier2 = tier2_log_from_row(row)
+    row.tier1_log = tier1
+    row.tier2_log = tier2
+    row.spine_500ml_count = tier_log_total(tier1)
+    row.water_ml = int(tier2.get("water", 0)) * ADULT_WATER_ML_PER_UNIT
+    row.spine_drinks = [{"type": k, "count": v} for k, v in sorted(tier1.items()) if v > 0]
 
 
 def adult_protein_points(protein_grams: int) -> int:
@@ -216,19 +318,40 @@ def adult_protein_points(protein_grams: int) -> int:
 
 
 def adult_hydration_points(water_ml: int, spine_500ml_count: int) -> int:
-    """§2.1: water 1 pt/500 ml + spine drink 2 pts/500 ml, capped at 6."""
+    """Legacy wrapper — prefer adult_fluid_points(tier1, tier2)."""
+    tier2: dict[str, int] = {}
     water_units = max(0, int(water_ml or 0)) // ADULT_WATER_ML_PER_UNIT
+    if water_units:
+        tier2["water"] = water_units
+    tier1: dict[str, int] = {}
     spine_units = max(0, int(spine_500ml_count or 0))
-    raw = (water_units * 1) + (spine_units * ADULT_SPINE_POINTS_PER_UNIT)
-    return min(ADULT_HYDRATION_POINTS_CAP, raw)
+    if spine_units:
+        tier1["bone_broth"] = spine_units
+    return adult_fluid_points(tier1, tier2)
+
+
+def adult_nutrition_points_from_logs(
+    protein_grams: int,
+    tier1_log: dict[str, int],
+    tier2_log: dict[str, int],
+) -> int:
+    return min(
+        ADULT_NUTRITION_POINTS_CAP,
+        adult_protein_points(protein_grams) + adult_fluid_points(tier1_log, tier2_log),
+    )
 
 
 def adult_nutrition_points(protein_grams: int, water_ml: int, spine_500ml_count: int) -> int:
-    """§2.1: nutrition_points = min(15, protein_points + hydration_points)."""
-    return min(
-        ADULT_NUTRITION_POINTS_CAP,
-        adult_protein_points(protein_grams) + adult_hydration_points(water_ml, spine_500ml_count),
-    )
+    """Legacy signature — maps water/spine totals into tier-style scoring."""
+    tier2 = {}
+    water_units = max(0, int(water_ml or 0)) // ADULT_WATER_ML_PER_UNIT
+    if water_units:
+        tier2["water"] = water_units
+    tier1 = {}
+    spine_units = max(0, int(spine_500ml_count or 0))
+    if spine_units:
+        tier1["bone_broth"] = spine_units
+    return adult_nutrition_points_from_logs(protein_grams, tier1, tier2)
 
 
 def get_adult_nutrition_day(user, log_date):
@@ -280,20 +403,36 @@ def adult_nutrition_points_today(user, log_date) -> int:
     row = get_adult_nutrition_day(user, log_date)
     if not row:
         return 0
-    return adult_nutrition_points(row.protein_grams, row.water_ml, row.spine_500ml_count)
+    return adult_nutrition_points_from_logs(
+        row.protein_grams,
+        tier1_log_from_row(row),
+        tier2_log_from_row(row),
+    )
+
+
+def _tier_items_payload(catalog: list[dict], log: dict[str, int], points_each: int) -> list[dict]:
+    return [
+        {
+            "key": item["key"],
+            "label": item["label"],
+            "count": int(log.get(item["key"], 0) or 0),
+            "points_each": points_each,
+        }
+        for item in catalog
+    ]
 
 
 def adult_nutrition_state(user, log_date) -> dict:
     """Full server-authoritative state for the adult nutrition screen / API."""
     row = get_adult_nutrition_day(user, log_date)
     protein_grams = int(getattr(row, "protein_grams", 0) or 0)
-    water_ml = int(getattr(row, "water_ml", 0) or 0)
-    spine_500ml = int(getattr(row, "spine_500ml_count", 0) or 0)
-    spine_drinks = list(getattr(row, "spine_drinks", []) or [])
+    tier1 = tier1_log_from_row(row)
+    tier2 = tier2_log_from_row(row)
 
     p_pts = adult_protein_points(protein_grams)
-    h_pts = adult_hydration_points(water_ml, spine_500ml)
-    n_pts = min(ADULT_NUTRITION_POINTS_CAP, p_pts + h_pts)
+    fluid_raw = adult_fluid_points_raw(tier1, tier2)
+    f_pts = adult_fluid_points(tier1, tier2)
+    n_pts = min(ADULT_NUTRITION_POINTS_CAP, p_pts + f_pts)
     return {
         "log_date": str(log_date),
         "protein": {
@@ -301,17 +440,38 @@ def adult_nutrition_state(user, log_date) -> dict:
             "points": p_pts,
             "grams_cap": ADULT_PROTEIN_GRAMS_CAP,
             "points_cap": ADULT_PROTEIN_POINTS_CAP,
-            "chips": ADULT_PROTEIN_CHIPS,
+            "gram_buttons": [10, 20, 30],
         },
-        "hydration": {
-            "water_ml": water_ml,
-            "water_500ml_units": water_ml // ADULT_WATER_ML_PER_UNIT,
-            "spine_500ml_count": spine_500ml,
-            "spine_drinks": spine_drinks,
-            "logs": build_hydration_log_entries(water_ml, spine_drinks),
-            "points": h_pts,
+        "tier1": {
+            "items": _tier_items_payload(ADULT_TIER1_ITEMS, tier1, ADULT_TIER1_POINTS_EACH),
+            "log": tier1,
+            "points_raw": min(ADULT_HYDRATION_POINTS_CAP, tier_log_total(tier1) * ADULT_TIER1_POINTS_EACH),
+            "points_each": ADULT_TIER1_POINTS_EACH,
+        },
+        "tier2": {
+            "items": _tier_items_payload(ADULT_TIER2_ITEMS, tier2, ADULT_TIER2_POINTS_EACH),
+            "log": tier2,
+            "points_raw": min(
+                ADULT_HYDRATION_POINTS_CAP,
+                tier_log_total(tier2) * ADULT_TIER2_POINTS_EACH,
+            ),
+            "points_each": ADULT_TIER2_POINTS_EACH,
+        },
+        "fluids": {
+            "points": f_pts,
             "points_cap": ADULT_HYDRATION_POINTS_CAP,
-            "spine_drink_types": ADULT_SPINE_DRINK_TYPES,
+            "points_raw": fluid_raw,
+            "label": f"Fluids {f_pts} / {ADULT_HYDRATION_POINTS_CAP} pts",
+        },
+        # Legacy block for clients not yet on tier UI.
+        "hydration": {
+            "water_ml": int(tier2.get("water", 0)) * ADULT_WATER_ML_PER_UNIT,
+            "water_500ml_units": int(tier2.get("water", 0) or 0),
+            "spine_500ml_count": tier_log_total(tier1),
+            "spine_drinks": [{"type": k, "count": v} for k, v in tier1.items() if v > 0],
+            "points": f_pts,
+            "points_cap": ADULT_HYDRATION_POINTS_CAP,
+            "spine_drink_types": ADULT_TIER1_ITEMS,
         },
         "nutrition_points": n_pts,
         "nutrition_points_cap": ADULT_NUTRITION_POINTS_CAP,

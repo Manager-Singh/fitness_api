@@ -14,6 +14,8 @@ from habits.services import (
 )
 from habits.serializers import HabitLogWriteSerializer
 from users.spec_runtime import rebuild_ledger_from_date
+from utils.dashboard_new_embed import build_dashboard_new_embed
+from utils.monetization_gate import logging_locked_payload
 from utils.user_time import user_today
 
 
@@ -64,6 +66,13 @@ class HabitLogViewSet(viewsets.ViewSet):
         return Response(build_habits_plan_payload(request.user, log_date))
 
     def create(self, request):
+        locked = logging_locked_payload(
+            request.user,
+            detail="Habit logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
+
         ser = HabitLogWriteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
@@ -92,20 +101,25 @@ class HabitLogViewSet(viewsets.ViewSet):
 
         raw_pts = total_raw_habit_points(request.user, log_date)
         removed = action == "removed"
+        payload = {
+            "logged": not removed,
+            "removed": removed,
+            "created": action == "created",
+            "log_date": str(log_date),
+            "habit_code": entry.habit.code if entry else habit_code,
+            "slot": entry.slot if entry else slot,
+            "points": int(entry.points) if entry else 0,
+            "habit_points_today": raw_pts,
+            "habit_points_capped_for_engine": capped_habit_points_for_engine(
+                request.user, log_date
+            ),
+            "daily_cap": DAILY_HABIT_CAP,
+        }
+        if not removed:
+            payload["dashboard_new"] = build_dashboard_new_embed(
+                request.user, log_date, request=request
+            )
         return Response(
-            {
-                "logged": not removed,
-                "removed": removed,
-                "created": action == "created",
-                "log_date": str(log_date),
-                "habit_code": entry.habit.code if entry else habit_code,
-                "slot": entry.slot if entry else slot,
-                "points": int(entry.points) if entry else 0,
-                "habit_points_today": raw_pts,
-                "habit_points_capped_for_engine": capped_habit_points_for_engine(
-                    request.user, log_date
-                ),
-                "daily_cap": DAILY_HABIT_CAP,
-            },
+            payload,
             status=status.HTTP_200_OK if removed else status.HTTP_201_CREATED,
         )

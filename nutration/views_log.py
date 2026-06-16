@@ -3,7 +3,6 @@ from datetime import date as dt, datetime, timedelta
 from django.db.models import Sum
 from django.db import transaction
 from django.utils import timezone
-from django.conf import settings
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -17,7 +16,7 @@ from .serializers_log import (
     NutraSessionSerializer
 )
 from utils.age import get_user_age
-from utils.check_payment import check_subscription_or_response
+from utils.monetization_gate import logging_locked_payload
 from workouts.models import WorkoutEntry
 from users.models import DailyLog
 from users.models import NotificationEventLog
@@ -110,16 +109,12 @@ class NutraLogViewSet(viewsets.ViewSet):
             age = get_user_age(request.user)
         except Exception:
             age = 0
-        subscription_data = check_subscription_or_response(request.user).data
-        if is_adult_flat_food_user(request.user, age) and not bool(subscription_data.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
-            return Response(
-                {
-                    "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
-                    "paywall_required": True,
-                    "gate": "adult_diagnosis_gate",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        locked = logging_locked_payload(
+            request.user,
+            detail="Nutrition/lifestyle logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
 
         raw = request.data
         data = raw.get("food_activity", raw)

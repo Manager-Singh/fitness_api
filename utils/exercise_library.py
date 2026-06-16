@@ -11,7 +11,7 @@ SECTION6_DISPLAY_COPY = {
     "Squats / Bodyweight Squats": "2-3 sets x 15-20 reps",
     "High Knees": "2 rounds x 30 sec",
     "Wall Angels": "2 sets x 12 reps",
-    "Mountain Climbers": "3 rounds x 20 sec on / 10 sec rest",
+    "Mountain Climbers": "40 seconds (timer)",
     "Deep Squat Hold": "2 sets x 45 sec hold",
     "Cat-Cow Stretch": "2 sets x 10 reps",
     "Hamstring Stretch": "2 sets x 30 sec per leg",

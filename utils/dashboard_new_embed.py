@@ -239,28 +239,19 @@ def _build_dashboard_new_embed_fast(user, log_date):
     routine_progress = _routine_progress_snapshot(user, log_date, is_teen=is_teen)
 
     if is_teen:
-        from user_profile.models import UserProfile
+        from utils.log_embed_metrics import teen_today_dashboard_metrics, teen_top_cards_from_metrics
 
-        prof = UserProfile.objects.filter(user=user).only("base_height_cm", "current_height_cm").first()
-        base_cm = float(getattr(prof, "base_height_cm", 0) or getattr(prof, "current_height_cm", 0) or 0)
-        runtime = get_user_runtime_state_snapshot(user) or {}
-        cum_cm = float(int(runtime.get("current_height_um") or 0)) / 10000.0
-        height_cm = round(base_cm + cum_cm, 4)
+        metrics = teen_today_dashboard_metrics(user, log_date)
         live_metrics = {
-            "base_height_cm": round(base_cm, 4),
-            "genetic_blue_cm": round(base_cm + cum_cm * 0.5, 4),
-            "us_optimized_red_cm": height_cm,
-            "height_cm": height_cm,
-            "daily_gains_cm": round(float(routine_progress.get("daily_points") or 0) * 0.001, 4),
-            "genetic_cumulative_cm": round(cum_cm * 0.5, 4),
-            "postureplus_cumulative_cm": round(cum_cm, 4),
+            "base_height_cm": metrics["base_height_cm"],
+            "genetic_blue_cm": metrics["genetic_blue_cm"],
+            "us_optimized_red_cm": metrics["us_optimized_red_cm"],
+            "height_cm": metrics["height_cm"],
+            "daily_gains_cm": metrics["daily_gains_cm"],
+            "genetic_cumulative_cm": metrics["genetic_cumulative_cm"],
+            "postureplus_cumulative_cm": metrics["postureplus_cumulative_cm"],
         }
-        top_cards = [
-            {"key": "genetic_plus", "label": "Genetic +", "value_cm": live_metrics["daily_gains_cm"]},
-            {"key": "posture_plus", "label": "Posture+", "value_cm": live_metrics["daily_gains_cm"]},
-            {"key": "daily_gains", "label": "Daily Gains", "value_cm": live_metrics["daily_gains_cm"]},
-            {"key": "height", "label": "Height", "value_cm": height_cm},
-        ]
+        top_cards = teen_top_cards_from_metrics(metrics)
         return {
             "message": "Dashboard retrieved successfully",
             "dashboard": {

@@ -251,6 +251,8 @@ When parent height was "I don't know" in onboarding, `*_is_estimate` is `true` a
 
 ## 8c. Other Friday dashboard keys (mobile handoff)
 
+**Full Friday batch (Tasks 1–9):** see [`FRIDAY_WORK_ORDER_FRONTEND_GUIDE.md`](FRIDAY_WORK_ORDER_FRONTEND_GUIDE.md).
+
 | Key | Purpose |
 |-----|---------|
 | `dashboard.routine_progress.completion_percent` | Home **"% optimized today"** — teen pool 68, adult pool 27 |
@@ -258,7 +260,7 @@ When parent height was "I don't know" in onboarding, `*_is_estimate` is `true` a
 | `dashboard.height_loss_box.remaining_cm` | Height lost to posture (live, ≥2 decimals) |
 | `dashboard.height_loss_box.recovered` | `true` when remaining ≤ 0 |
 | `GET/POST /api/adult-nutrition` | Adult protein + fluids (max 15 pts) — replaces chip grid |
-| `GET /api/habits` → `items[].how_to_detail` | Tap-down "How to" panel copy |
+| `GET /api/habits` → `items[].instruction_steps` | Tap-down "How to" ordered steps (fallback: `how_to_detail`) |
 
 **Mobile-only (no API change):** teen nutrition row sizing, habits full-screen layout, remove fake onboarding testimonials, growth-trend segment icons.
 

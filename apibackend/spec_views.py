@@ -18,7 +18,7 @@ from utils.age import get_user_age, get_user_age_exact
 from users.spec_runtime import compute_daily_height_for_user
 from utils.dashboard_new_embed import build_dashboard_new_embed
 from utils.check_payment import check_subscription_or_response
-from utils.monetization_gate import compute_monetization_flags
+from utils.monetization_gate import compute_monetization_flags, logging_locked_payload
 from utils.engine_routing import apply_engine_routing
 from utils.user_time import user_localize_dt, user_today
 from users.spec_runtime import rebuild_ledger_from_date
@@ -39,20 +39,6 @@ from utils.adult_nutrition import (
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _adult_free_logging_locked(user) -> bool:
-    """Section 7.1 — unpaid adults cannot log exercises or nutrition/lifestyle."""
-    try:
-        age = int(get_user_age(user) or 0)
-    except Exception:
-        age = 0
-    if age < 21:
-        return False
-    if bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
-        return False
-    sub = check_subscription_or_response(user).data
-    return not bool(sub.get("is_paid", False))
 
 
 def _to_local_date(request, fallback):
@@ -182,15 +168,13 @@ class LogExerciseAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if _adult_free_logging_locked(request.user):
-            return Response(
-                {
-                    "error": "paywall_required",
-                    "detail": "Exercise logging is locked for free adult accounts.",
-                    "gate": "adult_diagnosis_gate",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        locked = logging_locked_payload(
+            request.user,
+            detail="Exercise logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            locked = {**locked, "error": "paywall_required"}
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
         exercise_id = request.data.get("exercise_id")
         points = int(request.data.get("points", 0))
         if not exercise_id:
@@ -279,15 +263,13 @@ class LogFoodAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if _adult_free_logging_locked(request.user):
-            return Response(
-                {
-                    "error": "paywall_required",
-                    "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
-                    "gate": "adult_diagnosis_gate",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        locked = logging_locked_payload(
+            request.user,
+            detail="Nutrition/lifestyle logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            locked = {**locked, "error": "paywall_required"}
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
         module_id = request.data.get("module_id")
         food_id = request.data.get("food_id")
         if not module_id or not food_id:
@@ -372,15 +354,13 @@ class LogLifestyleAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if _adult_free_logging_locked(request.user):
-            return Response(
-                {
-                    "error": "paywall_required",
-                    "detail": "Nutrition/lifestyle logging is locked for free adult accounts.",
-                    "gate": "adult_diagnosis_gate",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        locked = logging_locked_payload(
+            request.user,
+            detail="Nutrition/lifestyle logging is locked. Subscribe to unlock full access.",
+        )
+        if locked:
+            locked = {**locked, "error": "paywall_required"}
+            return Response(locked, status=status.HTTP_403_FORBIDDEN)
         module_id = request.data.get("module_id")
         activity_id = request.data.get("activity_id")
         if not module_id or not activity_id:

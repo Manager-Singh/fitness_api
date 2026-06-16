@@ -97,6 +97,16 @@ class Module(models.Model):
         help_text="Short motivational line"
     )
 
+    info_popup_title = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Lifestyle ℹ️ popup title (e.g. SLEEP 🌙). Shown when body is also set.",
+    )
+    info_popup_body = models.TextField(
+        blank=True,
+        help_text="Lifestyle ℹ️ popup body copy (Monday spec E1).",
+    )
+
     nutrition_category = models.CharField(
         max_length=12,
         choices=NUTRITION_CATEGORIES,

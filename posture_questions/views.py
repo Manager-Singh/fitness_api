@@ -345,9 +345,35 @@ def upsert_posture_questions(request):
     from utils.posture.assessment_service import assessment_response_meta
 
     reconciliation = assessment_response_meta(user, assessment)
+
+    onboarding_results = None
+    if state and bool(state.questionnaire_completed) and section3_contract:
+        try:
+            ga_cm = (
+                round(float(compute_genetic_average_cm(user, user_today(user))), 3)
+                if is_teen
+                else None
+            )
+        except Exception:
+            ga_cm = None
+        mph_cm = (
+            round(float(genetic_estimate.estimated_height_cm), 3)
+            if genetic_estimate and genetic_estimate.estimated_height_cm is not None
+            else None
+        )
+        onboarding_results = {
+            "total_posture_loss_cm": section3_contract.get("total_recoverable_loss_cm"),
+            "genetic_average_cm": ga_cm,
+            "genetic_mid_parental_cm": mph_cm,
+            "current_height_cm": round(float(current_height), 3) if current_height else None,
+            "true_optimized_cm": None,
+            "true_optimized_locked": not bool(is_paid),
+        }
+
     return Response({
         'message': message,
         'success': True,
+        'onboarding_results': onboarding_results,
         'posture_state': {
             'scan_completed': bool(state.scan_completed) if state else False,
             'questionnaire_completed': bool(state.questionnaire_completed) if state else False,
