@@ -8,9 +8,14 @@ from utils.paywall_flags import (
 )
 
 
+from utils.trial_settings import teen_trial_globally_enabled
+
+
 def compute_monetization_flags(age_years, subscription_data, age_exact=None, user=None):
     is_paid = bool(subscription_data.get("is_paid", False))
     is_trial = bool(subscription_data.get("is_trial", False))
+    if not teen_trial_globally_enabled():
+        is_trial = False
     trial_day = subscription_data.get("trial_day")
     try:
         trial_day = int(trial_day) if trial_day is not None else None
@@ -35,6 +40,7 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None, use
             "teen_full_access": True,
             "conversion_enabled": True,
             "full_access_trial_expired": False,
+            "teen_trial_enabled": teen_trial_globally_enabled(),
         }
         return apply_monetization_qa_overlay(user, result, age_exact=ae) if user else result
 
@@ -56,6 +62,7 @@ def compute_monetization_flags(age_years, subscription_data, age_exact=None, use
         "teen_full_access": teen_full_access,
         "conversion_enabled": conversion_enabled,
         "full_access_trial_expired": full_access_trial_expired,
+        "teen_trial_enabled": teen_trial_globally_enabled(),
     }
     if user is not None:
         return apply_monetization_qa_overlay(user, result, age_exact=ae)

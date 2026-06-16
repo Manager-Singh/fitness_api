@@ -3,6 +3,49 @@ from django.db import models
 from payment_packages.duration_utils import format_duration_label, package_duration_days
 
 
+class MonetizationSettings(models.Model):
+    """
+    Singleton row (pk=1) — global monetization toggles editable from Django admin.
+    """
+
+    teen_trial_enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "When enabled, eligible teen users receive the 7-day full-access trial "
+            "(starts on first scan or questionnaire unlock). When disabled, no new "
+            "trials start and active trial windows are not honored in API responses."
+        ),
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Monetization settings"
+        verbose_name_plural = "Monetization settings"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("monetization_teen_trial_enabled")
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={"teen_trial_enabled": True})
+        return obj
+
+    @classmethod
+    def is_teen_trial_enabled(cls) -> bool:
+        from django.core.cache import cache
+
+        cached = cache.get("monetization_teen_trial_enabled")
+        if cached is not None:
+            return bool(cached)
+        enabled = bool(cls.load().teen_trial_enabled)
+        cache.set("monetization_teen_trial_enabled", enabled, timeout=60)
+        return enabled
+
+
 class PaymentPackage(models.Model):
     name = models.CharField(max_length=100)
     amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)

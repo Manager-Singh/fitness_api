@@ -1405,7 +1405,9 @@ def _mark_scan_completed(user):
 
     age_exact = get_user_age_exact(user) or 0.0
     # Section 5.5: 7-day trial is teen-only (sex-specific band) and starts on first scan.
-    if is_teen_age(age_exact, user=user):
+    from utils.trial_settings import teen_trial_globally_enabled
+
+    if teen_trial_globally_enabled() and is_teen_age(age_exact, user=user):
         if user.trial_start is None:
             user.trial_start = timezone.now()
         if user.trial_end is None:

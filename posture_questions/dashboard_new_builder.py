@@ -457,6 +457,9 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             "trial_day": payload.get("trial_day"),
             "trial_start": (payload.get("subscription") or {}).get("trial_start"),
             "trial_end": (payload.get("subscription") or {}).get("trial_end"),
+            "teen_trial_enabled": bool(
+                (payload.get("subscription") or {}).get("teen_trial_enabled", True)
+            ),
             "full_access_trial_active": bool(payload.get("full_access_trial_active")),
             "full_access_trial_expired": bool(payload.get("full_access_trial_expired")),
         },
@@ -528,6 +531,9 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             "age_exact": payload.get("age_exact"),
             "account_tier": payload.get("account_tier"),
             "trial_day": payload.get("trial_day"),
+            "teen_trial_enabled": bool(
+                (payload.get("subscription") or {}).get("teen_trial_enabled", True)
+            ),
             "full_access_trial_active": payload.get("full_access_trial_active"),
             "full_access_trial_expired": payload.get("full_access_trial_expired"),
         },

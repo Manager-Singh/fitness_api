@@ -210,8 +210,9 @@ def upsert_posture_questions(request):
                 except Exception:
                     age_exact_now = 0.0
                 from utils.paywall_flags import is_teen_age as _is_teen_age_unlock
+                from utils.trial_settings import teen_trial_globally_enabled
 
-                if _is_teen_age_unlock(age_exact_now, user=user):
+                if teen_trial_globally_enabled() and _is_teen_age_unlock(age_exact_now, user=user):
                     if getattr(user, "trial_start", None) is None:
                         user.trial_start = now_ts
                     if getattr(user, "trial_end", None) is None and getattr(user, "trial_start", None) is not None:

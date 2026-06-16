@@ -1,6 +1,9 @@
 from django.contrib import admin
 from django import forms
-from .models import PaymentPackage
+from django.shortcuts import redirect
+from django.urls import reverse
+
+from .models import MonetizationSettings, PaymentPackage
 from payment_packages.duration_utils import (
     DURATION_COUNT_CHOICES,
     DURATION_UNIT_CHOICES,
@@ -73,6 +76,27 @@ class PaymentPackageForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+
+@admin.register(MonetizationSettings)
+class MonetizationSettingsAdmin(admin.ModelAdmin):
+    """Single admin page to enable/disable the teen 7-day trial."""
+
+    list_display = ("teen_trial_enabled", "updated_at")
+    fields = ("teen_trial_enabled", "updated_at")
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
+        return not MonetizationSettings.objects.filter(pk=1).exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        obj, _ = MonetizationSettings.objects.get_or_create(
+            pk=1, defaults={"teen_trial_enabled": True}
+        )
+        return redirect(reverse("admin:payment_packages_monetizationsettings_change", args=[obj.pk]))
 
 
 @admin.register(PaymentPackage)

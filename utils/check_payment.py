@@ -48,6 +48,7 @@ from rest_framework import status
 from user_profile.models import Payment
 from utils.age import get_user_age_exact
 from utils.paywall_flags import apply_subscription_qa_overlay, is_adult_age, is_teen_age
+from utils.trial_settings import teen_trial_globally_enabled
 
 
 def _user_eligible_for_teen_trial(user, age_exact=None) -> bool:
@@ -55,6 +56,8 @@ def _user_eligible_for_teen_trial(user, age_exact=None) -> bool:
     7-day full-access trial applies to teens only (female 13–17, male 13–20).
     Adults never qualify, including when stale trial_start/trial_end exist on the row.
     """
+    if not teen_trial_globally_enabled():
+        return False
     if getattr(user, "account_tier", None) == "adult":
         return False
     ae = age_exact if age_exact is not None else get_user_age_exact(user)
@@ -65,7 +68,9 @@ def _user_eligible_for_teen_trial(user, age_exact=None) -> bool:
 
 def _apply_paywall_disabled_flags(user, payload: dict) -> dict:
     """Apply QA paywall bypass flags so subscription_data reflects full paid access."""
-    return apply_subscription_qa_overlay(user, payload)
+    out = apply_subscription_qa_overlay(user, payload)
+    out["teen_trial_enabled"] = teen_trial_globally_enabled()
+    return out
 
 
 # def check_subscription_or_response(user):
@@ -199,7 +204,13 @@ def check_subscription_or_response(user):
                 )
 
     # ✅ Trial check (only when not currently paid)
-    if is_teen and trial_start and trial_end and trial_start <= now <= trial_end:
+    if (
+        teen_trial_globally_enabled()
+        and is_teen
+        and trial_start
+        and trial_end
+        and trial_start <= now <= trial_end
+    ):
         days_left = (trial_end - now).days
         trial_day = int((now - trial_start).total_seconds() // 86400) + 1
         return Response(
