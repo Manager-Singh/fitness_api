@@ -15,6 +15,20 @@ router.register("routines",      RoutineVariantViewSet)
 router.register("workout-logs",  WorkoutLogViewSet, basename="workout-log")
 
 urlpatterns = [
+    path(
+        "workout-logs",
+        WorkoutLogViewSet.as_view({"get": "list", "post": "create"}),
+        name="workout-log-list-noslash",
+    ),
+    path(
+        "workout-logs/<int:pk>",
+        WorkoutLogViewSet.as_view({
+            "patch": "partial_update",
+            "put": "update",
+            "delete": "destroy",
+        }),
+        name="workout-log-detail-noslash",
+    ),
     path("my-workouts", MyWorkoutPlanView.as_view(), name="my-workouts"),
     path("my-workouts/", MyWorkoutPlanView.as_view(), name="my-workouts-slash"),
     path("my-routine", UserRoutineListView.as_view(), name="my-routine"),
