@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+
+{% block submit_buttons_bottom %}
+  {{ block.super }}
+  {% if original %}
+    <div class="submit-row">
+      <input type="submit" value="Run stress test now" name="_run_stress_test">
+      <p class="help" style="margin:8px 0 0;">
+        Runs synchronously in this admin request. For large tests, start with low requests/concurrency first.
+      </p>
+    </div>
+  {% endif %}
+{% endblock %}

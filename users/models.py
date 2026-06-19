@@ -232,6 +232,84 @@ class NotificationEventLog(models.Model):
         ordering = ["-event_date", "-created_at"]
 
 
+class StressTestRun(models.Model):
+    ENDPOINT_DASHBOARD = "dashboard"
+    ENDPOINT_ALL = "all"
+    ENDPOINT_CUSTOM = "custom"
+    ENDPOINT_CHOICES = [
+        (ENDPOINT_DASHBOARD, "Dashboard only"),
+        (ENDPOINT_ALL, "All: dashboard + workout + nutrition + microhabit"),
+        (ENDPOINT_CUSTOM, "Custom endpoint"),
+    ]
+
+    METHOD_CHOICES = [
+        ("GET", "GET"),
+        ("POST", "POST"),
+        ("PUT", "PUT"),
+        ("PATCH", "PATCH"),
+        ("DELETE", "DELETE"),
+    ]
+    TIER_CHOICES = [
+        ("teen", "Teen"),
+        ("adult", "Adult"),
+        ("both", "Both teen + adult"),
+    ]
+    EXECUTION_CHOICES = [
+        ("parallel", "Parallel"),
+        ("series", "Series"),
+    ]
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("running", "Running"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    ]
+
+    name = models.CharField(max_length=120, default="Dashboard stress test")
+    api_base = models.URLField(help_text="Example: https://your-live-domain.com/api")
+    endpoint_mode = models.CharField(max_length=16, choices=ENDPOINT_CHOICES, default=ENDPOINT_ALL)
+    endpoint = models.CharField(max_length=160, default="/dashboard-new")
+    method = models.CharField(max_length=8, choices=METHOD_CHOICES, default="GET")
+    json_body = models.JSONField(default=dict, blank=True)
+
+    user_count = models.PositiveIntegerField(default=100)
+    total_requests = models.PositiveIntegerField(default=100)
+    concurrency = models.PositiveIntegerField(default=5, help_text="Parallel requests at one time.")
+    execution_mode = models.CharField(max_length=16, choices=EXECUTION_CHOICES, default="parallel")
+    tier = models.CharField(max_length=8, choices=TIER_CHOICES, default="both")
+    prefix = models.CharField(max_length=40, default="stress")
+    domain = models.CharField(max_length=120, default="stress.local")
+    password = models.CharField(max_length=120, default="StressTest@12345")
+    make_paid = models.BooleanField(default=True, help_text="Create paid rows so write endpoints do not hit paywall.")
+    reset_password = models.BooleanField(default=False)
+    timeout_seconds = models.PositiveIntegerField(default=30)
+    sample_interval_seconds = models.FloatField(default=1.0)
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="draft", db_index=True)
+    report_file = models.CharField(max_length=255, blank=True)
+    report_json = models.JSONField(default=dict, blank=True)
+    command_output = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Stress test run"
+        verbose_name_plural = "Stress test runs"
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
+
+    @property
+    def effective_concurrency(self) -> int:
+        if self.execution_mode == "series":
+            return 1
+        return int(self.concurrency or 1)
+
+
 @receiver(post_save, sender=User)
 def _ensure_posture_state_on_signup(sender, instance, created, **kwargs):
     """

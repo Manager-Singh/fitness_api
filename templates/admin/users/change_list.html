@@ -1,0 +1,21 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools %}
+  <div class="module" style="padding: 10px 12px; margin-bottom: 12px;">
+    <h2 style="margin: 0 0 8px;">Stress Test Users</h2>
+    <p style="margin: 0 0 10px;">
+      Current stress users: <strong>{{ stress_users_count|default:0 }}</strong>.
+      Create makes 100 users: 50 teen + 50 adult. Delete removes those stress users and related cascade data.
+    </p>
+    <form method="post" action="{{ stress_create_url }}" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" class="button">Create 100 Stress Users</button>
+    </form>
+    <form method="post" action="{{ stress_delete_url }}" style="display:inline; margin-left: 8px;"
+          onsubmit="return confirm('Delete all stress test users and their related data?');">
+      {% csrf_token %}
+      <button type="submit" class="button deletelink">Delete Stress Users + Data</button>
+    </form>
+  </div>
+  {{ block.super }}
+{% endblock %}

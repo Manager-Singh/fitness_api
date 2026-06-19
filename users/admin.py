@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import io
+import json
+from pathlib import Path
+
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import get_deleted_objects
+from django.core.management import call_command
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from posture.models import PostureReport
@@ -38,7 +45,7 @@ from .admin_ui import (
     routine_section_html,
     um_to_cm,
 )
-from .models import DailyLog, FriendInvite, Friendship, HeightLedger, NotificationEventLog, OTP, PostureState, User
+from .models import DailyLog, FriendInvite, Friendship, HeightLedger, NotificationEventLog, OTP, PostureState, StressTestRun, User
 from .spec_runtime import _um_from_dm, compute_daily_height_for_user
 from django.apps import apps as django_apps
 from django.utils.html import format_html
@@ -357,10 +364,21 @@ class UserAdmin(admin.ModelAdmin):
         css = {"all": ("admin/css/user_progress.css",)}
 
     change_form_template = "admin/users/change_form.html"
+    change_list_template = "admin/users/change_list.html"
 
     def get_urls(self):
         urls = super().get_urls()
         custom = [
+            path(
+                "create-stress-users/",
+                self.admin_site.admin_view(self.create_stress_users_view),
+                name="users_user_create_stress_users",
+            ),
+            path(
+                "delete-stress-users/",
+                self.admin_site.admin_view(self.delete_stress_users_view),
+                name="users_user_delete_stress_users",
+            ),
             path(
                 "<object_id>/generate-routine/",
                 self.admin_site.admin_view(self.generate_routine_view),
@@ -373,6 +391,61 @@ class UserAdmin(admin.ModelAdmin):
             ),
         ]
         return custom + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        stress_qs = User.objects.filter(
+            Q(email__startswith="stress_")
+            | Q(email__startswith="stress_teen_")
+            | Q(email__startswith="stress_adult_"),
+            email__endswith="@stress.local",
+            is_staff=False,
+            is_superuser=False,
+        )
+        extra_context["stress_users_count"] = stress_qs.count()
+        extra_context["stress_create_url"] = reverse("admin:users_user_create_stress_users")
+        extra_context["stress_delete_url"] = reverse("admin:users_user_delete_stress_users")
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def create_stress_users_view(self, request):
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        if not self.has_add_permission(request):
+            return HttpResponseForbidden()
+        try:
+            call_command(
+                "create_stress_users",
+                count=100,
+                prefix="stress",
+                domain="stress.local",
+                password="StressTest@12345",
+                tier="both",
+                output="/tmp/fitness_api_stress_users.jsonl",
+            )
+            self.message_user(
+                request,
+                "Created/reused 100 stress test users (50 teen + 50 adult). Tokens exported to /tmp/fitness_api_stress_users.jsonl.",
+                level=messages.SUCCESS,
+            )
+        except Exception as exc:
+            self.message_user(request, f"Failed creating stress users: {exc}", level=messages.ERROR)
+        return HttpResponseRedirect(reverse("admin:users_user_changelist"))
+
+    def delete_stress_users_view(self, request):
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        if not self.has_delete_permission(request):
+            return HttpResponseForbidden()
+        try:
+            call_command("delete_stress_users", prefix="stress", domain="stress.local")
+            self.message_user(
+                request,
+                "Deleted stress test users and related data.",
+                level=messages.SUCCESS,
+            )
+        except Exception as exc:
+            self.message_user(request, f"Failed deleting stress users: {exc}", level=messages.ERROR)
+        return HttpResponseRedirect(reverse("admin:users_user_changelist"))
 
     def _user_from_admin_kwargs(self, kwargs):
         """Custom admin URLs may capture the pk as ``object_id`` or ``id``."""
@@ -719,6 +792,306 @@ class UserAdmin(admin.ModelAdmin):
             "media": self.media,
         }
         return TemplateResponse(request, "admin/users/confirm_cascade_delete.html", context)
+
+
+@admin.register(StressTestRun)
+class StressTestRunAdmin(admin.ModelAdmin):
+    change_form_template = "admin/users/stresstestrun/change_form.html"
+    list_display = (
+        "id",
+        "name",
+        "status_badge",
+        "target_display",
+        "load_display",
+        "rps_display",
+        "latency_display",
+        "system_display",
+        "created_at",
+    )
+    list_filter = ("status", "endpoint_mode", "execution_mode", "tier", "make_paid")
+    search_fields = ("name", "api_base", "report_file")
+    readonly_fields = (
+        "status",
+        "report_file",
+        "html_report_file",
+        "report_summary",
+        "report_json_pretty",
+        "command_output",
+        "error_message",
+        "started_at",
+        "finished_at",
+        "created_at",
+        "updated_at",
+    )
+    actions = ("run_selected_stress_tests",)
+    fieldsets = (
+        (
+            "Target",
+            {
+                "fields": (
+                    "name",
+                    "api_base",
+                    "endpoint_mode",
+                    "endpoint",
+                    "method",
+                    "json_body",
+                )
+            },
+        ),
+        (
+            "Load parameters",
+            {
+                "fields": (
+                    "user_count",
+                    "total_requests",
+                    "execution_mode",
+                    "concurrency",
+                    "tier",
+                    "make_paid",
+                    "reset_password",
+                )
+            },
+        ),
+        (
+            "Stress users",
+            {
+                "fields": (
+                    "prefix",
+                    "domain",
+                    "password",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Runtime",
+            {
+                "fields": (
+                    "timeout_seconds",
+                    "sample_interval_seconds",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Report",
+            {
+                "fields": (
+                    "status",
+                    "report_file",
+                    "html_report_file",
+                    "report_summary",
+                    "report_json_pretty",
+                    "command_output",
+                    "error_message",
+                    "started_at",
+                    "finished_at",
+                    "created_at",
+                    "updated_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<object_id>/run/",
+                self.admin_site.admin_view(self.run_stress_test_view),
+                name="users_stresstestrun_run",
+            ),
+        ]
+        return custom + urls
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if "json_body" in form.base_fields:
+            form.base_fields["json_body"].help_text = (
+                "Leave as {} for auto body. In 'All' mode the system automatically creates "
+                "valid workout, nutrition, and microhabit POST bodies from DB stress fixtures. "
+                "For custom /workout-logs, /nutra-logs, or /habit-logs POST tests, {} also auto-generates the correct body."
+            )
+        if "endpoint_mode" in form.base_fields:
+            form.base_fields["endpoint_mode"].help_text = (
+                "Choose 'All' to test dashboard + workout + nutrition + microhabit together. "
+                "In All mode, Method/Endpoint/JSON body are ignored for write payloads."
+            )
+        if "concurrency" in form.base_fields:
+            form.base_fields["concurrency"].help_text = (
+                "Parallel requests at one time. Example: 20 means 20 requests running together."
+            )
+        return form
+
+    def response_change(self, request, obj):
+        if "_run_stress_test" in request.POST:
+            return self._run_and_redirect(request, obj)
+        return super().response_change(request, obj)
+
+    def run_stress_test_view(self, request, object_id):
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        obj = get_object_or_404(StressTestRun, pk=object_id)
+        if not self.has_change_permission(request, obj):
+            return HttpResponseForbidden()
+        return self._run_and_redirect(request, obj)
+
+    def _run_and_redirect(self, request, obj):
+        def run_after_commit():
+            try:
+                self._execute_stress_run(obj)
+                self.message_user(request, f"Stress test completed: {obj.name}", level=messages.SUCCESS)
+            except Exception as exc:
+                self.message_user(request, f"Stress test failed: {exc}", level=messages.ERROR)
+
+        if transaction.get_connection().in_atomic_block:
+            transaction.on_commit(run_after_commit)
+        else:
+            run_after_commit()
+        return HttpResponseRedirect(reverse("admin:users_stresstestrun_change", args=[obj.pk]))
+
+    @admin.action(description="Run selected stress tests now")
+    def run_selected_stress_tests(self, request, queryset):
+        ok = 0
+        failed = 0
+        for obj in queryset:
+            try:
+                self._execute_stress_run(obj)
+                ok += 1
+            except Exception:
+                failed += 1
+        self.message_user(request, f"Stress tests complete. Success={ok}, failed={failed}")
+
+    def _execute_stress_run(self, obj: StressTestRun):
+        obj.status = "running"
+        obj.started_at = timezone.now()
+        obj.finished_at = None
+        obj.error_message = ""
+        obj.command_output = ""
+        obj.save(update_fields=["status", "started_at", "finished_at", "error_message", "command_output", "updated_at"])
+
+        output_path = f"/tmp/fitness_api_stress_run_{obj.pk}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.json"
+        endpoint_mode = obj.endpoint_mode
+        endpoint = "/dashboard-new" if endpoint_mode == StressTestRun.ENDPOINT_DASHBOARD else obj.endpoint
+        out = io.StringIO()
+        command_kwargs = {
+            "api_base": obj.api_base,
+            "endpoint": endpoint,
+            "method": obj.method,
+            "json": json.dumps(obj.json_body or {}),
+            "all": endpoint_mode == StressTestRun.ENDPOINT_ALL,
+            "users": obj.user_count,
+            "requests": obj.total_requests,
+            "concurrency": obj.effective_concurrency,
+            "tier": obj.tier,
+            "prefix": obj.prefix,
+            "domain": obj.domain,
+            "password": obj.password,
+            "timeout": obj.timeout_seconds,
+            "sample_interval": obj.sample_interval_seconds,
+            "output": output_path,
+            "reset_password": obj.reset_password,
+            "free": not obj.make_paid,
+            "stdout": out,
+        }
+        try:
+            call_command("run_api_stress_report", **command_kwargs)
+            report = {}
+            if Path(output_path).exists():
+                report = json.loads(Path(output_path).read_text(encoding="utf-8"))
+            obj.status = "completed"
+            obj.report_file = output_path
+            obj.report_json = report
+            obj.command_output = out.getvalue()
+            obj.finished_at = timezone.now()
+            obj.save(
+                update_fields=[
+                    "status",
+                    "report_file",
+                    "report_json",
+                    "command_output",
+                    "finished_at",
+                    "updated_at",
+                ]
+            )
+        except Exception as exc:
+            obj.status = "failed"
+            obj.command_output = out.getvalue()
+            obj.error_message = str(exc)
+            obj.finished_at = timezone.now()
+            obj.save(update_fields=["status", "command_output", "error_message", "finished_at", "updated_at"])
+            raise
+
+    @admin.display(description="Status")
+    def status_badge(self, obj):
+        colors = {
+            "draft": ("#374151", "#f3f4f6"),
+            "running": ("#92400e", "#fef3c7"),
+            "completed": ("#166534", "#dcfce7"),
+            "failed": ("#991b1b", "#fee2e2"),
+        }
+        color, bg = colors.get(obj.status, ("#374151", "#f3f4f6"))
+        return badge(obj.get_status_display(), color=color, bg=bg)
+
+    @admin.display(description="Target")
+    def target_display(self, obj):
+        if obj.endpoint_mode == StressTestRun.ENDPOINT_ALL:
+            return "All endpoints"
+        return f"{obj.method} {obj.endpoint}"
+
+    @admin.display(description="Load")
+    def load_display(self, obj):
+        mode = "series" if obj.execution_mode == "series" else f"parallel x{obj.concurrency}"
+        return f"{obj.total_requests} req / {obj.user_count} users / {mode}"
+
+    @admin.display(description="RPS")
+    def rps_display(self, obj):
+        return (obj.report_json or {}).get("results", {}).get("requests_per_second", "—")
+
+    @admin.display(description="Latency")
+    def latency_display(self, obj):
+        lat = (obj.report_json or {}).get("latency_ms") or {}
+        if not lat:
+            return "—"
+        return f"avg {lat.get('avg')} ms / p95 {lat.get('p95')} ms"
+
+    @admin.display(description="System")
+    def system_display(self, obj):
+        sys = ((obj.report_json or {}).get("system") or {}).get("during_summary") or {}
+        cpu = (sys.get("cpu_percent") or {}).get("max")
+        ram = (sys.get("memory_used_percent") or {}).get("max")
+        if cpu is None and ram is None:
+            return "—"
+        return f"CPU max {cpu}% / RAM max {ram}%"
+
+    def report_summary(self, obj):
+        report = obj.report_json or {}
+        if not report:
+            return "No report yet."
+        return format_html(
+            "<pre>{}</pre>",
+            json.dumps(
+                {
+                    "results": report.get("results"),
+                    "latency_ms": report.get("latency_ms"),
+                    "system": (report.get("system") or {}).get("during_summary"),
+                    "sample_errors": report.get("sample_errors"),
+                },
+                indent=2,
+            ),
+        )
+
+    @admin.display(description="HTML report file")
+    def html_report_file(self, obj):
+        if not obj.report_file:
+            return "No report yet."
+        return str(Path(obj.report_file).with_suffix(".html"))
+
+    def report_json_pretty(self, obj):
+        if not obj.report_json:
+            return "No report yet."
+        return format_html("<pre style='max-height:500px;overflow:auto'>{}</pre>", json.dumps(obj.report_json, indent=2))
 
 
 @admin.register(DailyLog)
