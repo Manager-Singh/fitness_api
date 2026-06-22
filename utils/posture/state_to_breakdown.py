@@ -6,6 +6,7 @@ from typing import Any, Dict
 from users.models import PostureState
 from utils.posture.height_constants import (
     POSTURE_SEGMENT_MAX_LOSS_CM,
+    height_scaled_segment_max_loss_cm,
     posture_segment_opt_pct,
 )
 
@@ -29,9 +30,17 @@ def posture_state_to_optimization_breakdown(state: PostureState | None) -> Dict[
     if state is None:
         return _empty_breakdown()
 
+    height_cm = None
+    try:
+        profile = getattr(state.user, "profile", None)
+        height_cm = getattr(profile, "current_height_cm", None) or getattr(profile, "base_height_cm", None)
+    except Exception:
+        height_cm = None
+    segment_max = height_scaled_segment_max_loss_cm(height_cm)
+
     out: Dict[str, Dict[str, Any]] = {}
     for seg, key in _STATE_SEGMENT_TO_BREAKDOWN_KEY.items():
-        max_cm = float(POSTURE_SEGMENT_MAX_LOSS_CM[key])
+        max_cm = float(segment_max.get(key, POSTURE_SEGMENT_MAX_LOSS_CM[key]))
         loss_um = int(getattr(state, _STATE_UM_ATTR[seg], 0) or 0)
         current_loss_cm = round(loss_um / 10000.0, 2)
         current_loss_cm = max(0.0, min(max_cm, current_loss_cm))

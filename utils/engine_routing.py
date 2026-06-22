@@ -39,8 +39,7 @@ def apply_engine_routing(user, log_date, age_exact, points=0, routine_type=None,
         daily.food_points = max(0, int(daily.food_points))
         daily.engine1_points = max(0, int(daily.engine1_points))
     else:
-        # Section-11 teen per-channel caps (write-time recompute):
-        # hgh + food(35) + sleep(10) + sunlight(6) + meditation(2) + hydration(1)
+        # Monday work order teen per-channel caps: HGH has no cap; food/lifestyle do.
         raw_hgh_points = WorkoutEntry.objects.filter(
             session__user=user,
             session__date=log_date,
@@ -67,9 +66,8 @@ def apply_engine_routing(user, log_date, age_exact, points=0, routine_type=None,
         )
 
         # Exact teen per-channel caps from spec.
-        hgh_points = min(raw_hgh_points, 30)
         daily.engine2_points = int(
-            hgh_points
+            raw_hgh_points
             + min(food_points, 35)
             + min(sleep_points, 10)
             + min(sunlight_points, 6)

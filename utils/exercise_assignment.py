@@ -11,6 +11,8 @@ from workouts.exercise_assignment_data import (
     TEEN_ONLY_HGH_NAMES,
     dedupe_name_key,
     normalize_exercise_name,
+    primary_secondary_for_exercise,
+    spec_points_for_exercise,
     spec_key_for_name,
 )
 
@@ -22,6 +24,10 @@ _BREAKDOWN_TO_SEGMENT = {
     "pelvic_tilt_back": "pelvic",
     "leg_hamstring": "legs",
 }
+
+_SEGMENT_TO_BREAKDOWN = {v: k for k, v in _BREAKDOWN_TO_SEGMENT.items()}
+_PILLARS = ("spinal", "collapse", "pelvic", "legs")
+_PILLAR_TIE_ORDER = {"spinal": 4, "collapse": 3, "pelvic": 2, "legs": 1}
 
 
 @dataclass(frozen=True)
@@ -35,7 +41,7 @@ def segment_losses_from_breakdown(
     section3_contract: dict | None = None,
 ) -> SegmentLosses:
     """Recoverable loss cm per segment for assignment formulas."""
-    if section3_contract and section3_contract.get("mode") == "issue9_visual":
+    if section3_contract and section3_contract.get("mode") in ("issue9_visual", "posture_targeting_v1"):
         segs = section3_contract.get("segments") or {}
         if segs:
             return {
@@ -57,12 +63,153 @@ def segment_losses_from_breakdown(
 
 
 def ranked_segments_from_losses(losses: SegmentLosses) -> list[str]:
-    tie = {"spinal": 4, "collapse": 3, "pelvic": 2, "legs": 1}
     return sorted(
         losses.keys(),
-        key=lambda s: (losses.get(s, 0), tie.get(s, 0)),
+        key=lambda s: (losses.get(s, 0), _PILLAR_TIE_ORDER.get(s, 0)),
         reverse=True,
     )
+
+
+def _apportion_slots_by_largest_remainder(weights: dict[str, float], count: int) -> dict[str, int]:
+    count = max(0, int(count or 0))
+    out = {p: 0 for p in _PILLARS}
+    if count <= 0:
+        return out
+    positive = {p: max(0.0, float(weights.get(p, 0) or 0)) for p in _PILLARS}
+    total = sum(positive.values())
+    if total <= 0:
+        ranked = sorted(_PILLARS, key=lambda p: _PILLAR_TIE_ORDER[p], reverse=True)
+        for p in ranked[:count]:
+            out[p] += 1
+        return out
+    raw = {p: count * positive[p] / total for p in _PILLARS}
+    for p in _PILLARS:
+        out[p] = int(raw[p])
+    remaining = count - sum(out.values())
+    order = sorted(
+        _PILLARS,
+        key=lambda p: (raw[p] - int(raw[p]), positive[p], _PILLAR_TIE_ORDER[p]),
+        reverse=True,
+    )
+    for p in order[:remaining]:
+        out[p] += 1
+    return out
+
+
+def _exercise_pillar_credit_um(exercise: Any) -> dict[str, int]:
+    primary, secondary = primary_secondary_for_exercise(exercise)
+    pts_um = spec_points_for_exercise(exercise) * 10
+    if not primary or pts_um <= 0:
+        return {}
+    secondary = secondary or primary
+    return {
+        primary: int(round(pts_um * 0.70)),
+        secondary: int(round(pts_um * 0.30)),
+    }
+
+
+def allocate_variable_slots(
+    losses: SegmentLosses,
+    core_exercises: Sequence[Any],
+    *,
+    count: int = 4,
+    share_pts: float = 6.75,
+) -> dict[str, int]:
+    """Monday work order §8: baseline-aware largest-remainder slot allocation."""
+    remaining_um = {p: int(round(float(losses.get(p, 0) or 0) * 10000)) for p in _PILLARS}
+    core_um = {p: 0 for p in _PILLARS}
+    primary_trained = set()
+    for ex in core_exercises:
+        primary, _secondary = primary_secondary_for_exercise(ex)
+        if primary:
+            primary_trained.add(primary)
+        for p, amount in _exercise_pillar_credit_um(ex).items():
+            core_um[p] += amount
+    baseline_um = {
+        p: core_um[p] + (int(round(share_pts * 10)) if p in primary_trained else 0)
+        for p in _PILLARS
+    }
+    net_gap = {p: max(0, remaining_um[p] - baseline_um[p]) for p in _PILLARS}
+    if sum(net_gap.values()) <= 0:
+        return _apportion_slots_by_largest_remainder(remaining_um, count)
+    return _apportion_slots_by_largest_remainder(net_gap, count)
+
+
+def _pick_for_allocated_pillars(
+    pool: Iterable[Any],
+    slots_by_pillar: dict[str, int],
+    core_exercises: Sequence[Any],
+    *,
+    exclude: Sequence[Any] = (),
+    allow_teen_only: bool = False,
+) -> list[Any]:
+    blocked_ids = {e.id for e in core_exercises} | {e.id for e in exclude}
+    blocked_keys = {
+        dedupe_name_key(getattr(e, "name", "") or "")
+        for e in list(core_exercises) + list(exclude)
+    }
+    selected: list[Any] = []
+
+    def _eligible_for(pillar: str) -> list[Any]:
+        candidates = []
+        for ex in pool:
+            if ex.id in blocked_ids:
+                continue
+            if not allow_teen_only and getattr(ex, "teen_only", False):
+                continue
+            key = dedupe_name_key(getattr(ex, "name", "") or "")
+            if key and key in blocked_keys:
+                continue
+            primary, secondary = primary_secondary_for_exercise(ex)
+            if primary == pillar:
+                candidates.append(ex)
+        candidates.sort(
+            key=lambda ex: (
+                spec_points_for_exercise(ex),
+                getattr(ex, "potency", 0) or 0,
+                normalize_exercise_name(getattr(ex, "name", "") or ""),
+            ),
+            reverse=True,
+        )
+        return candidates
+
+    allocation_order: list[str] = []
+    for pillar, n in sorted(
+        slots_by_pillar.items(),
+        key=lambda item: (item[1], _PILLAR_TIE_ORDER.get(item[0], 0)),
+        reverse=True,
+    ):
+        allocation_order.extend([pillar] * int(n))
+
+    for pillar in allocation_order:
+        picked = None
+        for ex in _eligible_for(pillar):
+            picked = ex
+            break
+        if picked is None:
+            # Fallback: secondary match, then any unused posture exercise.
+            fallback = []
+            for ex in pool:
+                if ex.id in blocked_ids:
+                    continue
+                if not allow_teen_only and getattr(ex, "teen_only", False):
+                    continue
+                key = dedupe_name_key(getattr(ex, "name", "") or "")
+                if key and key in blocked_keys:
+                    continue
+                primary, secondary = primary_secondary_for_exercise(ex)
+                if secondary == pillar or primary:
+                    fallback.append(ex)
+            fallback.sort(key=lambda ex: spec_points_for_exercise(ex), reverse=True)
+            picked = fallback[0] if fallback else None
+        if picked is None:
+            continue
+        selected.append(picked)
+        blocked_ids.add(picked.id)
+        key = dedupe_name_key(getattr(picked, "name", "") or "")
+        if key:
+            blocked_keys.add(key)
+    return selected
 
 
 def get_age_multipliers(age: int) -> tuple[float, float]:
@@ -257,27 +404,16 @@ def select_adult_recommended_beast(
     reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
     """Returns (recommended[2], beast[2]) from Exercise queryset/list."""
-    reserved_ids = {e.id for e in reserved_beast}
-    remaining = _exclude_core(pool, core_exercises)
-    remaining = [
-        ex for ex in remaining if not ex.teen_only and ex.id not in reserved_ids
-    ]
-
-    recommended = pick_top_scored(
-        remaining,
-        lambda ex: score_adult_exercise(ex, losses, is_beast=False),
-        2,
-    )
-    beast = _select_beast_exercises(
+    slots = allocate_variable_slots(losses, core_exercises, count=4, share_pts=6.75)
+    extra = _pick_for_allocated_pillars(
         pool,
-        losses,
-        lambda ex: score_adult_exercise(ex, losses, is_beast=True),
-        2,
-        core_exercises=core_exercises,
-        exclude=recommended,
-        reserved_beast=reserved_beast,
+        slots,
+        core_exercises,
+        exclude=reserved_beast,
         allow_teen_only=False,
     )
+    recommended = extra[:2]
+    beast = extra[2:4]
     _assert_no_teen_only(recommended + beast, "adult")
     return recommended, beast
 
@@ -290,26 +426,16 @@ def select_teen_recommended_beast(
     *,
     reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
-    hgh_mult, posture_mult = get_age_multipliers(age)
-    reserved_ids = {e.id for e in reserved_beast}
-    remaining = _exclude_core(pool, core_exercises)
-    remaining = [ex for ex in remaining if ex.id not in reserved_ids]
-
-    recommended = pick_top_scored(
-        remaining,
-        lambda ex: score_teen_recommended(ex, losses, hgh_mult, posture_mult),
-        2,
-    )
-    beast = _select_beast_exercises(
+    slots = allocate_variable_slots(losses, core_exercises, count=4, share_pts=3.0)
+    extra = _pick_for_allocated_pillars(
         pool,
-        losses,
-        lambda ex: score_teen_beast(ex, losses, hgh_mult, posture_mult),
-        2,
+        slots,
         core_exercises=core_exercises,
-        exclude=recommended,
-        reserved_beast=reserved_beast,
-        allow_teen_only=True,
+        exclude=reserved_beast,
+        allow_teen_only=False,
     )
+    recommended = extra[:2]
+    beast = extra[2:4]
     return recommended, beast
 
 

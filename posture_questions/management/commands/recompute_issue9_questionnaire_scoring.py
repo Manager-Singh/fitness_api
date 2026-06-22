@@ -1,10 +1,8 @@
-"""Recompute stored questionnaire assessments under the recalibrated Issue9 scoring.
+"""Recompute stored questionnaire assessments under the posture targeting scoring.
 
-POSTURE_LOSS_SCORING_FIX.md changed the questionnaire math for everyone (Q8 now
-ADDS loss, no multiplier; bars reconcile to the headline). Users who completed the
-questionnaire *before* this change still have a PostureState/PostureAssessment that
-was computed with the old formula. This command re-runs the current scoring on their
-already-stored answers and re-saves the assessment so their bars/headline match.
+The Monday work order changed the questionnaire math to A-F answer fractions,
+height-scaled pillar caps, and targeted posture deficiencies. This command re-runs
+the current scoring on already-stored answers and re-saves the assessment.
 
 It reuses the exact same extraction + scoring + persistence path as the live
 submit view, so there is no logic drift.
@@ -25,7 +23,7 @@ from utils.posture.section3_manual_scoring import _pick_single_with_options
 
 
 def _extract_issue9_letters(posture_q):
-    """Same field/option mapping the submit view uses to build A-D answers."""
+    """Same field/option mapping the submit view uses to build A-F answers."""
     return {
         "q1": _pick_single_with_options(posture_q.forward_head_posture_answer, posture_q.forward_head_posture_options),
         "q2": _pick_single_with_options(posture_q.gap_between_your_lower_back_answer, posture_q.gap_between_your_lower_back_options),
@@ -65,7 +63,7 @@ def _breakdown_from_segments(segs):
 
 
 class Command(BaseCommand):
-    help = "Recompute stored questionnaire assessments under the recalibrated Issue9 scoring."
+    help = "Recompute stored questionnaire assessments under posture targeting scoring."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -112,11 +110,13 @@ class Command(BaseCommand):
         for posture_q in pq_qs.iterator():
             processed += 1
             letters = _extract_issue9_letters(posture_q)
-            if not all(v in ("A", "B", "C", "D") for v in letters.values()):
+            if not all(v in ("A", "B", "C", "D", "E", "F") for v in letters.values()):
                 skipped_non_issue9 += 1
                 continue
 
-            result = compute_issue9_visual_results(letters)
+            profile = getattr(posture_q.user, "profile", None)
+            height_cm = getattr(profile, "current_height_cm", None) or getattr(profile, "base_height_cm", None)
+            result = compute_issue9_visual_results(letters, height_cm=height_cm, clamp_min_cm=1.0)
             new_total = float(result["total_recoverable_loss_cm"])
 
             state = PostureState.objects.filter(user_id=posture_q.user_id).first()
@@ -137,9 +137,10 @@ class Command(BaseCommand):
                 posture_q.user,
                 breakdown,
                 raw_data={
-                    "mode": "issue9_visual",
+                    "mode": "posture_targeting_v1",
                     "answers": letters,
                     "recomputed_by": "recompute_issue9_questionnaire_scoring",
+                    "scoring_meta": result.get("meta", {}),
                 },
             )
             updated += 1

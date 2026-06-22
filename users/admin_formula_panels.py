@@ -189,7 +189,7 @@ def daily_points_formula_html(user, log_date=None) -> str:
             e1_i,
         )
         e2_formula = format_html(
-            "<code>E2 = min(HGH,30) + min(food,35) + min(sleep,10) + min(sun,6) "
+            "<code>E2 = HGH + min(food,35) + min(sleep,10) + min(sun,6) "
             "+ min(meditation,2) + min(hydration,1)</code><br>"
             "Lifestyle bucket today: <strong>{} pts</strong> (sleep/sun/med/hyd) · "
             "Food: <strong>{}</strong> → <strong>{} pts E2</strong>",

@@ -31,9 +31,12 @@ from utils.exercise_prescriptions import prescription_for_exercise_name
 from workouts.exercise_assignment_data import (
     ADULT_CORE_6_BY_MIN_AGE,
     BEAST_MODE_CANONICAL_KEYS,
+    TEEN_CORE_BASE_NAMES,
     TEEN_CORE_6_NAMES,
     dedupe_name_key,
     normalize_exercise_name,
+    primary_secondary_for_exercise,
+    spec_points_for_exercise,
     spec_key_for_name,
 )
 
@@ -340,6 +343,49 @@ def _adult_core_names_for_age(age: int) -> list[str]:
     return list(ADULT_CORE_6_BY_MIN_AGE.get(bracket, ADULT_CORE_6_BY_MIN_AGE[21]))
 
 
+def _teen_core_for_losses(variant, losses, pool) -> list:
+    """Core 6: 1 HGH + one of each posture pillar + 1 worst-pillar extra."""
+    core = []
+    seen_ids: set[int] = set()
+    _append_core_slots_by_names(
+        variant,
+        core,
+        TEEN_CORE_BASE_NAMES,
+        seen_ids,
+        allowed_categories=HGH_ALLOWED_CATEGORIES | POSTURE_ALLOWED_CATEGORIES,
+    )
+    seen_names = {dedupe_name_key(getattr(ve.exercise, "name", "") or "") for ve in core}
+    ranked = ranked_segments_from_losses(losses)
+    worst = ranked[0] if ranked else "spinal"
+    candidates = []
+    for ex in pool:
+        if ex.id in seen_ids:
+            continue
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if key and key in seen_names:
+            continue
+        if getattr(ex, "teen_only", False):
+            continue
+        primary, _secondary = primary_secondary_for_exercise(ex)
+        if primary == worst:
+            candidates.append(ex)
+    candidates.sort(
+        key=lambda ex: (
+            spec_points_for_exercise(ex),
+            getattr(ex, "potency", 0) or 0,
+            normalize_exercise_name(getattr(ex, "name", "") or ""),
+        ),
+        reverse=True,
+    )
+    if candidates and len(core) < 6:
+        ex = candidates[0]
+        ve = _find_variant_exercise(variant, ex, tier=Tier.CORE) or _synthetic_for_pick(
+            variant, ex, Tier.CORE, len(core) + 1
+        )
+        core.append(ve)
+    return core[:6]
+
+
 def _append_core_slots_by_names(variant, core, names, seen_ids, *, allowed_categories):
     """Fill core list toward 6 using spec core names (DB + synthetic fallback)."""
     cats = allowed_categories or POSTURE_ALLOWED_CATEGORIES
@@ -545,14 +591,14 @@ def build_posture_routine_slots(
     from utils.exercise_assignment import beast_whitelist_exercises_from_db
 
     if is_teen:
-        core = _core_from_variant(variant, teen=True)
-        core, reserved_beast = _trim_core_whitelist_for_beast(core, variant, age=age)
         pool = list(teen_scoring_pool_queryset(Exercise))
         pool_ids = {ex.id for ex in pool}
         for ex in beast_whitelist_exercises_from_db(Exercise):
             if ex.id not in pool_ids:
                 pool.append(ex)
                 pool_ids.add(ex.id)
+        core = _teen_core_for_losses(variant, losses, pool)
+        core, reserved_beast = _trim_core_whitelist_for_beast(core, variant, age=age)
         recommended, beast = select_teen_recommended_beast(
             pool, losses, age, [ve.exercise for ve in core], reserved_beast=reserved_beast
         )

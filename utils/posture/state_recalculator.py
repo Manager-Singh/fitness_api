@@ -43,6 +43,39 @@ def _cumulative_engine1_recovery_um(user) -> int:
     return max(0, int(total or 0))
 
 
+def _cumulative_engine1_recovery_by_segment_um(user, baseline_um: dict) -> dict:
+    """Sum targeted per-segment Engine-1 ledger credits; fallback old rows by ratio."""
+    out = {attr: 0 for attr in baseline_um}
+    fallback_total = 0
+    rows = HeightLedger.objects.filter(
+        user=user, entry_type__in=("daily_compute", "apply_pending")
+    ).only("metadata", "engine1_delta_um")
+    for row in rows:
+        md = row.metadata or {}
+        shares = md.get("engine1_segment_shares_um")
+        if not shares and isinstance(md.get("targeted_engine1"), dict):
+            shares = (md.get("targeted_engine1") or {}).get("engine1_segment_shares_um")
+        if isinstance(shares, dict) and any(int(v or 0) > 0 for v in shares.values()):
+            for seg, attr in {
+                "spinal": "spinal_current_loss_um",
+                "collapse": "collapse_current_loss_um",
+                "pelvic": "pelvic_current_loss_um",
+                "legs": "legs_current_loss_um",
+            }.items():
+                try:
+                    out[attr] += max(0, int(shares.get(seg, 0) or 0))
+                except Exception:
+                    continue
+        else:
+            fallback_total += max(0, int(getattr(row, "engine1_delta_um", 0) or 0))
+
+    if fallback_total > 0:
+        fallback = _distribute_recovery_over_baseline(baseline_um, fallback_total)
+        for attr, amount in fallback.items():
+            out[attr] += int(amount or 0)
+    return {attr: min(max(0, int(baseline_um.get(attr, 0) or 0)), amount) for attr, amount in out.items()}
+
+
 def _distribute_recovery_over_baseline(baseline_um: dict, recovered_um: int) -> dict:
     """
     Split cumulative Engine-1 recovery across segments by the fixed §4.3 ratios
@@ -111,10 +144,7 @@ def _apply_baseline_minus_recovery(user, state, baseline_um: dict, *, set_total:
     """
     if set_total:
         state.total_recoverable_loss_um = sum(baseline_um.values())
-    recovered_um = _cumulative_engine1_recovery_um(user)
-    recovery_shares = (
-        _distribute_recovery_over_baseline(baseline_um, recovered_um) if recovered_um > 0 else {}
-    )
+    recovery_shares = _cumulative_engine1_recovery_by_segment_um(user, baseline_um)
     for attr, base in baseline_um.items():
         setattr(state, attr, max(0, base - recovery_shares.get(attr, 0)))
 

@@ -161,16 +161,6 @@ class WorkoutLogViewSet(viewsets.ViewSet):
                 },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-        if age < 21 and routine_type == "hgh" and exercise:
-            teen_hgh_exercise_count = session.entries.filter(exercise=exercise).count()
-            if teen_hgh_exercise_count >= 2:
-                return Response(
-                    {
-                        "error": "hgh_daily_exercise_cap_reached",
-                        "message": "Max 2 completions per HGH exercise per day.",
-                    },
-                    status=status.HTTP_429_TOO_MANY_REQUESTS,
-                )
         entry_payload = dict(ser.validated_data)
         entry_payload.pop("client_timestamp", None)
         # Ensure the logged entry is linked to the assigned routine exercise.

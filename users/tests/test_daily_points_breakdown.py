@@ -36,6 +36,6 @@ class DailyPointsBreakdownTests(TestCase):
             self.assertIn(src, bd["raw_sources"])
         # Teen Engine-2 caps are documented for the audit.
         self.assertEqual(bd["engine2"]["caps"]["food"], 35)
-        self.assertEqual(bd["engine2"]["caps"]["hgh"], 30)
+        self.assertIsNone(bd["engine2"]["caps"]["hgh"])
         self.assertEqual(bd["engine1"]["cm_per_point"], 0.001)
         self.assertEqual(bd["engine2"]["cm_per_point"], 0.00005)

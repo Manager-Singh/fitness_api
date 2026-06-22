@@ -251,6 +251,15 @@ SEGMENT_FIELD_RATIO = {
     "legs_current_loss_um": POSTURE_SEGMENT_DISTRIBUTION_RATIO["leg_hamstring"],
 }
 
+PILLAR_TO_STATE_FIELD = {
+    "spinal": "spinal_current_loss_um",
+    "collapse": "collapse_current_loss_um",
+    "pelvic": "pelvic_current_loss_um",
+    "legs": "legs_current_loss_um",
+}
+
+STATE_FIELD_TO_PILLAR = {v: k for k, v in PILLAR_TO_STATE_FIELD.items()}
+
 
 def compute_engine1_gain_shares(state, engine1_gain_um) -> dict[str, int]:
     """
@@ -315,6 +324,100 @@ def _redistribute_engine1_gain_across_segments(state, engine1_gain_um):
         ]
     )
     return shares
+
+
+def _cap_segment_shares_to_state(state, shares_by_pillar: dict[str, int]) -> dict[str, int]:
+    capped = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+    if not state:
+        return capped
+    for pillar, field in PILLAR_TO_STATE_FIELD.items():
+        raw = max(0, int(shares_by_pillar.get(pillar, 0) or 0))
+        remaining = max(0, int(getattr(state, field, 0) or 0))
+        capped[pillar] = min(raw, remaining)
+    return capped
+
+
+def _limit_segment_shares_to_total(shares_by_pillar: dict[str, int], max_total_um: int) -> dict[str, int]:
+    max_total_um = max(0, int(max_total_um or 0))
+    shares = {p: max(0, int(shares_by_pillar.get(p, 0) or 0)) for p in PILLAR_TO_STATE_FIELD}
+    total = sum(shares.values())
+    if max_total_um <= 0:
+        return {p: 0 for p in shares}
+    if total <= max_total_um:
+        return shares
+    apportioned = apportion_by_ratio(
+        {p: amount for p, amount in shares.items() if amount > 0},
+        max_total_um,
+        shares,
+    )
+    return {p: int(apportioned.get(p, 0) or 0) for p in shares}
+
+
+def compute_targeted_engine1_recovery(user, log_date, age, state, adult_nutrition_points, habit_points) -> dict:
+    """
+    Monday work order targeted Engine-1 crediting:
+    posture exercise points credit primary/secondary 70/30; nutrition/habit shares
+    are collected only by pillars primary-trained by at least one completed posture exercise.
+    """
+    from workouts.exercise_assignment_data import primary_secondary_for_exercise
+    from workouts.models import ExerciseCategory
+
+    shares = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+    exercise_shares = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+    bonus_shares = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+    trained_today: set[str] = set()
+    workouts_done = False
+
+    workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
+        "exercise",
+        "session__user_routine",
+    )
+    for entry in workout_qs:
+        workouts_done = True
+        ex = getattr(entry, "exercise", None)
+        if not ex:
+            continue
+        routine = getattr(getattr(entry, "session", None), "user_routine", None)
+        routine_type = str(getattr(routine, "routine_type", "") or "").lower()
+        category = str(getattr(ex, "category", "") or "").lower()
+        if routine_type == "hgh" or category == ExerciseCategory.HGH or getattr(ex, "teen_only", False):
+            continue
+        primary, secondary = primary_secondary_for_exercise(ex)
+        if not primary:
+            continue
+        trained_today.add(primary)
+        secondary = secondary or primary
+        pts = max(0.0, float(getattr(entry, "points", 0) or 0))
+        recovery_um = int(round(pts * 10.0))
+        primary_um = int(round(recovery_um * 0.70))
+        secondary_um = max(0, recovery_um - primary_um)
+        exercise_shares[primary] += primary_um
+        exercise_shares[secondary] += secondary_um
+
+    for pillar, amount in exercise_shares.items():
+        shares[pillar] += amount
+
+    if workouts_done:
+        is_adult = is_adult_age(age_years=age, user=user)
+        eligible_pts = float(adult_nutrition_points or 0) + float(habit_points or 0) if is_adult else float(habit_points or 0)
+        share_um = int(round(max(0.0, eligible_pts) * 10.0 / 4.0))
+        for pillar in trained_today:
+            bonus_shares[pillar] += share_um
+            shares[pillar] += share_um
+
+    capped = _cap_segment_shares_to_state(state, shares)
+    return {
+        "engine1_segment_shares_um": capped,
+        "engine1_segment_raw_shares_um": shares,
+        "exercise_segment_shares_um": exercise_shares,
+        "strict_share_segment_shares_um": bonus_shares,
+        "trained_primary_pillars": sorted(trained_today),
+        "workouts_done_today": bool(workouts_done),
+        "forfeited_share_pillars": [
+            p for p in PILLAR_TO_STATE_FIELD if workouts_done and p not in trained_today
+        ],
+        "engine1_delta_um": sum(capped.values()),
+    }
 
 
 def _reset_adult_posture_segments_from_latest_scan(user):
@@ -511,25 +614,23 @@ def _daily_raw_source_points(user, log_date):
     per source. Used by both the engine-point compute and the audit breakdown so the two
     can never drift. Returns a dict of floats:
         posture, hgh, food, sleep, sun, meditation, hydration
-    The Section 11.3 per-exercise teen HGH spam guard (>2 logs of one exercise ignored)
-    is applied here so it is reflected consistently everywhere.
+    Monday work order: HGH routes to Engine 2 and has no per-category cap.
     """
     workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
         "session__user_routine"
     )
     posture_pts = 0.0
     hgh_pts = 0.0
-    hgh_exercise_counts = {}
+    from workouts.models import ExerciseCategory
+
     for w in workout_qs:
         session = getattr(w, "session", None)
         user_routine = getattr(session, "user_routine", None)
         rt = str(getattr(user_routine, "routine_type", "") or "").lower()
+        ex = getattr(w, "exercise", None)
+        category = str(getattr(ex, "category", "") or "").lower()
         pts = float(w.points or 0)
-        if rt == "hgh":
-            ex_id = int(getattr(w, "exercise_id", 0) or 0)
-            hgh_exercise_counts[ex_id] = hgh_exercise_counts.get(ex_id, 0) + 1
-            if hgh_exercise_counts[ex_id] > 2:
-                continue
+        if rt == "hgh" or category == ExerciseCategory.HGH or bool(getattr(ex, "teen_only", False)):
             hgh_pts += pts
         else:
             posture_pts += pts
@@ -626,7 +727,7 @@ def _daily_engine_points(user, log_date, age, subscription_data):
         return engine1, engine2, exercise_points, food_points, lifestyle_points, int(habit_pts)
 
     engine2 = (
-        min(hgh_pts, 30.0)
+        hgh_pts
         + min(food_pts, 35.0)
         + min(sleep_pts, 10.0)
         + min(sun_pts, 6.0)
@@ -706,7 +807,7 @@ def daily_points_source_breakdown(user, log_date, age, subscription_data) -> dic
             "cm_per_point": POINTS_TO_CM_ENGINE2,
             "cm": engine2_cm,
             "caps": (
-                {} if is_adult else {"hgh": 30, "food": 35, "sleep": 10, "sun": 6, "meditation": 2, "hydration": 1}
+                {} if is_adult else {"hgh": None, "food": 35, "sleep": 10, "sun": 6, "meditation": 2, "hydration": 1}
             ),
         },
         "daily_points_total": daily_points_total,
@@ -799,8 +900,19 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     # Strict spec validation for streak/leaderboard correctness.
     set_daily_validated(user, log_date)
 
-    # Section 11 formulas and routing.
-    engine1_delta_um = _to_um(e1 * POINTS_TO_CM_ENGINE1)
+    # Section 11 formulas and routing. Displayed Engine-1 points remain full; actual
+    # posture recovery is targeted to trained pillars by the Monday work order.
+    is_adult_for_day = is_adult_age(age_years=age, user=user)
+    targeted_engine1 = compute_targeted_engine1_recovery(
+        user=user,
+        log_date=log_date,
+        age=age,
+        state=state,
+        adult_nutrition_points=food_points if is_adult_for_day else 0,
+        habit_points=habit_points,
+    )
+    engine1_segment_shares_um = dict(targeted_engine1.get("engine1_segment_shares_um") or {})
+    engine1_delta_um = int(targeted_engine1.get("engine1_delta_um") or 0)
     # Engine2 must preserve 0.5 μm increments: store as dμm, derive μm only for legacy totals.
     engine2_delta_dm = _to_dm_from_engine2_points(e2)
     engine2_delta_um = _um_from_dm(engine2_delta_dm)
@@ -825,9 +937,12 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
                 )
         teen_engine1_cap_um = _to_um(OPTIMIZATION_GAP_CM)
         remaining_um = max(0, teen_engine1_cap_um - prior_engine1_um)
-        engine1_delta_um = min(max(0, engine1_delta_um), remaining_um)
+        engine1_segment_shares_um = _limit_segment_shares_to_total(engine1_segment_shares_um, remaining_um)
+        engine1_delta_um = sum(engine1_segment_shares_um.values())
+        targeted_engine1["engine1_segment_shares_um"] = engine1_segment_shares_um
+        targeted_engine1["engine1_delta_um"] = engine1_delta_um
 
-    if age >= 21 and state.total_recoverable_loss_um > 0:
+    if is_adult_for_day and state.total_recoverable_loss_um > 0:
         # Section 12.1 carry-over rule:
         # adult remaining deficit must be based on historical posture gain only.
         prior_total_um = 0
@@ -844,11 +959,11 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
                     extra={"row_id": getattr(row, "id", None)},
                 )
         remaining_um = max(0, int(state.total_recoverable_loss_um) - prior_total_um)
-        total_today_um = max(0, engine1_delta_um + engine2_delta_um)
-        total_today_um = min(total_today_um, remaining_um)
-        # Preserve engine1 priority for adult posture recovery.
-        engine1_delta_um = min(engine1_delta_um, total_today_um)
-        engine2_delta_um = max(0, total_today_um - engine1_delta_um)
+        engine1_segment_shares_um = _limit_segment_shares_to_total(engine1_segment_shares_um, remaining_um)
+        engine1_delta_um = sum(engine1_segment_shares_um.values())
+        targeted_engine1["engine1_segment_shares_um"] = engine1_segment_shares_um
+        targeted_engine1["engine1_delta_um"] = engine1_delta_um
+        engine2_delta_um = 0
         engine2_delta_dm = int(engine2_delta_um) * 10
 
     # Final daily delta (teens include biological auto gain).
@@ -860,6 +975,9 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             delta_cm = 0.0
             delta_um = 0
             engine1_delta_um = 0
+            engine1_segment_shares_um = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+            targeted_engine1["engine1_segment_shares_um"] = engine1_segment_shares_um
+            targeted_engine1["engine1_delta_um"] = 0
             engine2_delta_um = 0
             engine2_delta_dm = 0
             bio_delta_um = 0
@@ -870,6 +988,9 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         if 13 <= age <= 20 and (not state.scan_completed) and (not state.questionnaire_completed):
             pending_engine1_um = max(0, int(engine1_delta_um))
             engine1_delta_um = 0
+            engine1_segment_shares_um = {p: 0 for p in PILLAR_TO_STATE_FIELD}
+            targeted_engine1["engine1_segment_shares_um"] = engine1_segment_shares_um
+            targeted_engine1["engine1_delta_um"] = 0
             engine2_delta_um = 0
             engine2_delta_dm = 0
             delta_um = max(0, int(bio_delta_um))
@@ -889,17 +1010,6 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         + max(0, int(bio_delta_um))
         + int(round(max(0, int(engine2_delta_dm)) / 10.0))
     )
-
-    engine1_segment_shares_um = {}
-    if (
-        state
-        and int(engine1_delta_um or 0) > 0
-        and (age >= 21 or _posture_unlocked_for_segment_redistribution(state))
-    ):
-        # Informational only: today's per-segment split of the Engine-1 gain. The
-        # authoritative segment Current_Loss is set deterministically AFTER the ledger
-        # row is written (see resync below), so repeated recomputes can't drift the bars.
-        engine1_segment_shares_um = compute_engine1_gain_shares(state, engine1_delta_um)
 
     HeightLedger.objects.create(
         user=user,
@@ -921,6 +1031,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             "bio_delta_um": int(bio_delta_um),
             "scan_completed": bool(state and state.scan_completed),
             "engine1_segment_shares_um": engine1_segment_shares_um,
+            "targeted_engine1": targeted_engine1,
             # Bug 14 — per-source audit so any day's points total can be reconciled.
             "daily_points_breakdown": _safe_daily_points_breakdown(user, log_date, age, subscription_data),
         },
@@ -1052,6 +1163,14 @@ def apply_pending_pre_scan_engine1(user, when=None):
 
     state, _ = PostureState.objects.get_or_create(user=user)
     if _posture_unlocked_for_segment_redistribution(state):
-        _redistribute_engine1_gain_across_segments(state, total_pending_um)
+        try:
+            from utils.posture.state_recalculator import resync_segment_losses_from_baseline
+
+            resync_segment_losses_from_baseline(user)
+        except Exception:
+            logger.exception(
+                "apply_pending_pre_scan_engine1: segment resync failed",
+                extra={"user_id": getattr(user, "id", None)},
+            )
 
     return {"applied_um": total_pending_um, "rows": len(pending_ids)}

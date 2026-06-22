@@ -193,66 +193,166 @@ EXERCISE_NAME_ALIASES = {
     "cat-cow": "cat-cow stretch",
     "doorways chest stretch": "doorway chest stretch",
     "mountain climber": "mountain climbers",
+    "hanging from bar": "decompression hang",
+    "hanging": "decompression hang",
+    "knees-to-chest rock": "knees-to-chest rock",
+    "knees to chest rock": "knees-to-chest rock",
+    "standing posture reset": "standing posture reset",
+    "hamstring hinge": "hamstring hinge",
+    "bird dog": "bird dog",
+    "dead bug": "dead bug",
+    "side plank": "side plank",
+    "pigeon pose": "pigeon pose",
+    "wall calf stretch": "wall calf stretch",
+    "ankle mobility": "ankle mobility",
 }
 
-# Section 10.2 — only these four may appear as Beast Mode posture picks.
-BEAST_MODE_CANONICAL_KEYS = frozenset({
-    "decompression hang",
-    "wall angels",
-    "glute bridges",
-    "hip flexor stretch",
+# Monday work order: Recommended/Beast are display labels only, not whitelists.
+BEAST_MODE_CANONICAL_KEYS = frozenset()
+
+EXERCISE_ASSIGNMENT_SPEC.update({
+    "standing posture reset": {
+        "name": "Standing Posture Reset",
+        "age_group": "both",
+        "spinal_pct": 30, "collapse_pct": 70, "pelvic_pct": 0, "legs_pct": 0,
+        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 7,
+    },
+    "knees-to-chest rock": {
+        "name": "Knees-to-Chest Rock",
+        "age_group": "both",
+        "spinal_pct": 70, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 0,
+        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 7,
+    },
+    "hamstring hinge": {
+        "name": "Hamstring Hinge",
+        "age_group": "both",
+        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
+        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "bird dog": {
+        "name": "Bird Dog",
+        "age_group": "both",
+        "spinal_pct": 30, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 0,
+        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "dead bug": {
+        "name": "Dead Bug",
+        "age_group": "both",
+        "spinal_pct": 30, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 0,
+        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "side plank": {
+        "name": "Side Plank",
+        "age_group": "both",
+        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 30,
+        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 5,
+    },
+    "pigeon pose": {
+        "name": "Pigeon Pose",
+        "age_group": "both",
+        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 30,
+        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 5,
+    },
+    "wall calf stretch": {
+        "name": "Wall Calf Stretch",
+        "age_group": "both",
+        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
+        "potency": 4, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 4,
+    },
+    "ankle mobility": {
+        "name": "Ankle Mobility",
+        "age_group": "both",
+        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
+        "potency": 4, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 4,
+    },
 })
 
-TEEN_CORE_6_NAMES = [
-    "Decompression Hang",
-    "Cobra Stretch",
-    "Hip Flexor Stretch",
-    "Wall Angels",
+SPEC_PRIMARY_SECONDARY = {
+    "decompression hang": ("spinal", "collapse"),
+    "wall angels": ("collapse", "spinal"),
+    "glute bridges": ("pelvic", "legs"),
+    "hip flexor stretch": ("pelvic", "legs"),
+    "cobra stretch": ("spinal", "pelvic"),
+    "knees-to-chest rock": ("spinal", "pelvic"),
+    "standing posture reset": ("collapse", "spinal"),
+    "cat-cow stretch": ("spinal", "pelvic"),
+    "hamstring stretch": ("legs", "pelvic"),
+    "hamstring hinge": ("legs", "pelvic"),
+    "tadasana (mountain pose)": ("collapse", "spinal"),
+    "doorway chest stretch": ("collapse", "spinal"),
+    "child's pose with arm walks": ("spinal", "collapse"),
+    "spinal twist stretch": ("spinal", "pelvic"),
+    "pelvic tilts": ("pelvic", "spinal"),
+    "bird dog": ("pelvic", "spinal"),
+    "dead bug": ("pelvic", "spinal"),
+    "chin tucks": ("collapse", "spinal"),
+    "butterfly stretch": ("legs", "pelvic"),
+    "side plank": ("pelvic", "legs"),
+    "pigeon pose": ("pelvic", "legs"),
+    "wall calf stretch": ("legs", "pelvic"),
+    "ankle mobility": ("legs", "pelvic"),
+}
+
+TEEN_CORE_BASE_NAMES = [
     "Jump Rope",
-    "Bodyweight Squats",
+    "Decompression Hang",
+    "Wall Angels",
+    "Glute Bridges",
+    "Hamstring Stretch",
 ]
+
+TEEN_CORE_6_NAMES = TEEN_CORE_BASE_NAMES
 
 # Master spec §4.4 — Core 6 exercise names by age bracket min_age (adults 21+).
 ADULT_CORE_6_BY_MIN_AGE = {
     21: [
         "Decompression Hang",
         "Cobra Stretch",
-        "Glute Bridges",
-        "Hip Flexor Stretch",
         "Wall Angels",
-        "Chin Tucks",
+        "Tadasana (Mountain Pose)",
+        "Glute Bridges",
+        "Hamstring Stretch",
     ],
     30: [
         "Decompression Hang",
         "Cobra Stretch",
-        "Glute Bridges",
-        "Hip Flexor Stretch",
-        "Pelvic Tilts",
         "Wall Angels",
+        "Chin Tucks",
+        "Glute Bridges",
+        "Hamstring Stretch",
     ],
     40: [
         "Decompression Hang",
         "Cobra Stretch",
-        "Glute Bridges",
-        "Hip Flexor Stretch",
-        "Pelvic Tilts",
         "Wall Angels",
+        "Chin Tucks",
+        "Glute Bridges",
+        "Hamstring Stretch",
     ],
     50: [
         "Decompression Hang",
         "Cobra Stretch",
-        "Glute Bridges",
-        "Hip Flexor Stretch",
-        "Cat-Cow Stretch",
         "Wall Angels",
+        "Cat-Cow Stretch",
+        "Hip Flexor Stretch",
+        "Wall Calf Stretch",
     ],
     60: [
         "Decompression Hang",
         "Cobra Stretch",
-        "Glute Bridges",
-        "Hip Flexor Stretch",
-        "Cat-Cow Stretch",
         "Wall Angels",
+        "Cat-Cow Stretch",
+        "Hip Flexor Stretch",
+        "Ankle Mobility",
     ],
 }
 
@@ -298,6 +398,23 @@ def is_teen_only_exercise(exercise) -> bool:
         return True
     key = spec_key_for_name(getattr(exercise, "name", "") or "")
     return bool(key and key in TEEN_ONLY_HGH_NAMES)
+
+
+def primary_secondary_for_exercise(exercise_or_name) -> tuple[str | None, str | None]:
+    """Return Monday spec primary/secondary posture pillars for an exercise."""
+    name = exercise_or_name if isinstance(exercise_or_name, str) else getattr(exercise_or_name, "name", "")
+    key = spec_key_for_name(name)
+    if key and key in SPEC_PRIMARY_SECONDARY:
+        return SPEC_PRIMARY_SECONDARY[key]
+    return None, None
+
+
+def spec_points_for_exercise(exercise) -> int:
+    """Spec point value, falling back to the DB value for unknown exercises."""
+    key = spec_key_for_name(getattr(exercise, "name", "") or "")
+    if key and key in EXERCISE_ASSIGNMENT_SPEC:
+        return int(EXERCISE_ASSIGNMENT_SPEC[key].get("points") or getattr(exercise, "points", 0) or 0)
+    return int(getattr(exercise, "points", 0) or 0)
 
 
 def apply_spec_to_exercise_dict(spec: dict) -> dict:

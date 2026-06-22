@@ -117,7 +117,13 @@ def upsert_posture_questions(request):
     # Convert and extract safely
     try:
         age_exact = float(get_user_age_exact(user) or 0.0)
-        current_age = int(age_exact) if age_exact > 0 else int(_profile_float(profile_dict.get("age"), default=0))
+        if age_exact <= 0 and profile_dict.get("age") not in (None, ""):
+            try:
+                current_age = int(float(profile_dict.get("age")))
+            except (TypeError, ValueError):
+                raise ValueError("Invalid age")
+        else:
+            current_age = int(age_exact) if age_exact > 0 else int(_profile_float(profile_dict.get("age"), default=0))
         gender = profile_dict.get("gender")
         base_height = _profile_float(
             profile_dict.get("base_height_cm") or profile_dict.get("current_height_cm"),
@@ -135,6 +141,11 @@ def upsert_posture_questions(request):
         if is_teen:
             father_height = _profile_float(profile_dict.get("father_height_cm"), default=None)
             mother_height = _profile_float(profile_dict.get("mother_height_cm"), default=None)
+            if father_height is None or mother_height is None:
+                return Response(
+                    {"error": "Teen questionnaire requires both parent heights."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         else:
             father_height = None
             mother_height = None
@@ -222,8 +233,7 @@ def upsert_posture_questions(request):
                     except Exception:
                         logger.exception("Failed saving teen trial_start/trial_end on questionnaire unlock")
 
-            # Try Issue9 scoring using the SAME stored answers/options.
-            # If answers/options don't map cleanly to A-D, fall back to legacy manual scoring.
+            # New posture targeting spec: 8 required answers map A-F to per-pillar loss.
             issue9_letters = {
                 "q1": _pick_single_with_options(posture_q.forward_head_posture_answer, posture_q.forward_head_posture_options),
                 "q2": _pick_single_with_options(posture_q.gap_between_your_lower_back_answer, posture_q.gap_between_your_lower_back_options),
@@ -234,10 +244,14 @@ def upsert_posture_questions(request):
                 "q7": _pick_single_with_options(posture_q.flexible_in_your_hamstrings_and_hips_answer, posture_q.flexible_in_your_hamstrings_and_hips_options),
                 "q8": _pick_single_with_options(posture_q.active_your_core_during_daily_task_answer, posture_q.active_your_core_during_daily_task_options),
             }
-            use_issue9 = all(v in ("A", "B", "C", "D") for v in issue9_letters.values())
+            use_issue9 = all(v in ("A", "B", "C", "D", "E", "F") for v in issue9_letters.values())
 
             if use_issue9:
-                issue9_result = compute_issue9_visual_results(issue9_letters)
+                issue9_result = compute_issue9_visual_results(
+                    issue9_letters,
+                    height_cm=current_height,
+                    clamp_min_cm=1.0 if is_adult else 0.0,
+                )
                 total_recoverable = float(issue9_result["total_recoverable_loss_cm"])
                 target_height = round(base_height + total_recoverable, 2)
                 segs = issue9_result["segments"]
@@ -264,7 +278,7 @@ def upsert_posture_questions(request):
                     },
                 }
                 section3_contract = {
-                    "mode": "issue9_visual",
+                    "mode": "posture_targeting_v1",
                     "answers": issue9_letters,
                     "raw_loss_cm": issue9_result["raw_loss_cm"],
                     "total_loss_cm": issue9_result["total_loss_cm"],
@@ -274,6 +288,7 @@ def upsert_posture_questions(request):
                     "optimization_breakdown": optimization_breakdown,
                     "target_height_cm": target_height,
                     "target_height_formula": "Base_Height + Total_Recoverable_Loss",
+                    "scoring_meta": issue9_result.get("meta", {}),
                 }
 
             else:
@@ -302,6 +317,12 @@ def upsert_posture_questions(request):
                 },
             )
             state.refresh_from_db()
+            if is_adult:
+                if getattr(profile, "last_scan", None) is None:
+                    profile.last_scan = timezone.now()
+                    profile.save(update_fields=["last_scan"])
+                state.scan_completed = True
+                state.last_scan_at = state.last_scan_at or getattr(profile, "last_scan", None) or timezone.now()
             state.save(update_fields=[
                 "scan_completed",
                 "questionnaire_completed",

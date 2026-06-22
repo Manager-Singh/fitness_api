@@ -64,10 +64,10 @@ POINTS_TO_CM_ENGINE2 = 0.00005
 # Documented removed v1 rule (never use for math)
 REMOVED_V1_DAILY_HEIGHT_CAP_CM = 0.05
 
-# --- 1.2 — per-segment structural ceiling (cm); sum = 8.0 ---
+# --- 1.2 — per-segment structural ceiling at 175cm reference height; sum = 8.0 ---
 POSTURE_SEGMENT_MAX_LOSS_CM: Dict[str, float] = {
-    "spinal_compression": 3.0,
-    "posture_collapse": 2.5,
+    "spinal_compression": 2.5,
+    "posture_collapse": 3.0,
     "pelvic_tilt_back": 1.5,
     "leg_hamstring": 1.0,
 }
@@ -81,6 +81,7 @@ POSTURE_SEGMENT_DISTRIBUTION_RATIO: Dict[str, float] = {
 }
 
 TOTAL_STRUCTURAL_CEILING_CM: float = sum(POSTURE_SEGMENT_MAX_LOSS_CM.values())
+REFERENCE_HEIGHT_CM: float = 175.0
 
 # --- 1.3 ---
 OPTIMIZATION_GAP_CM = 5.5
@@ -128,6 +129,22 @@ def clamp_current_loss_to_segment_max(current_loss_cm: float, max_loss_cm: float
     if max_loss_cm <= 0:
         return 0.0
     return max(0.0, min(float(max_loss_cm), float(current_loss_cm)))
+
+
+def posture_height_factor(height_cm: Any) -> float:
+    """Scale posture recoverable loss by user height relative to the 175cm reference."""
+    try:
+        h = float(height_cm or 0)
+    except (TypeError, ValueError):
+        h = 0.0
+    if h <= 0:
+        return 1.0
+    return h / REFERENCE_HEIGHT_CM
+
+
+def height_scaled_segment_max_loss_cm(height_cm: Any) -> Dict[str, float]:
+    factor = posture_height_factor(height_cm)
+    return {key: float(value) * factor for key, value in POSTURE_SEGMENT_MAX_LOSS_CM.items()}
 
 
 def apportion_by_ratio(weights: Dict[Any, float], total_amount: int, caps: Dict[Any, int]) -> Dict[Any, int]:

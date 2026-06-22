@@ -275,40 +275,41 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
 
 
 class Issue9VisualQuestionnaireScoringTests(TestCase):
-    """Acceptance tests from POSTURE_LOSS_SCORING_FIX.md (client-signed-off recalibration)."""
+    """Acceptance tests for the Monday posture targeting A-F scoring engine."""
 
     @staticmethod
     def _bars_sum(r):
         return sum(r["segments"][s]["loss_cm"] for s in ("spinal", "collapse", "pelvic", "legs"))
 
-    def test_all_d_is_max_and_bars_reconcile(self):
+    def test_all_f_is_max_and_bars_reconcile(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
-        r = compute_issue9_visual_results({q: "D" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 6.00, places=2)
-        self.assertAlmostEqual(self._bars_sum(r), 6.00, places=2)
+        r = compute_issue9_visual_results({q: "F" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 8.00, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 8.00, places=2)
 
     def test_all_a_hits_floor(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
         r = compute_issue9_visual_results({q: "A" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.50, places=2)
-        self.assertAlmostEqual(self._bars_sum(r), 0.50, places=2)
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 1.00, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 1.00, places=2)
 
     def test_all_c_total(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
         r = compute_issue9_visual_results({q: "C" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 4.15, places=2)
-        self.assertAlmostEqual(self._bars_sum(r), 4.15, places=2)
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 3.20, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 3.20, places=2)
 
     def test_q8_adds_loss_never_halves(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
         base = {q: "A" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7")}
-        r = compute_issue9_visual_results({**base, "q8": "D"})
-        # Q8=D alone (others A) adds 0.7 (proves Q8 ADDS and never multiplies/halves).
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.70, places=2)
+        r = compute_issue9_visual_results({**base, "q8": "F"}, clamp_min_cm=0.0)
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.80, places=2)
+        self.assertAlmostEqual(r["segments"]["spinal"]["loss_cm"], 0.50, places=2)
+        self.assertAlmostEqual(r["segments"]["pelvic"]["loss_cm"], 0.30, places=2)
         self.assertEqual(r.get("structural_loss_cm"), 0.0)
 
     def test_reconciliation_across_random_mixes(self):
@@ -318,7 +319,7 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
         rng = random.Random(1234)
         qs = ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")
         for _ in range(2000):
-            answers = {q: rng.choice("ABCD") for q in qs}
+            answers = {q: rng.choice("ABCDEF") for q in qs}
             r = compute_issue9_visual_results(answers)
             # Bars are rounded to 2dp each, so their sum can drift up to ~0.02
             # from the headline; that is the "within rounding" tolerance.
@@ -390,7 +391,7 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
             resp = upsert_posture_questions(req)
 
         self.assertIn(resp.status_code, (200, 201))
-        self.assertEqual(resp.data["user"]["section3_contract"]["mode"], "issue9_visual")
+        self.assertEqual(resp.data["user"]["section3_contract"]["mode"], "posture_targeting_v1")
 
     def test_issue9_json_wrapped_scalar_answers(self):
         """
@@ -462,7 +463,7 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
 
         self.assertIn(resp.status_code, (200, 201), msg=str(getattr(resp, "data", None)))
         contract = resp.data["user"]["section3_contract"]
-        self.assertEqual(contract["mode"], "issue9_visual")
+        self.assertEqual(contract["mode"], "posture_targeting_v1")
         self.assertGreater(float(contract["total_recoverable_loss_cm"]), 0.0)
 
 

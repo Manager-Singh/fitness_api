@@ -71,7 +71,7 @@ class ExerciseAssignmentScoringTests(SimpleTestCase):
         core = [_ex_from_spec("decompression hang"), _ex_from_spec("cobra stretch")]
         rec, beast = select_adult_recommended_beast(pool, losses, core)
         rec_names = {e.name for e in rec}
-        self.assertIn("Doorway Chest Stretch", rec_names)
+        self.assertIn("Standing Posture Reset", rec_names)
         self.assertIn("Wall Angels", rec_names)
 
     def test_tc_a1_low_losses_high_potency(self):
@@ -82,27 +82,22 @@ class ExerciseAssignmentScoringTests(SimpleTestCase):
         names = {e.name for e in rec + beast}
         self.assertTrue(names & {"Decompression Hang", "Wall Angels", "Hip Flexor Stretch"})
 
-    def test_tc_t1_teen_beast_is_hgh_dominant(self):
-        """Exercise Assignment Spec TC-T1: young teen Beast picks are HGH movers."""
+    def test_tc_t1_teen_extra_slots_target_posture_pillars(self):
+        """Monday spec: teen Rec/Beast posture slots target deficiencies, not HGH."""
         losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
         pool = _teen_pool()
         core = [_ex_from_spec(n) for n in ["decompression hang", "cobra stretch", "hip flexor stretch", "wall angels"]]
         _, beast = select_teen_recommended_beast(pool, losses, 13, core)
-        beast_names = {e.name for e in beast}
-        # Document worked example (age 14, same losses): Box Jumps + Mountain Climbers.
-        self.assertEqual(beast_names, {"Box Jumps", "Mountain Climbers"})
         for ex in beast:
-            self.assertTrue(ex.teen_only)
+            self.assertFalse(ex.teen_only)
 
-    def test_tc_t2_teen_beast_never_doorway(self):
-        from workouts.exercise_assignment_data import normalize_exercise_name
-
+    def test_tc_t2_teen_beast_uses_posture_pool(self):
         losses = {"spinal": 0.2, "collapse": 1.5, "pelvic": 0.3, "legs": 0.1}
         pool = _teen_pool()
         core = [_ex_from_spec("decompression hang")]
         _, beast = select_teen_recommended_beast(pool, losses, 19, core)
         for ex in beast:
-            self.assertNotEqual(normalize_exercise_name(ex.name), "doorway chest stretch")
+            self.assertFalse(ex.teen_only)
 
     def test_tc_n_adult_never_teen_only(self):
         import random

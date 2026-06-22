@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Dict
 
+from utils.posture.height_constants import (
+    POSTURE_SEGMENT_MAX_LOSS_CM,
+    REFERENCE_HEIGHT_CM,
+    height_scaled_segment_max_loss_cm,
+    posture_height_factor,
+)
+
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(float(lo), min(float(hi), float(x)))
@@ -14,50 +21,39 @@ def _opt_pct(current_loss_cm: float, max_loss_cm: float) -> float:
     return float(_clamp(pct, 0.0, 100.0))
 
 
-# Per POSTURE_LOSS_SCORING_FIX.md (client-signed-off recalibration):
-#   - Every question (incl. Q8) ADDS loss. There is no Q8 multiplier.
-#   - Options are ordered A (best) -> D (worst); D column sums to exactly 6.0.
-#   - total_loss = clamp(sum of 8 values, 0.5, 6.0).
-ISSUE9_MIN_TOTAL_LOSS_CM = 0.5
-ISSUE9_MAX_TOTAL_LOSS_CM = 6.0
+ISSUE9_ADULT_MIN_TOTAL_LOSS_CM = 1.0
+ISSUE9_TEEN_MIN_TOTAL_LOSS_CM = 0.0
+ISSUE9_MAX_TOTAL_LOSS_CM = 8.0
 
-ISSUE9_MAX_LOSS = {"spinal": 3.0, "collapse": 2.5, "pelvic": 1.5, "legs": 1.0}
-
-# New additive per-question loss table. D column sums to 6.0:
-# 0.9 + 1.2 + 0.5 + 0.9 + 0.4 + 0.7 + 0.7 + 0.7 = 6.0
-ISSUE9_LOSS: Dict[str, Dict[str, float]] = {
-    "q1": {"A": 0.0, "B": 0.30, "C": 0.60, "D": 0.90},
-    "q2": {"A": 0.0, "B": 0.40, "C": 0.80, "D": 1.20},
-    "q3": {"A": 0.0, "B": 0.20, "C": 0.35, "D": 0.50},
-    "q4": {"A": 0.0, "B": 0.30, "C": 0.60, "D": 0.90},
-    "q5": {"A": 0.0, "B": 0.15, "C": 0.30, "D": 0.40},  # monotonic: D is the worst/most compressive
-    "q6": {"A": 0.0, "B": 0.25, "C": 0.50, "D": 0.70},
-    "q7": {"A": 0.0, "B": 0.25, "C": 0.50, "D": 0.70},
-    "q8": {"A": 0.0, "B": 0.25, "C": 0.50, "D": 0.70},  # Q8 now ADDS loss (no multiplier)
+ANSWER_FRACTIONS: Dict[str, float] = {
+    "A": 0.0,
+    "B": 0.2,
+    "C": 0.4,
+    "D": 0.6,
+    "E": 0.8,
+    "F": 1.0,
 }
 
-# Per-question -> segment distribution (each question's shares sum to 1.0).
-# Q1..Q7 keep the existing Issue9 distribution. Q8 (wall-rigidity test:
-# flatten neck + upper back) maps to spinal (cervical) + collapse (thoracic).
-ISSUE9_SEGMENT_PCT: Dict[str, Dict[str, float]] = {
-    "q1": {"spinal": 0.6, "collapse": 0.4},
-    "q2": {"collapse": 1.0},
-    "q3": {"spinal": 0.3, "collapse": 0.7},
-    "q4": {"spinal": 0.2, "pelvic": 0.8},
-    "q5": {"pelvic": 0.9, "legs": 0.1},
-    "q6": {"legs": 1.0},
-    "q7": {"pelvic": 0.4, "legs": 0.6},
-    "q8": {"spinal": 0.5, "collapse": 0.5},
+ISSUE9_MAX_LOSS = {
+    "spinal": POSTURE_SEGMENT_MAX_LOSS_CM["spinal_compression"],
+    "collapse": POSTURE_SEGMENT_MAX_LOSS_CM["posture_collapse"],
+    "pelvic": POSTURE_SEGMENT_MAX_LOSS_CM["pelvic_tilt_back"],
+    "legs": POSTURE_SEGMENT_MAX_LOSS_CM["leg_hamstring"],
 }
 
 _SEGMENTS = ("spinal", "collapse", "pelvic", "legs")
 
 
-def compute_issue9_visual_results(answers: Dict[str, str]) -> Dict:
+def compute_issue9_visual_results(
+    answers: Dict[str, str],
+    *,
+    height_cm: float | None = None,
+    clamp_min_cm: float = ISSUE9_ADULT_MIN_TOTAL_LOSS_CM,
+) -> Dict:
     """
     Compute Issue9 visual questionnaire outputs (recalibrated spec).
 
-    answers: {"q1":"A".."D", ... "q8":"A".."D"} (case-insensitive)
+    answers: {"q1":"A".."F", ... "q8":"A".."F"} (case-insensitive)
 
     Headline == sum of the 4 segment bars, always (reconciliation guaranteed).
     """
@@ -67,37 +63,46 @@ def compute_issue9_visual_results(answers: Dict[str, str]) -> Dict:
 
     a = {k: _norm_letter(v) for k, v in (answers or {}).items()}
     for k in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"):
-        if a.get(k) not in ("A", "B", "C", "D"):
+        if a.get(k) not in ANSWER_FRACTIONS:
             raise ValueError(f"Missing/invalid answer for {k}")
 
-    q_loss = {k: float(ISSUE9_LOSS[k][a[k]]) for k in ISSUE9_LOSS.keys()}
+    f = {k: float(ANSWER_FRACTIONS[a[k]]) for k in a}
+    factor = posture_height_factor(height_cm)
+    scaled_max_by_key = height_scaled_segment_max_loss_cm(height_cm)
+    scaled_max = {
+        "spinal": scaled_max_by_key["spinal_compression"],
+        "collapse": scaled_max_by_key["posture_collapse"],
+        "pelvic": scaled_max_by_key["pelvic_tilt_back"],
+        "legs": scaled_max_by_key["leg_hamstring"],
+    }
 
-    # raw_loss = sum of the 8 selected option values; clamp to [0.5, 6.0].
-    raw_loss = sum(q_loss.values())
-    total_loss = float(_clamp(raw_loss, ISSUE9_MIN_TOTAL_LOSS_CM, ISSUE9_MAX_TOTAL_LOSS_CM))
-
-    # Raw per-segment loss from the per-question distribution.
-    seg_raw = {s: 0.0 for s in _SEGMENTS}
-    for q, shares in ISSUE9_SEGMENT_PCT.items():
-        val = q_loss[q]
-        for seg, pct in shares.items():
-            seg_raw[seg] += val * pct
-
-    # Scale the segment bars so they always add up to the clamped headline.
-    if raw_loss > 0:
-        factor = total_loss / raw_loss
-        seg_loss = {s: seg_raw[s] * factor for s in _SEGMENTS}
-    else:
-        # All-A edge case (raw_loss == 0): distribute the 0.5 floor across
-        # segments by their max ceilings so the bars still sum to total_loss.
-        max_sum = sum(ISSUE9_MAX_LOSS[s] for s in _SEGMENTS)
-        seg_loss = {s: total_loss * ISSUE9_MAX_LOSS[s] / max_sum for s in _SEGMENTS}
+    ref_loss_um = {
+        "collapse": ((f["q1"] + f["q2"] + f["q3"] + f["q4"]) / 4.0) * 3000.0,
+        "spinal": (f["q7"] * 2000.0) + (f["q8"] * 500.0),
+        "pelvic": (f["q5"] * 1200.0) + (f["q8"] * 300.0),
+        "legs": f["q6"] * 1000.0,
+    }
+    seg_loss = {
+        "spinal": _clamp(ref_loss_um["spinal"], 0, 2500) * factor / 1000.0,
+        "collapse": _clamp(ref_loss_um["collapse"], 0, 3000) * factor / 1000.0,
+        "pelvic": _clamp(ref_loss_um["pelvic"], 0, 1500) * factor / 1000.0,
+        "legs": _clamp(ref_loss_um["legs"], 0, 1000) * factor / 1000.0,
+    }
+    raw_loss = sum(seg_loss.values())
+    max_total = sum(scaled_max.values())
+    total_loss = float(_clamp(raw_loss, clamp_min_cm, max_total))
+    if raw_loss > 0 and total_loss != raw_loss:
+        scale = total_loss / raw_loss
+        seg_loss = {s: min(scaled_max[s], seg_loss[s] * scale) for s in _SEGMENTS}
+    elif raw_loss <= 0 and total_loss > 0:
+        max_sum = sum(scaled_max.values())
+        seg_loss = {s: total_loss * scaled_max[s] / max_sum for s in _SEGMENTS}
 
     segments = {
         s: {
             "loss_cm": round(seg_loss[s], 2),
-            "opt_pct": round(_opt_pct(seg_loss[s], ISSUE9_MAX_LOSS[s]), 2),
-            "max_loss": ISSUE9_MAX_LOSS[s],
+            "opt_pct": round(_opt_pct(seg_loss[s], scaled_max[s]), 2),
+            "max_loss": round(scaled_max[s], 4),
         }
         for s in _SEGMENTS
     }
@@ -118,5 +123,13 @@ def compute_issue9_visual_results(answers: Dict[str, str]) -> Dict:
         "structural_loss_cm": 0.0,
         "segments": segments,
         "ranked_segments": ranked,
-        "meta": {"multiplier": 1.0, "floor_cm": ISSUE9_MIN_TOTAL_LOSS_CM, "cap_cm": ISSUE9_MAX_TOTAL_LOSS_CM},
+        "meta": {
+            "answer_fractions": ANSWER_FRACTIONS,
+            "reference_height_cm": REFERENCE_HEIGHT_CM,
+            "height_cm": height_cm,
+            "height_factor": round(factor, 6),
+            "floor_cm": clamp_min_cm,
+            "cap_cm": round(max_total, 4),
+            "ref_loss_um": {k: int(round(v)) for k, v in ref_loss_um.items()},
+        },
     }
