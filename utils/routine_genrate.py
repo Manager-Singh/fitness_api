@@ -13,6 +13,7 @@ from workouts.models import (
     Tier, Type, Track, Exercise, ExerciseCategory, RoutineType, Unit,
 )
 from utils.age import get_user_age
+from utils.paywall_flags import is_teen_age
 from posture_questions.models import PostureQuestion
 from utils.exercise_assignment import (
     segment_losses_from_breakdown,
@@ -581,12 +582,14 @@ def build_posture_routine_slots(
     age: int,
     optimization_breakdown: dict,
     section3_contract: dict | None = None,
+    *,
+    is_teen_user: bool | None = None,
 ):
     """
     Returns list of (variant_exercise_or_synthetic, tier) in order: 6 core, 2 rec, 2 beast.
     """
     losses = segment_losses_from_breakdown(optimization_breakdown, section3_contract)
-    is_teen = 13 <= int(age) <= 20
+    is_teen = bool(is_teen_user) if is_teen_user is not None else 13 <= int(age) <= 20
 
     from utils.exercise_assignment import beast_whitelist_exercises_from_db
 
@@ -603,7 +606,15 @@ def build_posture_routine_slots(
             pool, losses, age, [ve.exercise for ve in core], reserved_beast=reserved_beast
         )
     else:
-        core = _core_from_variant(variant, teen=False, allowed_categories=POSTURE_ALLOWED_CATEGORIES)
+        core = []
+        seen_core_ids: set[int] = set()
+        _append_core_slots_by_names(
+            variant,
+            core,
+            _adult_core_names_for_age(age),
+            seen_core_ids,
+            allowed_categories=POSTURE_ALLOWED_CATEGORIES,
+        )
         core, reserved_beast = _trim_core_whitelist_for_beast(
             core, variant, allowed_categories=POSTURE_ALLOWED_CATEGORIES, age=age
         )
@@ -795,6 +806,7 @@ def generate_user_routines(
 
     _get_program_config(age)
     variant = _get_valid_variant(age, "POSTURE")
+    is_teen_user = is_teen_age(age_years=age, user=user)
 
     if regen_rec_beast_only and existing_routine is not None:
         return _regen_rec_beast_only(
@@ -804,12 +816,13 @@ def generate_user_routines(
             age,
             optimization_breakdown,
             section3_contract,
+            is_teen_user=is_teen_user,
         )
 
     UserRoutine.objects.filter(user=user, is_active=True).update(is_active=False)
 
     slots, assignment_meta = build_posture_routine_slots(
-        variant, age, optimization_breakdown, section3_contract
+        variant, age, optimization_breakdown, section3_contract, is_teen_user=is_teen_user
     )
 
     scan_score = dict(optimization_breakdown or {})
@@ -862,10 +875,12 @@ def _regen_rec_beast_only(
     age: int,
     optimization_breakdown: dict,
     section3_contract: dict | None,
+    *,
+    is_teen_user: bool | None = None,
 ):
     """Replace only Recommended + Beast slots; keep Core 6 on existing routine."""
     losses = segment_losses_from_breakdown(optimization_breakdown, section3_contract)
-    is_teen = 13 <= int(age) <= 20
+    is_teen = bool(is_teen_user) if is_teen_user is not None else 13 <= int(age) <= 20
 
     core_exercises = list(
         UserRoutineExercise.objects.filter(routine=routine, tier=Tier.CORE)

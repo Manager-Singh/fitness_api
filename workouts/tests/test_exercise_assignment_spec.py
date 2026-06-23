@@ -12,12 +12,15 @@ from utils.exercise_assignment import (
     select_adult_recommended_beast,
     select_teen_recommended_beast,
 )
+from utils.routine_genrate import build_posture_routine_slots
 from workouts.exercise_assignment_data import (
+    ADULT_CORE_6_BY_MIN_AGE,
     EXERCISE_ASSIGNMENT_SPEC,
     TEEN_ONLY_HGH_NAMES,
     apply_spec_to_exercise_dict,
+    primary_secondary_for_exercise,
 )
-from workouts.models import Exercise
+from workouts.models import AgeBracket, Exercise, RoutineTemplate, RoutineVariant, Tier, Track, Unit, VariantExercise
 
 
 def _ex_from_spec(key: str):
@@ -132,3 +135,93 @@ class ExerciseAssignmentBackfillTests(TestCase):
         )
         self.assertIsNotNone(ex)
         self.assertIsNotNone(ex.potency)
+
+
+class TuesdayAdultRoutineCoreTests(TestCase):
+    def setUp(self):
+        for spec in EXERCISE_ASSIGNMENT_SPEC.values():
+            Exercise.objects.update_or_create(
+                name=spec["name"],
+                defaults={
+                    **apply_spec_to_exercise_dict(spec),
+                    "category": spec.get("category", "posture"),
+                    "points": spec.get("points", 0),
+                },
+            )
+        bracket, _ = AgeBracket.objects.update_or_create(
+            min_age=40,
+            max_age=49,
+            defaults={"title": "40-49"},
+        )
+        template, _ = RoutineTemplate.objects.update_or_create(
+            name="Tuesday stale variant regression",
+            defaults={"notes": ""},
+        )
+        self.variant, _ = RoutineVariant.objects.update_or_create(
+            template=template,
+            age_bracket=bracket,
+            track=Track.POSTURE,
+            defaults={"notes": ""},
+        )
+        stale_core_names = [
+            "Glute Bridges",
+            "Hip Flexor Stretch",
+            "Pelvic Tilts",
+            "Bird Dog",
+            "Dead Bug",
+            "Side Plank",
+        ]
+        for order, name in enumerate(stale_core_names, start=1):
+            ex = Exercise.objects.get(name=name)
+            VariantExercise.objects.update_or_create(
+                variant=self.variant,
+                exercise=ex,
+                defaults={
+                    "order": order,
+                    "sets": 1,
+                    "quantity_min": 30,
+                    "unit": Unit.SECS,
+                    "tier": Tier.CORE,
+                },
+            )
+
+    def test_adult_core_ignores_stale_variant_core_rows(self):
+        breakdown = {
+            "spinal_compression": {"current_loss_cm": 0.4},
+            "posture_collapse": {"current_loss_cm": 0.4},
+            "pelvic_tilt_back": {"current_loss_cm": 0.4},
+            "leg_hamstring": {"current_loss_cm": 2.0},
+        }
+        slots, _ = build_posture_routine_slots(
+            self.variant,
+            40,
+            breakdown,
+            is_teen_user=False,
+        )
+        core_names = [slot.exercise.name for slot, tier in slots if tier == Tier.CORE]
+        self.assertEqual(core_names, ADULT_CORE_6_BY_MIN_AGE[40])
+
+    def test_teen_spinal_worst_generates_spinal_heavy_plan(self):
+        breakdown = {
+            "spinal_compression": {"current_loss_cm": 2.5},
+            "posture_collapse": {"current_loss_cm": 0.1},
+            "pelvic_tilt_back": {"current_loss_cm": 0.1},
+            "leg_hamstring": {"current_loss_cm": 0.1},
+        }
+        slots, _ = build_posture_routine_slots(
+            self.variant,
+            14,
+            breakdown,
+            is_teen_user=True,
+        )
+        primary_counts = {"spinal": 0, "collapse": 0, "pelvic": 0, "legs": 0}
+        for slot, _tier in slots:
+            primary, _secondary = primary_secondary_for_exercise(slot.exercise)
+            if primary in primary_counts:
+                primary_counts[primary] += 1
+
+        core_names = [slot.exercise.name for slot, tier in slots if tier == Tier.CORE]
+        self.assertIn("Jump Rope", core_names)
+        self.assertGreaterEqual(primary_counts["spinal"], 3)
+        self.assertGreater(primary_counts["spinal"], primary_counts["collapse"])
+        self.assertGreater(primary_counts["spinal"], primary_counts["pelvic"])

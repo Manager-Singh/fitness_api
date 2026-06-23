@@ -377,3 +377,86 @@ Dashboard / logging:
 - Do not assume teen nutrition/lifestyle moves posture bars.
 - Do not rely on image text baked into `q1`-`q8` assets.
 
+---
+
+## 13. Tuesday Mobile Handoff Addendum
+
+These items come from the Tuesday work order and are mobile/UI tasks unless a screen reads copy from an API.
+
+### Adult Nutrition Copy
+
+Protein:
+
+- Header: `PROTEIN`
+- Rate label: `+1 pt per 10g`
+- Body: `Rebuilds the back, core, and glute muscles that hold your spine tall. Aim for 90g a day.`
+- Keep the `+10g`, `+20g`, `+30g`, and `+Add` buttons.
+
+Basic Hydration:
+
+- Header: `BASIC HYDRATION`
+- Rate label: `+1 pt per 500ml`
+- Body: `Everyday hydration keeps your discs full and your spine working at full height. Staying hydrated through the day is one of the simplest ways to support your height.`
+
+Premium Hydration:
+
+- Header: `PREMIUM HYDRATION`
+- Rate label: `+2 pts per 500ml`
+- Body: `The most powerful drinks for spinal health. Your discs are nearly 80% water - these spine-friendly drinks deliver the deepest hydration and nutrients for disc lubrication and nourishment. Worth twice the points of basic drinks.`
+
+Shared pool line:
+
+- `Fluids X / 6 pts - Premium + Basic drinks share one pool`
+- Remove all `drink 3 a day` copy.
+
+### Adult And Teen Paywalls
+
+- Remove `12,000+ members`, `join 12,000 teens`, and any invented member counts.
+- Trust row: `Secure payment` · `30-day money-back guarantee` · `No hidden fees`
+- Risk-free line near CTA: `Try it risk-free - if you don't see results, get a full refund within 30 days.`
+- Only ship guarantee copy if the refund policy page supports it.
+
+### Adult Results Page
+
+Use backend values, not local fallbacks:
+
+```text
+recoverable_cm = total_recoverable_loss_cm
+current_height = current_height_cm
+optimized_height = target_height_cm or current_height_cm + total_recoverable_loss_cm
+```
+
+Copy:
+
+- Big number: `+{recoverable_cm} cm`
+- Body: `You're currently {current_height} cm. Your optimized height is {optimized_height} cm - most of this gap is recoverable, locked away by spinal compression, muscle imbalance, and years of bad posture.`
+- Never render `You should be 0.0 cm` when height data exists.
+
+### Pre-Assessment Lander
+
+- Eyebrow: `FREE ASSESSMENT`
+- Headline: `Your Free Height Loss Assessment`
+- Subhead: `Find out exactly how much height your posture has stolen - in 2 minutes.`
+- Intro: `8 quick questions. To get your most accurate result, set yourself up right:`
+- Icon cards: `Take a photo or use a mirror`, `Stand totally relaxed`, `Or have someone check you`
+- Key callout: `The #1 rule: don't correct your posture. Your relaxed, natural stance is your true starting point - that's what we measure.`
+- CTA: `START MY ASSESSMENT ->`
+- Trust line: `Free · No account needed · Takes 2 minutes`
+- Flow: assessment entry -> lander -> Q1.
+
+### Questionnaire Page Fix
+
+- Remove the full 3-method instruction block from Q1-Q8 pages.
+- Show only progress, prompt, one short reminder line, and choices.
+- Q1-Q6: 2x3 image grid, images fill the majority of the screen.
+- Q7/Q8: six stacked numbered cards.
+- Reminder line: `Stand relaxed - don't correct your posture. Pick the closest match.`
+
+### Teen Report And Paywall UI
+
+- Teen report pillar row keeps existing blue style and adds fifth icon: `HGH Boost`, placed after `Legs & Hamstring`.
+- Teen feature-card images: `posture3`, `growth3`, `sleep3`, `nutrition3`, `hgh3`, `track3`.
+- True Optimized card: remove broken `? ? ?` / triple-checkmark cluster.
+- Replace `LOCKED` with a colored reveal button: `Reveal My Prediction` with lock icon.
+- Subtitle: `Your genetic height prediction` plus smaller `(how tall will you be?)`.
+

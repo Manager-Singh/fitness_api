@@ -14,6 +14,7 @@ from .serializers_log import (
     WorkoutSessionSerializer,
 )
 from utils.age import get_user_age 
+from utils.paywall_flags import is_teen_age
 from utils.engine_routing import apply_engine_routing
 from utils.check_payment import check_subscription_or_response
 from utils.monetization_gate import logging_locked_payload
@@ -96,6 +97,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
             age = get_user_age(request.user)
         except Exception:
             age = 0
+        is_teen = is_teen_age(age_years=age, user=request.user)
         subscription_data = check_subscription_or_response(request.user).data
         locked = logging_locked_payload(
             request.user,
@@ -121,7 +123,7 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         # Teen UX: `/api/my-routine` returns a single MIXED routine id, but exercises may
         # physically belong to POSTURE or HGH routines. Auto-route the log accordingly.
         if exercise and not UserRoutineExercise.objects.filter(routine=user_routine, exercise=exercise).exists():
-            if age < 21:
+            if is_teen:
                 fallback_routine = (
                     UserRoutine.objects.filter(user=request.user, is_active=True)
                     .exclude(id=user_routine.id)

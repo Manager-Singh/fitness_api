@@ -126,12 +126,12 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
         resp = upsert_posture_questions(request)
         self.assertIn(resp.status_code, (401, 403))
 
-    def test_missing_userprofile_returns_server_error(self, _mock_sub):
+    def test_missing_userprofile_returns_400(self, _mock_sub):
         u = self._create_user_with_profile(email_suffix="prof_del", years_old=25)
         UserProfile.objects.filter(user=u).delete()
         u = User.objects.get(pk=u.pk)
         resp = self._call_upsert(u, _full_questionnaire_body())
-        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 400)
 
     def test_invalid_age_string_returns_400(self, _mock_sub):
         u = self._create_user_with_profile(email_suffix="bad_age", years_old=25)
@@ -189,7 +189,7 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
         st = PostureState.objects.get(user=u)
         self.assertTrue(st.questionnaire_completed)
 
-    def test_teen_gender_none_with_parents_returns_server_error(self, _mock_sub):
+    def test_teen_gender_none_with_parents_returns_400(self, _mock_sub):
         u = self._create_user_with_profile(
             email_suffix="teen_nogender",
             years_old=16,
@@ -198,7 +198,7 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
             gender=None,
         )
         resp = self._call_upsert(u, _full_questionnaire_body())
-        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 400)
 
     def test_partial_answers_remain_incomplete(self, _mock_sub):
         u = self._create_user_with_profile(email_suffix="partial", years_old=25)
@@ -250,6 +250,48 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
         self._call_upsert(u, _full_questionnaire_body())
         pq = PostureQuestion.objects.get(user=u)
         self.assertEqual(pq.forward_head_posture_answer, "A")
+
+    def test_all_f_submit_uses_posture_targeting_scoring(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="all_f", years_old=25, base_cm="175")
+        body = _full_questionnaire_body()
+        for key in list(body.keys()):
+            if key.endswith("_options"):
+                body[key] = '["A","B","C","D","E","F"]'
+            elif key.endswith("_answer"):
+                body[key] = "F"
+
+        resp = self._call_upsert(u, body)
+
+        self.assertIn(resp.status_code, (200, 201))
+        contract = resp.data["user"]["section3_contract"]
+        self.assertEqual(contract["mode"], "posture_targeting_v1")
+        self.assertEqual(float(contract["total_recoverable_loss_cm"]), 8.0)
+
+    def test_numbered_six_answers_map_to_f(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="num6", years_old=25, base_cm="175")
+        body = _full_questionnaire_body()
+        for key in list(body.keys()):
+            if key.endswith("_options"):
+                body[key] = '["A","B","C","D","E","F"]'
+            elif key.endswith("_answer"):
+                body[key] = "6"
+
+        resp = self._call_upsert(u, body)
+
+        self.assertIn(resp.status_code, (200, 201))
+        contract = resp.data["user"]["section3_contract"]
+        self.assertEqual(contract["mode"], "posture_targeting_v1")
+        self.assertEqual(contract["answers"]["q8"], "F")
+
+    def test_invalid_completed_answers_return_400(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="bad_answer", years_old=25)
+        body = _full_questionnaire_body()
+        body["active_your_core_during_daily_task_answer"] = "Z"
+
+        resp = self._call_upsert(u, body)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Invalid posture questionnaire answers", resp.data["error"])
 
     def test_response_includes_subscription_data(self, _mock_sub):
         u = self._create_user_with_profile(email_suffix="subecho", years_old=27)

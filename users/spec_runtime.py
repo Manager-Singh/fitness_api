@@ -10,7 +10,7 @@ from workouts.models import WorkoutEntry
 from users.models import DailyLog, HeightLedger, PostureState, User
 from utils.age import get_user_age_exact_on_date, get_user_age_on_date
 from utils.check_payment import check_subscription_or_response
-from utils.paywall_flags import effective_is_paid, is_adult_age, teen_paywall_disabled
+from utils.paywall_flags import effective_is_paid, is_adult_age, is_teen_age, teen_paywall_disabled
 from utils.posture.height_constants import (
     OPTIMIZATION_GAP_CM,
     POINTS_TO_CM_ENGINE1,
@@ -161,7 +161,7 @@ def set_daily_validated(user, log_date):
     - Adult: all Core posture complete AND >=1 food in each required category.
     - Teen: all Core posture complete AND all Core HGH complete AND >=1 food logged.
     """
-    from workouts.models import RoutineType, Tier as RoutineTier
+    from workouts.models import RoutineType, Tier as RoutineTier, UserRoutineExercise
     from nutration.models_log import NutraEntry
     from workouts.models import WorkoutEntry
     from users.models import DailyLog
@@ -176,8 +176,11 @@ def set_daily_validated(user, log_date):
         )
         age = 0
 
+    is_adult_for_day = is_adult_age(age_years=age, user=user)
+    is_teen_for_day = is_teen_age(age_years=age, user=user)
+
     def _core_done(routine_type):
-        assigned = set(
+        completed = set(
             WorkoutEntry.objects.filter(
                 session__user=user,
                 session__date=log_date,
@@ -186,19 +189,18 @@ def set_daily_validated(user, log_date):
             ).values_list("user_routine_exercise_id", flat=True)
         )
         required = set(
-            WorkoutEntry.objects.filter(
-                session__user=user,
-                session__date=log_date,
-                session__user_routine__routine_type=routine_type,
-            )
-            .values_list("user_routine_exercise_id", flat=True)
+            UserRoutineExercise.objects.filter(
+                routine__user=user,
+                routine__is_active=True,
+                routine__routine_type=routine_type,
+                tier=RoutineTier.CORE,
+            ).values_list("id", flat=True)
         )
-        # If no explicit routine-exercise IDs exist, fall back to "any core logged" safeguard.
         if not required:
             return False
-        return required.issubset(assigned)
+        return required.issubset(completed)
 
-    if age >= 21:
+    if is_adult_for_day:
         core_posture_done = _core_done(RoutineType.POSTURE)
         foods = NutraEntry.objects.filter(
             session__user=user,
@@ -222,7 +224,7 @@ def set_daily_validated(user, log_date):
                 if any(t in module_name for t in ("muscle", "repair", "fuel")):
                     has_muscle = True
         daily.validated = bool(core_posture_done and has_disc and has_muscle)
-    else:
+    elif is_teen_for_day:
         core_posture_done = _core_done(RoutineType.POSTURE)
         any_food = NutraEntry.objects.filter(
             session__user=user,
@@ -230,6 +232,8 @@ def set_daily_validated(user, log_date):
             food__isnull=False,
         ).exists()
         daily.validated = bool(core_posture_done and any_food)
+    else:
+        daily.validated = False
 
     daily.save(update_fields=["validated", "updated_at"])
     return daily
@@ -482,7 +486,7 @@ def _replay_adult_engine1_ledger_before(user, before_log_date, state):
                 extra={"row_id": getattr(row, "id", None), "log_date": str(getattr(row, "log_date", ""))},
             )
             row_age = 0
-        if row_age < 21:
+        if not is_adult_age(age_years=row_age, user=user):
             continue
         try:
             e1 = int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
@@ -880,7 +884,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     daily.habit_points = habit_points
     daily.engine1_points = int(round(float(e1)))
     daily.engine2_points = int(round(float(e2)))
-    if 13 <= age <= 20:
+    if is_teen_for_day:
         try:
             daily.genetic_average_cm = float(compute_genetic_average_cm(user, log_date))
             daily.daily_genetic_average_gain_cm = float(
@@ -902,7 +906,6 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
 
     # Section 11 formulas and routing. Displayed Engine-1 points remain full; actual
     # posture recovery is targeted to trained pillars by the Monday work order.
-    is_adult_for_day = is_adult_age(age_years=age, user=user)
     targeted_engine1 = compute_targeted_engine1_recovery(
         user=user,
         log_date=log_date,
@@ -918,7 +921,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     engine2_delta_um = _um_from_dm(engine2_delta_dm)
     bio_delta_um = 0
 
-    if 13 <= age <= 20:
+    if is_teen_for_day:
         profile = UserProfile.objects.filter(user=user).first()
         base_height_cm = float(getattr(profile, "base_height_cm", None) or getattr(profile, "current_height_cm", 0) or 0)
         bio_delta_um = _to_um(_interpolated_teen_bio_gain_cm(user, base_height_cm, on_date=log_date))
@@ -971,7 +974,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     delta_cm = round(delta_um / 10000.0, 4)
     if state:
         # Section 4.1 gate (adults): block only when both scan and questionnaire are incomplete.
-        if age >= 21 and (not state.scan_completed) and (not state.questionnaire_completed):
+        if is_adult_for_day and (not state.scan_completed) and (not state.questionnaire_completed):
             delta_cm = 0.0
             delta_um = 0
             engine1_delta_um = 0
@@ -985,7 +988,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         # - If BOTH scan and questionnaire are incomplete: bio applies, engine2 blocked,
         #   engine1 is stored as pending and does not affect displayed height until unlock.
         # - If questionnaire is complete (even without scan): allow engine1/engine2 normally.
-        if 13 <= age <= 20 and (not state.scan_completed) and (not state.questionnaire_completed):
+        if is_teen_for_day and (not state.scan_completed) and (not state.questionnaire_completed):
             pending_engine1_um = max(0, int(engine1_delta_um))
             engine1_delta_um = 0
             engine1_segment_shares_um = {p: 0 for p in PILLAR_TO_STATE_FIELD}
@@ -1036,7 +1039,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
             "daily_points_breakdown": _safe_daily_points_breakdown(user, log_date, age, subscription_data),
         },
     )
-    if 13 <= age <= 20 and pending_engine1_um > 0:
+    if is_teen_for_day and pending_engine1_um > 0:
         # Store pending posture gain for v3.3 teen pre-scan state.
         HeightLedger.objects.create(
             user=user,
@@ -1060,7 +1063,7 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
     # baseline minus cumulative Engine-1 recovery (now that today's ledger row exists).
     # This is idempotent, so force_recompute / rebuild can't compound the reduction and
     # drive the optimization bars past the real recovery.
-    if state and (age >= 21 or _posture_unlocked_for_segment_redistribution(state)):
+    if state and (is_adult_for_day or _posture_unlocked_for_segment_redistribution(state)):
         try:
             from utils.posture.state_recalculator import resync_segment_losses_from_baseline
 

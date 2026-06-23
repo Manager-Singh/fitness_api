@@ -11,6 +11,7 @@ from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_
 from posture_questions.services.routine_service import RoutineService
 from utils.check_payment import check_subscription_or_response
 from utils.age import get_user_age
+from utils.paywall_flags import is_adult_age, is_teen_age
 
 
 class UserRoutineListView(APIView):
@@ -23,7 +24,9 @@ class UserRoutineListView(APIView):
         except Exception:
             age = 0
         sub = check_subscription_or_response(request.user).data
-        if age >= 21 and not bool(sub.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
+        is_adult = is_adult_age(age_years=age, user=request.user)
+        is_teen = is_teen_age(age_years=age, user=request.user)
+        if is_adult and not bool(sub.get("is_paid", False)) and not bool(getattr(settings, "ADULT_PAYWALL_DISABLED", False)):
             return Response(
                 {
                     "detail": "Workout plan is locked for free adult accounts.",
@@ -75,7 +78,7 @@ class UserRoutineListView(APIView):
                 return Response({"detail": "No routines found"}, status=404)
 
         # Spec guard for teens: if routines contain mixed-category exercises, rebuild routines.
-        if age < 21:
+        if is_teen:
             routines = list(
                 routines_qs.prefetch_related(
                     Prefetch("exercises", queryset=UserRoutineExercise.objects.select_related("exercise"))
@@ -122,7 +125,7 @@ class UserRoutineListView(APIView):
             return Response(serializer.data)
 
         # Teen UX: unified 10-exercise POSTURE routine (legacy MIXED merge if old HGH row still active).
-        if age < 21:
+        if is_teen:
             routines = list(routines_qs)
             posture = next((r for r in routines if str(r.routine_type).lower() == "posture"), None)
             hgh = next((r for r in routines if str(r.routine_type).lower() == "hgh"), None)

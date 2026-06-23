@@ -37,13 +37,13 @@ def _parse_options(value):
 
 
 def _letter_for_option_index(idx: int) -> str:
-    letters = ["A", "B", "C", "D", "E"]
+    letters = ["A", "B", "C", "D", "E", "F"]
     return letters[idx] if 0 <= idx < len(letters) else ""
 
 
 def _coerce_to_letters(value, options=None):
     """
-    Convert stored answers into A/B/C/D/E letters.
+    Convert stored answers into A/B/C/D/E/F letters.
 
     Supported inputs:
     - Already letter-coded: "A", "B", "A) ..." etc.
@@ -131,8 +131,11 @@ def _extract_letters(value):
         txt = _normalize_answer(item)
         if not txt:
             continue
+        if txt in {"1", "2", "3", "4", "5", "6"}:
+            out.append(_letter_for_option_index(int(txt) - 1))
+            continue
         letter = txt[0]
-        if letter in {"a", "b", "c", "d", "e"}:
+        if letter in {"a", "b", "c", "d", "e", "f"}:
             out.append(letter.upper())
     return out
 

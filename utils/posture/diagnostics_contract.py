@@ -3,7 +3,12 @@ from datetime import timedelta
 from django.utils import timezone
 
 from users.spec_runtime import get_user_runtime_state_snapshot
-from utils.posture.height_constants import POSTURE_SEGMENT_MAX_LOSS_CM, posture_segment_opt_pct, posture_segment_opt_pct_precise
+from utils.posture.height_constants import (
+    POSTURE_SEGMENT_MAX_LOSS_CM,
+    height_scaled_segment_max_loss_cm,
+    posture_segment_opt_pct,
+    posture_segment_opt_pct_precise,
+)
 
 
 def _segment_payload(current_loss_cm, max_loss_cm):
@@ -23,6 +28,12 @@ def build_posture_optimization_diagnostics(
     rescan_days=7,
 ):
     runtime = get_user_runtime_state_snapshot(user)
+    try:
+        profile = getattr(user, "profile", None)
+        height_cm = getattr(profile, "current_height_cm", None) or getattr(profile, "base_height_cm", None)
+    except Exception:
+        height_cm = None
+    segment_max_loss = height_scaled_segment_max_loss_cm(height_cm)
     last_scan_at = runtime.get("last_scan_at")
     days_since_scan = None
     if last_scan_at:
@@ -55,7 +66,8 @@ def build_posture_optimization_diagnostics(
     use_live_segment_loss = unlocked and has_live_loss_state
 
     segments = {}
-    for seg, max_loss in POSTURE_SEGMENT_MAX_LOSS_CM.items():
+    for seg in POSTURE_SEGMENT_MAX_LOSS_CM.keys():
+        max_loss = float(segment_max_loss.get(seg, POSTURE_SEGMENT_MAX_LOSS_CM[seg]))
         live_loss = float(runtime_segments[seg])
         if use_live_segment_loss:
             seg_current = live_loss

@@ -112,7 +112,10 @@ from utils.posture.teen_genetic_average import (
 @permission_classes([IsAuthenticated])
 def upsert_posture_questions(request):
     user = request.user
-    profile = UserProfile.objects.get(user=user)
+    try:
+        profile = UserProfile.objects.get(user=user)
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile not found."}, status=status.HTTP_400_BAD_REQUEST)
     profile_dict = model_to_dict(profile)
     # Convert and extract safely
     try:
@@ -132,6 +135,9 @@ def upsert_posture_questions(request):
         current_height = base_height
 
         profile_sex_q = normalize_sex(profile_dict.get("gender"))
+        if not profile_sex_q:
+            raise ValueError("Invalid gender")
+        gender = profile_sex_q
         age_exact_q = float(get_user_age_exact(user) or current_age or 0)
         from utils.paywall_flags import is_adult_age, is_teen_age as is_teen_age_band
 
@@ -292,19 +298,14 @@ def upsert_posture_questions(request):
                 }
 
             else:
-                clamp_min = 1.0 if is_adult else 0.0
-                manual = build_section3_manual_breakdown(posture_q, clamp_min_cm=clamp_min)
-                total_recoverable = float(manual["total_recoverable_loss_cm"])
-                target_height = round(base_height + total_recoverable, 2)
-                section3_contract = {
-                    "mode": "legacy_manual",
-                    "raw_score_cm": manual["raw_score_cm"],
-                    "total_recoverable_loss_cm": total_recoverable,
-                    "distribution_ratio": "30/35/25/10",
-                    "optimization_breakdown": manual["optimization_breakdown"],
-                    "target_height_cm": target_height,
-                    "target_height_formula": "Base_Height + Total_Recoverable_Loss",
-                }
+                return Response(
+                    {
+                        "error": "Invalid posture questionnaire answers.",
+                        "detail": "All 8 completed posture answers must map to A-F or 1-6.",
+                        "answers": issue9_letters,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             from utils.posture.assessment_service import save_questionnaire_assessment
 
             assessment = save_questionnaire_assessment(
@@ -1414,17 +1415,16 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                 "adult_daily_gain_formula": "(posture_pts + traceable_nutrition_pts) * 0.001",
                 "teen_postureplus_daily_formula": "posture_pts * 0.001",
                 "teen_engine2_caps": {
+                    "hgh_total": None,
                     "nutrition": 35,
                     "sleep": 10,
                     "sunlight": 6,
                     "meditation": 2,
                     "hydration": 1,
-                    "hgh_total": 30,
-                    "hgh_per_exercise_max_completions": 2,
                 },
                 "posture_segment_max_loss_cm": {
-                    "spinal_compression": 3.0,
-                    "posture_collapse": 2.5,
+                    "spinal_compression": 2.5,
+                    "posture_collapse": 3.0,
                     "pelvic_tilt_back": 1.5,
                     "leg_hamstring": 1.0,
                 },
