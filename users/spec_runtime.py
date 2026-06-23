@@ -869,6 +869,9 @@ def compute_daily_height_for_user(user, log_date=None, force_recompute=False):
         )
         age = 0
 
+    is_adult_for_day = is_adult_age(age_years=age, user=user)
+    is_teen_for_day = is_teen_age(age_years=age, user=user)
+
     subscription_data = check_subscription_or_response(user).data
     e1, e2, exercise_points, food_points, lifestyle_points, habit_points = _daily_engine_points(
         user=user,
