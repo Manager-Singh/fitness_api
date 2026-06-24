@@ -19,6 +19,15 @@ from utils.posture.teen_genetic_average import (
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value, default=0.0):
+    if value is None or value == "":
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     payload = dict(payload or {})
     age_exact = float(payload.get("age_exact") or 0.0)
@@ -233,14 +242,8 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         teen_card_growthmax_cm = teen_live_red_cm
         teen_card_height_cm = teen_live_red_cm
     local_today = user_today(user)
-    teen_ga_cm = (
-        round(float(compute_genetic_average_cm(user, local_today)), 4) if is_teen else None
-    )
-    teen_daily_ga_gain = (
-        round(float(compute_daily_genetic_average_gain_cm(user, local_today)), 6)
-        if is_teen
-        else None
-    )
+    teen_ga_cm = round(_safe_float(compute_genetic_average_cm(user, local_today)), 4) if is_teen else None
+    teen_daily_ga_gain = round(_safe_float(compute_daily_genetic_average_gain_cm(user, local_today)), 6) if is_teen else None
     if is_teen:
         habits_logged_count = int(min(8, teen_nutrition_dots + teen_lifestyle_dots))
     else:

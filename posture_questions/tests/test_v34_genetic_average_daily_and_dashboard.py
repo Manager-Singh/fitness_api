@@ -141,12 +141,20 @@ class DailyLogGeneticAverageIntegrationTests(TestCase):
         ), patch(
             "posture_questions.views.compute_optimized_height",
             return_value={"mph_height_cm": 170.0, "optimized_height_cm": 175.0},
+        ), patch(
+            "posture_questions.dashboard_new_builder.compute_genetic_average_cm",
+            return_value=None,
+        ), patch(
+            "posture_questions.dashboard_new_builder.compute_daily_genetic_average_gain_cm",
+            return_value=None,
         ):
             resp = get_dashboard_new(req)
         self.assertEqual(getattr(resp, "status_code", None), 200)
         dash = resp.data.get("dashboard") or {}
         scan = dash.get("scan") or {}
         self.assertTrue(bool(scan.get("scan_completed")))
+        self.assertEqual(dash.get("genetic_average_cm"), 0.0)
+        self.assertEqual(dash.get("daily_genetic_average_gain_cm"), 0.0)
 
 
 class DashboardNewV34SerializerTests(SimpleTestCase):
