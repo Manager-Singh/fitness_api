@@ -806,7 +806,10 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     optimized_result = compute_optimized_height(teen_profile)
 
     # ── 7. Height calculations ─────────────────────
-    current_cm_val = float(profile_dict.get("base_height_cm") or profile_dict.get("current_height_cm", 0.0))
+    current_cm_val = _profile_float(
+        profile_dict.get("base_height_cm") or profile_dict.get("current_height_cm"),
+        default=0.0,
+    )
     # Spec: separate *genetic target* from *true optimized* and from *current height*.
     genetic_height_cm = float(optimized_result.get("mph_height_cm") or 0.0)
     true_optimized_cm = float(optimized_result.get("optimized_height_cm") or 0.0)
@@ -1538,12 +1541,12 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
             },
             "section5_contract": {
                 "genetic_average_cm": (
-                    round(float(compute_genetic_average_cm(user, user_local_today)), 4)
+                    round(_profile_float(compute_genetic_average_cm(user, user_local_today), default=0.0), 4)
                     if is_teen_track
                     else None
                 ),
                 "daily_genetic_average_gain_cm": (
-                    round(float(compute_daily_genetic_average_gain_cm(user, user_local_today)), 6)
+                    round(_profile_float(compute_daily_genetic_average_gain_cm(user, user_local_today), default=0.0), 6)
                     if is_teen_track
                     else None
                 ),

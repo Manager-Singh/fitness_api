@@ -116,6 +116,11 @@ class DailyLogGeneticAverageIntegrationTests(TestCase):
         mock_sub.side_effect = lambda user: self._mock_sub_teen_paid()
         log_date = date(2024, 9, 1)
         u = self._teen_with_parents(log_date, years_old=15)
+        prof = u.profile
+        prof.base_height_cm = None
+        prof.current_height_cm = None
+        prof.save(update_fields=["base_height_cm", "current_height_cm"])
+        u = User.objects.select_related("profile").get(pk=u.pk)
         # Explicitly simulate: questionnaire done, scan NOT done.
         ps = PostureState.objects.get(user=u)
         ps.scan_completed = False
