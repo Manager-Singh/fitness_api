@@ -243,10 +243,11 @@ def clamp(v, lo, hi):
 
 
 def safe_float(v, default=0.0):
+    if v is None or v == "":
+        return default
     try:
         return float(v)
-    except Exception:
-        logger.exception("safe_float failed", extra={"value": repr(v)})
+    except (TypeError, ValueError):
         return default
 
 
