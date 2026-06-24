@@ -28,9 +28,21 @@ def _safe_float(value, default=0.0):
         return float(default)
 
 
+def _safe_int(value, default=0):
+    if value is None or value == "":
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return int(default)
+
+
 def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     payload = dict(payload or {})
-    age_exact = float(payload.get("age_exact") or 0.0)
+    age_exact = _safe_float(payload.get("age_exact"), 0.0)
     nav = payload.get("section16_navigation") or {}
     # Decimal age is canonical; do not treat 18yo as adult when account_tier is stale.
     profile_gender_early = normalize_sex((payload.get("profile") or {}).get("gender")) or user_profile_sex(user)
@@ -56,9 +68,9 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
 
     display_lines = section5.get("display_lines") or {}
     predictor_completed = bool(section5.get("predictor_completed") or display_lines.get("predictor_completed"))
-    base_height_cm = float(section4.get("base_height_cm") or growth_projection.get("current_height_cm") or 0.0)
-    teen_genetic_cumulative_cm = float(section5.get("genetic_cumulative_cm") or 0.0)
-    teen_posture_cumulative_cm = float(section5.get("postureplus_cumulative_cm") or 0.0)
+    base_height_cm = _safe_float(section4.get("base_height_cm") or growth_projection.get("current_height_cm"), 0.0)
+    teen_genetic_cumulative_cm = _safe_float(section5.get("genetic_cumulative_cm"), 0.0)
+    teen_posture_cumulative_cm = _safe_float(section5.get("postureplus_cumulative_cm"), 0.0)
     # Section 5 formulas:
     # Blue line  = Base + Genetic_Cumulative
     # Red line   = Base + Genetic_Cumulative + PosturePlus_Cumulative
@@ -66,28 +78,25 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     teen_growthmax_cm = round(base_height_cm + teen_genetic_cumulative_cm + teen_posture_cumulative_cm, 4)
     # Fallback to legacy display lines only if cumulatives are absent.
     if teen_genetic_cm <= 0 and display_lines.get("blue_genetic_line_cm") is not None:
-        teen_genetic_cm = float(display_lines.get("blue_genetic_line_cm") or 0.0)
+        teen_genetic_cm = _safe_float(display_lines.get("blue_genetic_line_cm"), 0.0)
     if teen_growthmax_cm <= 0 and display_lines.get("red_us_optimized_line_cm") is not None:
-        teen_growthmax_cm = float(display_lines.get("red_us_optimized_line_cm") or teen_genetic_cm)
+        teen_growthmax_cm = _safe_float(display_lines.get("red_us_optimized_line_cm"), teen_genetic_cm)
     teen_true_optimized_cm = display_lines.get("green_true_optimized_cm")
-    try:
-        teen_true_optimized_cm = float(teen_true_optimized_cm) if teen_true_optimized_cm is not None else None
-    except Exception:
-        teen_true_optimized_cm = None
-    teen_daily_gain_cm = float(section5.get("daily_gains_today_cm") or 0.0)
+    teen_true_optimized_cm = _safe_float(teen_true_optimized_cm, 0.0) if teen_true_optimized_cm is not None else None
+    teen_daily_gain_cm = _safe_float(section5.get("daily_gains_today_cm"), 0.0)
     # Section 5.3 / 16.2 readouts: Genetic+ and Posture+ (GrowthMax+ product name) cards are *today* deltas (cm),
     # not cumulative line heights (those stay in teen_lines_cm / live_metrics).
-    teen_genetic_plus_today_cm = float(section5.get("genetic_plus_today_cm") or 0.0)
-    teen_posture_plus_today_cm = float(section5.get("posture_plus_today_cm") or 0.0)
+    teen_genetic_plus_today_cm = _safe_float(section5.get("genetic_plus_today_cm"), 0.0)
+    teen_posture_plus_today_cm = _safe_float(section5.get("posture_plus_today_cm"), 0.0)
     # Teen live height follows cumulative formula (not projected lifetime target).
-    teen_height_live_cm = float(teen_growthmax_cm or base_height_cm)
-    teen_live_blue_cm = float(teen_genetic_cm or base_height_cm)
-    teen_live_red_cm = float(teen_growthmax_cm or base_height_cm)
+    teen_height_live_cm = _safe_float(teen_growthmax_cm or base_height_cm, base_height_cm)
+    teen_live_blue_cm = _safe_float(teen_genetic_cm or base_height_cm, base_height_cm)
+    teen_live_red_cm = _safe_float(teen_growthmax_cm or base_height_cm, base_height_cm)
 
-    adult_base_cm = float(base_height_cm)
-    adult_recovered_cm = float(section4.get("recovered_so_far_cm") or 0.0)
-    adult_daily_gain_cm = float(section4.get("daily_gains_cm") or 0.0)
-    adult_height_live_cm = float(section4.get("height_live_cm") or adult_base_cm)
+    adult_base_cm = _safe_float(base_height_cm, 0.0)
+    adult_recovered_cm = _safe_float(section4.get("recovered_so_far_cm"), 0.0)
+    adult_daily_gain_cm = _safe_float(section4.get("daily_gains_cm"), 0.0)
+    adult_height_live_cm = _safe_float(section4.get("height_live_cm"), adult_base_cm)
 
     top_cards = [
         {"key": "base_height", "label": "Base Height", "value_cm": round(adult_base_cm, 3)},
@@ -102,8 +111,8 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     section8 = payload.get("section8_mapping_summary") or {}
     teen_map = section8.get("teen_dashboard_mapping") or {}
     adult_map = section8.get("adult_dashboard_mapping") or {}
-    teen_nutrition_dots = int(teen_map.get("teen_nutrition_dots") or 0)
-    teen_lifestyle_dots = int(teen_map.get("teen_lifestyle_dots") or 0)
+    teen_nutrition_dots = _safe_int(teen_map.get("teen_nutrition_dots"), 0)
+    teen_lifestyle_dots = _safe_int(teen_map.get("teen_lifestyle_dots"), 0)
     # Section 5.10 — single formula for combined % (same as section8 teen_dashboard_mapping).
     teen_lifestyle_nutrition_pct = (
         teen_lifestyle_nutrition_combined_percent(teen_nutrition_dots, teen_lifestyle_dots)
@@ -118,23 +127,23 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         combined_completion = None
     _pb_src = (teen_map if is_teen else adult_map).get("progress_bars_percent") or {}
     if isinstance(_pb_src, dict) and _pb_src:
-        posture_bars = {str(k): int(v) for k, v in _pb_src.items()}
+        posture_bars = {str(k): _safe_int(v, 0) for k, v in _pb_src.items()}
         # Always provide a precise (2-decimal) variant derived from the live segment math.
         # `progress_bars_percent` is legacy int-only mapping; UI can prefer the precise values.
         posture_bars_precise = {
-            seg: float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)) or 0.0)
+            seg: _safe_float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)), 0.0)
             for seg, seg_payload in segments.items()
         }
     else:
         posture_bars = {
-            seg: int((seg_payload or {}).get("percent_optimized", 0) or 0)
+            seg: _safe_int((seg_payload or {}).get("percent_optimized"), 0)
             for seg, seg_payload in segments.items()
         }
         posture_bars_precise = {
-            seg: float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)) or 0.0)
+            seg: _safe_float((seg_payload or {}).get("percent_optimized_precise", posture_bars.get(seg, 0)), 0.0)
             for seg, seg_payload in segments.items()
         }
-    today_streak = int(((streaks.get("health") or {}).get("current_streak") or 0))
+    today_streak = _safe_int(((streaks.get("health") or {}).get("current_streak")), 0)
     leaderboard = streaks.get("leaderboard") or {}
     # `get_user_leaderboard_rank()` returns `my_rank` / `total_rank` (not `rank`).
     rank_value = None
@@ -159,9 +168,9 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     # must flatline at the trial-end snapshot while blue continues to rise.
     if teen_locked_post_day7 and display_lines.get("red_us_optimized_line_cm") is not None:
         try:
-            teen_live_red_cm = float(display_lines.get("red_us_optimized_line_cm") or teen_live_red_cm)
-            teen_height_live_cm = float(teen_live_red_cm)
-            teen_growthmax_cm = float(teen_live_red_cm)
+            teen_live_red_cm = _safe_float(display_lines.get("red_us_optimized_line_cm"), teen_live_red_cm)
+            teen_height_live_cm = _safe_float(teen_live_red_cm, teen_height_live_cm)
+            teen_growthmax_cm = _safe_float(teen_live_red_cm, teen_growthmax_cm)
         except Exception:
             logger.exception("Failed applying teen_locked_post_day7 red-line override")
     # Spec (Section 5.6 / 7.2): True Optimized Height is revealed ONLY when paid (not during trial).
@@ -176,12 +185,12 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     anomalies = []
     # Build target metrics from growth projection (forecast model).
     try:
-        teen_target_blue_cm = float(growth_projection.get("estimated_genetic_height_cm") or 0.0)
+        teen_target_blue_cm = _safe_float(growth_projection.get("estimated_genetic_height_cm"), 0.0)
     except Exception:
         logger.exception("Failed parsing estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("estimated_genetic_height_cm"))})
         teen_target_blue_cm = 0.0
     try:
-        teen_target_red_cm = float(growth_projection.get("optimized_estimated_genetic_height_cm") or 0.0)
+        teen_target_red_cm = _safe_float(growth_projection.get("optimized_estimated_genetic_height_cm"), 0.0)
     except Exception:
         logger.exception("Failed parsing optimized_estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("optimized_estimated_genetic_height_cm"))})
         teen_target_red_cm = 0.0
@@ -192,7 +201,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     # Target invariants: optimized (red) must not be below genetic (blue).
     teen_target_red_cm = max(teen_target_red_cm, teen_target_blue_cm)
     try:
-        teen_target_unoptimized_cm = float(growth_projection.get("unoptimized_estimated_genetic_height_cm") or 0.0)
+        teen_target_unoptimized_cm = _safe_float(growth_projection.get("unoptimized_estimated_genetic_height_cm"), 0.0)
     except Exception:
         logger.exception("Failed parsing unoptimized_estimated_genetic_height_cm", extra={"value": repr(growth_projection.get("unoptimized_estimated_genetic_height_cm"))})
         teen_target_unoptimized_cm = 0.0
@@ -275,14 +284,12 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     )
     teen_chart_unoptimized_cm = teen_target_unoptimized_cm
     canonical_chart = payload.get("chart_breakdown")
-    adult_target_height_cm = float(section4.get("target_height_cm") or adult_height_live_cm or adult_base_cm)
+    adult_target_height_cm = _safe_float(section4.get("target_height_cm") or adult_height_live_cm or adult_base_cm, adult_base_cm)
     try:
-        adult_estimated_genetic_cm = float(
-            growth_projection.get("estimated_genetic_height_cm") or adult_base_cm
-        )
+        adult_estimated_genetic_cm = _safe_float(growth_projection.get("estimated_genetic_height_cm"), adult_base_cm)
     except Exception:
-        adult_estimated_genetic_cm = float(adult_base_cm)
-    adult_optimized_estimated_cm = float(max(adult_target_height_cm, adult_estimated_genetic_cm))
+        adult_estimated_genetic_cm = _safe_float(adult_base_cm, 0.0)
+    adult_optimized_estimated_cm = _safe_float(max(adult_target_height_cm, adult_estimated_genetic_cm), adult_base_cm)
     # Spec adult dashboard does not use teen-style genetic projection comparisons.
     adult_unoptimized_cm = None
     adult_diff_cm = None
@@ -317,12 +324,13 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
     from utils.posture.height_loss_display import height_loss_display_cm
 
     hl = height_loss_display_cm(user)
-    remaining_loss_cm = float(hl.get("remaining_cm") or 0.0)
-    initial_recoverable_cm = float(
+    remaining_loss_cm = _safe_float(hl.get("remaining_cm"), 0.0)
+    initial_recoverable_cm = _safe_float(
         hl.get("starting_cm")
         or diagnostics.get("total_recoverable_loss_cm")
         or remaining_loss_cm
-        or 0.0
+        or 0.0,
+        0.0,
     )
     height_loss_box = {
         "label": "Height Lost to Posture",
@@ -387,7 +395,7 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             "rescan_timer_days": scan_access.get("Re_Scan_Timer"),
             "teen_scan_required": bool(scan_access.get("teen_scan_required", False)),
             "can_reassess": bool(scan_access.get("can_reassess", scan_access.get("can_scan"))),
-            "workouts_logged_today": int(scan_access.get("workouts_logged_today") or 0),
+            "workouts_logged_today": _safe_int(scan_access.get("workouts_logged_today"), 0),
             "reassess_message": scan_access.get("reassess_message") or "",
         },
         "top_graph": {
@@ -407,42 +415,43 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
         "routine_progress": {
             "cta": nav.get("primary_cta") or "Start Today's Routine",
             "posture_exercises_fraction": section4_posture.get("fraction_today"),
-            "posture_exercises_done": int(section4_posture.get("completed_total_today") or 0),
-            "posture_exercises_total": int(section4_posture.get("assigned_total") or 0),
-            "exercises_done": int(section4_posture.get("completed_total_today") or 0),
-            "total_exercises": int(section4_posture.get("assigned_total") or 0),
+            "posture_exercises_done": _safe_int(section4_posture.get("completed_total_today"), 0),
+            "posture_exercises_total": _safe_int(section4_posture.get("assigned_total"), 0),
+            "exercises_done": _safe_int(section4_posture.get("completed_total_today"), 0),
+            "total_exercises": _safe_int(section4_posture.get("assigned_total"), 0),
             "habits_logged": habits_logged_count,
             "posture_exercises_percent": (
-                int(
+                _safe_int(
                     round(
                         (
-                            (int(section4_posture.get("completed_total_today") or 0) / max(1, int(section4_posture.get("assigned_total") or 0)))
+                            (_safe_int(section4_posture.get("completed_total_today"), 0) / max(1, _safe_int(section4_posture.get("assigned_total"), 0)))
                             * 100.0
                         )
-                    )
+                    ),
+                    0,
                 )
-                if int(section4_posture.get("assigned_total") or 0) > 0
+                if _safe_int(section4_posture.get("assigned_total"), 0) > 0
                 else 0
             ),
             "nutrition_percent": (
-                int(combined_completion["percent"])
+                _safe_int(combined_completion.get("percent"), 0)
                 if combined_completion is not None
                 else (
-                    int(teen_lifestyle_nutrition_pct)
+                    _safe_int(teen_lifestyle_nutrition_pct, 0)
                     if is_teen
-                    else int(section4.get("posture_nutrition_percent") or 0)
+                    else _safe_int(section4.get("posture_nutrition_percent"), 0)
                 )
             ),
             # Bug 11 — shared completion number that only hits 100% when BOTH lifestyle
             # (or adult nutrition) AND habits are fully done.
             "completion_percent": (
-                int(combined_completion["percent"]) if combined_completion is not None else None
+                _safe_int(combined_completion.get("percent"), 0) if combined_completion is not None else None
             ),
             "completion_breakdown": combined_completion,
             "teen_nutrition_dots": teen_nutrition_dots if is_teen else None,
             "teen_lifestyle_dots": teen_lifestyle_dots if is_teen else None,
             "streak_days": today_streak,
-            "daily_points": int(payload.get("today_total_score") or 0),
+            "daily_points": _safe_int(payload.get("today_total_score"), 0),
             "daily_points_breakdown": payload.get("today_score_breakdown"),
             "rank": rank_value,
         },

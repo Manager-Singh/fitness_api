@@ -811,8 +811,8 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         default=0.0,
     )
     # Spec: separate *genetic target* from *true optimized* and from *current height*.
-    genetic_height_cm = float(optimized_result.get("mph_height_cm") or 0.0)
-    true_optimized_cm = float(optimized_result.get("optimized_height_cm") or 0.0)
+    genetic_height_cm = _profile_float(optimized_result.get("mph_height_cm"), default=0.0)
+    true_optimized_cm = _profile_float(optimized_result.get("optimized_height_cm"), default=0.0)
     genetic_diff, genetic_status = GrowthProjectionService.calculate_genetic_status(
         current_cm_val, genetic_height_cm
     )
@@ -827,7 +827,10 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     # - genetic_blue target = MPH
     # - us_optimized_red target = MPH + posture potential (capped by premium posture boost max)
     # - true_optimized_green target = full optimized height (paid/trial reveal), never below red
-    red_us_optimized_target_cm = float(genetic_height_cm + min(float(teen_profile.posture_potential_cm or 0.0), float(POSTURE_BOOST_MAX_CM)))
+    red_us_optimized_target_cm = float(
+        genetic_height_cm
+        + min(_profile_float(teen_profile.posture_potential_cm, default=0.0), float(POSTURE_BOOST_MAX_CM))
+    )
     if true_optimized_cm > 0:
         true_optimized_cm = max(true_optimized_cm, red_us_optimized_target_cm)
     # UI reveal: true optimized is only shown for paid teen (or trial access is handled by dashboard-new lock flag).
@@ -848,7 +851,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     lower_bound_cm = genetic_height_cm - 2
     optimized_ceiling_cm = red_us_optimized_target_cm
     posture_boost_for_chart = min(
-        float(teen_profile.posture_potential_cm or 0.0),
+        _profile_float(teen_profile.posture_potential_cm, default=0.0),
         float(POSTURE_BOOST_MAX_CM),
     )
     genetic_height_cm, optimized_ceiling_cm, lower_bound_cm = floor_teen_projection_targets(
@@ -888,7 +891,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     )
     # runtime_state already computed above (includes questionnaire unlock state).
     runtime_total_recoverable_loss_cm = round(
-        float(runtime_state.get("total_recoverable_loss_um", 0)) / 10000.0,
+        _profile_float(runtime_state.get("total_recoverable_loss_um"), default=0.0) / 10000.0,
         4,
     )
     if runtime_total_recoverable_loss_cm > 0:
@@ -990,7 +993,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     # Spec naming convention aliases (UI labels vs backend keys).
     # Use runtime ledger first (authoritative); fallback to score-derived conversion.
     runtime_height_um = runtime_state.get("current_height_um")
-    posture_plus_cumulative_cm = round(float(score_summary.get("total_engine1_points", 0)) * 0.001, 4)
+    posture_plus_cumulative_cm = round(_profile_float(score_summary.get("total_engine1_points"), default=0.0) * 0.001, 4)
     if is_adult_track:
         # Live dashboard: ledger cumulative gain (includes habits/workouts after rebuild_ledger).
         posture_plus_cumulative_cm = live_cumulative_gain_cm(user)
@@ -1017,7 +1020,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                         )
                         continue
     genetic_plus_cumulative_cm = round(
-        float(score_summary.get("teen_engine2_boost_cm", 0)),
+        _profile_float(score_summary.get("teen_engine2_boost_cm"), default=0.0),
         4,
     ) if is_teen_track else 0.0
     teen_engine1_cumulative_cm = 0.0
