@@ -383,6 +383,9 @@ def build_dashboard_new_from_payload(user, payload, *, include_debug=False):
             ),
             "rescan_timer_days": scan_access.get("Re_Scan_Timer"),
             "teen_scan_required": bool(scan_access.get("teen_scan_required", False)),
+            "can_reassess": bool(scan_access.get("can_reassess", scan_access.get("can_scan"))),
+            "workouts_logged_today": int(scan_access.get("workouts_logged_today") or 0),
+            "reassess_message": scan_access.get("reassess_message") or "",
         },
         "top_graph": {
             "cards": top_cards,

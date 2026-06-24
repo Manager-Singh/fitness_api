@@ -18,6 +18,18 @@ from posture_questions.models import PostureQuestion
 from posture_questions.views import upsert_posture_questions
 from user_profile.models import UserProfile
 from users.models import PostureState
+from utils.reassess_lock import REASSESS_BLOCKED_MESSAGE
+from workouts.models import (
+    Exercise,
+    ExerciseCategory,
+    RoutineType,
+    Tier,
+    Unit,
+    UserRoutine,
+    UserRoutineExercise,
+    WorkoutEntry,
+    WorkoutSession,
+)
 
 User = get_user_model()
 
@@ -117,6 +129,44 @@ class QuestionnaireSubmitTests(TestCase, QuestionnaireSubmitRequestMixin):
     def _call_upsert(self, user, body: dict):
         request = self._factory_post(user, body)
         return upsert_posture_questions(request)
+
+    def test_reassess_blocked_after_same_day_workout(self, _mock_sub):
+        u = self._create_user_with_profile(email_suffix="blocked_reassess", years_old=28)
+        ex = Exercise.objects.create(
+            name="Reassess Lock Wall Angels",
+            points=7,
+            category=ExerciseCategory.POSTURE,
+            spinal_pct=30,
+            collapse_pct=70,
+            pelvic_pct=0,
+            legs_pct=0,
+            potency=7,
+        )
+        routine = UserRoutine.objects.create(user=u, routine_type=RoutineType.POSTURE, is_active=True)
+        ure = UserRoutineExercise.objects.create(
+            routine=routine,
+            exercise=ex,
+            tier=Tier.CORE,
+            order=1,
+            sets=2,
+            qty_min=10,
+            unit=Unit.REPS,
+        )
+        session = WorkoutSession.objects.create(user=u, user_routine=routine, date=date.today())
+        WorkoutEntry.objects.create(
+            session=session,
+            user_routine_exercise=ure,
+            exercise=ex,
+            points=7,
+        )
+
+        resp = self._call_upsert(u, _full_questionnaire_body())
+
+        self.assertEqual(resp.status_code, 423)
+        self.assertEqual(resp.data["error"], "reassess_locked_after_workout")
+        self.assertFalse(resp.data["can_reassess"])
+        self.assertEqual(resp.data["workouts_logged_today"], 1)
+        self.assertEqual(resp.data["message"], REASSESS_BLOCKED_MESSAGE)
 
     def test_unauthenticated_returns_401_or_403(self, _mock_sub):
         from rest_framework.test import APIRequestFactory
@@ -330,19 +380,19 @@ class Issue9VisualQuestionnaireScoringTests(TestCase):
         self.assertAlmostEqual(r["total_recoverable_loss_cm"], 8.00, places=2)
         self.assertAlmostEqual(self._bars_sum(r), 8.00, places=2)
 
-    def test_all_a_hits_floor(self):
+    def test_all_a_hits_zero_anchor(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
         r = compute_issue9_visual_results({q: "A" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 1.00, places=2)
-        self.assertAlmostEqual(self._bars_sum(r), 1.00, places=2)
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 0.00, places=2)
+        self.assertAlmostEqual(self._bars_sum(r), 0.00, places=2)
 
     def test_all_c_total(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results
 
         r = compute_issue9_visual_results({q: "C" for q in ("q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8")})
-        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 3.20, places=2)
-        self.assertAlmostEqual(self._bars_sum(r), 3.20, places=2)
+        self.assertAlmostEqual(r["total_recoverable_loss_cm"], 2.87, places=2)
+        self.assertLessEqual(abs(self._bars_sum(r) - r["total_recoverable_loss_cm"]), 0.02)
 
     def test_q8_adds_loss_never_halves(self):
         from utils.posture.issue9_visual_scoring import compute_issue9_visual_results

@@ -113,6 +113,25 @@ class TargetedEngine1RecoveryTests(TestCase):
         self.assertGreater(strict["legs"], 0)
         self.assertEqual(result["trained_primary_pillars"], ["legs"])
 
+    def test_single_legs_workout_stays_sub_one_percent_recovery(self):
+        ex = self._exercise("Hamstring Stretch", 6)
+        WorkoutEntry.objects.create(session=self.session, exercise=ex, points=6)
+
+        result = compute_targeted_engine1_recovery(
+            self.user,
+            self.log_date,
+            age=25,
+            state=self.state,
+            adult_nutrition_points=0,
+            habit_points=0,
+        )
+
+        legs_um = result["engine1_segment_shares_um"]["legs"]
+        legs_percent = (legs_um / float(self.state.legs_current_loss_um)) * 100.0
+        self.assertEqual(legs_um, 42)
+        self.assertAlmostEqual(legs_percent, 0.42, places=2)
+        self.assertLess(legs_percent, 1.0)
+
     def test_full_core_pillars_collect_all_strict_shares(self):
         for name in [
             "Decompression Hang",

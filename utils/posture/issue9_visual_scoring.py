@@ -21,17 +21,28 @@ def _opt_pct(current_loss_cm: float, max_loss_cm: float) -> float:
     return float(_clamp(pct, 0.0, 100.0))
 
 
-ISSUE9_ADULT_MIN_TOTAL_LOSS_CM = 1.0
+ISSUE9_ADULT_MIN_TOTAL_LOSS_CM = 0.0
 ISSUE9_TEEN_MIN_TOTAL_LOSS_CM = 0.0
 ISSUE9_MAX_TOTAL_LOSS_CM = 8.0
 
 ANSWER_FRACTIONS: Dict[str, float] = {
     "A": 0.0,
-    "B": 0.2,
-    "C": 0.4,
-    "D": 0.6,
-    "E": 0.8,
+    "B": 0.17,
+    "C": 0.36,
+    "D": 0.58,
+    "E": 0.79,
     "F": 1.0,
+}
+
+QUESTION_MULTIPLIERS: Dict[str, float] = {
+    "q1": 1.00,
+    "q2": 0.96,
+    "q3": 1.03,
+    "q4": 0.98,
+    "q5": 1.02,
+    "q6": 0.97,
+    "q7": 1.01,
+    "q8": 0.99,
 }
 
 ISSUE9_MAX_LOSS = {
@@ -66,7 +77,14 @@ def compute_issue9_visual_results(
         if a.get(k) not in ANSWER_FRACTIONS:
             raise ValueError(f"Missing/invalid answer for {k}")
 
-    f = {k: float(ANSWER_FRACTIONS[a[k]]) for k in a}
+    def _fraction(question: str, answer: str) -> float:
+        if answer == "A":
+            return 0.0
+        if answer == "F":
+            return 1.0
+        return min(1.0, float(ANSWER_FRACTIONS[answer]) * float(QUESTION_MULTIPLIERS[question]))
+
+    f = {k: _fraction(k, a[k]) for k in a}
     factor = posture_height_factor(height_cm)
     scaled_max_by_key = height_scaled_segment_max_loss_cm(height_cm)
     scaled_max = {
@@ -125,6 +143,8 @@ def compute_issue9_visual_results(
         "ranked_segments": ranked,
         "meta": {
             "answer_fractions": ANSWER_FRACTIONS,
+            "question_multipliers": QUESTION_MULTIPLIERS,
+            "effective_fractions": {k: round(v, 6) for k, v in f.items()},
             "reference_height_cm": REFERENCE_HEIGHT_CM,
             "height_cm": height_cm,
             "height_factor": round(factor, 6),

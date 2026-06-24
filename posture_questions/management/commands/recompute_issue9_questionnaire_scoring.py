@@ -116,7 +116,7 @@ class Command(BaseCommand):
 
             profile = getattr(posture_q.user, "profile", None)
             height_cm = getattr(profile, "current_height_cm", None) or getattr(profile, "base_height_cm", None)
-            result = compute_issue9_visual_results(letters, height_cm=height_cm, clamp_min_cm=1.0)
+            result = compute_issue9_visual_results(letters, height_cm=height_cm, clamp_min_cm=0.0)
             new_total = float(result["total_recoverable_loss_cm"])
 
             state = PostureState.objects.filter(user_id=posture_q.user_id).first()

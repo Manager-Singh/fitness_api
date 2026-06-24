@@ -1,9 +1,9 @@
 from rest_framework import serializers
-from django.utils import timezone
 from .models import UserRoutine, UserRoutineExercise, WorkoutEntry
 from user_profile.models import UserProfile
 from django.forms.models import model_to_dict
 from utils.exercise_library import section6_display_copy_for_exercise
+from utils.user_time import user_today
 
 
 # class UserRoutineExerciseSerializer(serializers.ModelSerializer):
@@ -156,7 +156,7 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        today = timezone.localdate()
+        today = user_today(request.user)
         return WorkoutEntry.objects.filter(
             session__user=request.user,
             session__date=today,

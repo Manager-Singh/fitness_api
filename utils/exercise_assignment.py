@@ -212,6 +212,49 @@ def _pick_for_allocated_pillars(
     return selected
 
 
+def _pick_hgh_exercises(
+    pool: Iterable[Any],
+    count: int,
+    *,
+    exclude: Sequence[Any] = (),
+) -> list[Any]:
+    blocked_ids = {getattr(e, "id", None) for e in exclude}
+    blocked_keys = {
+        dedupe_name_key(getattr(e, "name", "") or "")
+        for e in exclude
+    }
+    candidates: list[Any] = []
+    seen_keys: set[str] = set()
+    for ex in pool:
+        if getattr(ex, "id", None) in blocked_ids:
+            continue
+        key = dedupe_name_key(getattr(ex, "name", "") or "")
+        if key and (key in blocked_keys or key in seen_keys):
+            continue
+        cat = str(getattr(ex, "category", "") or "").lower()
+        is_hgh = bool(
+            getattr(ex, "teen_only", False)
+            or cat == "hgh"
+            or key in TEEN_ONLY_HGH_NAMES
+        )
+        if not is_hgh:
+            continue
+        candidates.append(ex)
+        if key:
+            seen_keys.add(key)
+
+    candidates.sort(
+        key=lambda ex: (
+            getattr(ex, "hgh_score", 0) or 0,
+            spec_points_for_exercise(ex),
+            getattr(ex, "beast_bonus", 0) or 0,
+            normalize_exercise_name(getattr(ex, "name", "") or ""),
+        ),
+        reverse=True,
+    )
+    return candidates[:max(0, int(count or 0))]
+
+
 def get_age_multipliers(age: int) -> tuple[float, float]:
     """Returns (hgh_mult, posture_mult) per Exercise Assignment Spec Part 2."""
     age = int(age)
@@ -426,6 +469,13 @@ def select_teen_recommended_beast(
     *,
     reserved_beast: Sequence[Any] = (),
 ) -> tuple[list[Any], list[Any]]:
+    growth_window_open = 13 <= int(age or 0) <= 18
+    posture_optimized = sum(max(0.0, float(losses.get(p, 0) or 0)) for p in _PILLARS) <= 0
+
+    if growth_window_open and posture_optimized:
+        hgh_extra = _pick_hgh_exercises(pool, 4, exclude=list(core_exercises) + list(reserved_beast))
+        return hgh_extra[:2], hgh_extra[2:4]
+
     slots = allocate_variable_slots(losses, core_exercises, count=4, share_pts=3.0)
     extra = _pick_for_allocated_pillars(
         pool,
@@ -434,6 +484,12 @@ def select_teen_recommended_beast(
         exclude=reserved_beast,
         allow_teen_only=False,
     )
+    if growth_window_open:
+        existing = list(core_exercises) + list(reserved_beast) + list(extra)
+        guaranteed_hgh = _pick_hgh_exercises(pool, 1, exclude=existing)
+        if guaranteed_hgh:
+            extra = (extra[:3] + guaranteed_hgh)[:4]
+
     recommended = extra[:2]
     beast = extra[2:4]
     return recommended, beast

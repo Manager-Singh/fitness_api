@@ -1047,6 +1047,7 @@ from users.models import HeightLedger, PostureState
 from users.spec_runtime import apply_pending_pre_scan_engine1
 from utils.age import get_user_age_exact
 from utils.age import get_user_age
+from utils.reassess_lock import reassess_block_response
 
 logger = logging.getLogger(__name__)
 
@@ -1118,6 +1119,10 @@ def _enforce_scan_access(user):
     - Teen unpaid: first scan only.
     - Teen paid: re-scan every 7 days.
     """
+    reassess_payload, reassess_status = reassess_block_response(user)
+    if reassess_payload:
+        return reassess_payload, reassess_status
+
     try:
         age = int(get_user_age(user) or 0)
     except Exception:

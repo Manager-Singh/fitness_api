@@ -55,6 +55,69 @@ class WorkoutLogViewSet(viewsets.ViewSet):
                     pass
         return log_date
 
+    @staticmethod
+    def _response_payload(request, *, log_date, age, entry, counts_toward_engine, duplicate=False):
+        total_workouts_today = WorkoutSession.objects.filter(
+            user=request.user,
+            date=log_date
+        ).aggregate(total=Count("entries"))["total"] or 0
+        daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
+        daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
+        daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
+        # Match POST /api/nutra-logs: capped traceable food from entries (DailyLog.food_points
+        # stays 0 for many adults until engine rules; teens looked "correct" by coincidence).
+        raw_food_pts = float(
+            NutraEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+                food__isnull=False,
+            ).aggregate(total=Sum("score"))["total"]
+            or 0
+        )
+        if int(age or 0) >= 21:
+            from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
+
+            exercise_any = WorkoutEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+            ).exists()
+            posture_pts = float(
+                WorkoutEntry.objects.filter(
+                    session__user=request.user,
+                    session__date=log_date,
+                    session__user_routine__routine_type__iexact="posture",
+                ).aggregate(total=Sum("points"))["total"]
+                or 0
+            )
+            entries = NutraEntry.objects.filter(
+                session__user=request.user,
+                session__date=log_date,
+                food__isnull=False,
+            ).select_related("module")
+            d_ids, m_ids = adult_disc_muscle_food_id_sets(entries)
+            traceable = adult_engine_nutrition_points(posture_pts, d_ids, m_ids) if exercise_any else 0.0
+            daily_nutrition_pts_today = int(round(traceable))
+        else:
+            cap_limit = 35.0
+            daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
+        daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
+
+        payload = {
+            "logged": True,
+            "duplicate": bool(duplicate),
+            "log_date": str(log_date),
+            "counts_toward_engine": bool(counts_toward_engine),
+            "daily_posture_pts_today": daily_posture_pts_today,
+            "daily_hgh_pts_today": daily_hgh_pts_today,
+            "daily_nutrition_pts_today": daily_nutrition_pts_today,
+            "daily_lifestyle_pts_today": daily_lifestyle_pts_today,
+            "exercises_done": bool(total_workouts_today > 0),
+            "entry": WorkoutEntryReadSerializer(entry).data,
+            "total_workouts_today": total_workouts_today,
+        }
+        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date, request=request)
+        return payload
+
     def list(self, request):
         date_q = request.query_params.get("date")
         try:
@@ -150,28 +213,30 @@ class WorkoutLogViewSet(viewsets.ViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         routine_type = str(getattr(user_routine, "routine_type", "") or "").lower()
-        last_entry = (
-            session.entries.filter(exercise=exercise).order_by("-created_at").first()
-            if exercise else None
-        )
-        if last_entry and (timezone.now() - last_entry.created_at).total_seconds() < 60:
-            return Response(
-                {
-                    "error": "duplicate_log",
-                    "message": "This exercise was already logged within 60 seconds.",
-                    "cooldown_s": 60,
-                },
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
         entry_payload = dict(ser.validated_data)
         entry_payload.pop("client_timestamp", None)
         # Ensure the logged entry is linked to the assigned routine exercise.
         # Dashboard progress counts distinct `user_routine_exercise_id` completions.
+        assigned_ure = None
         if exercise:
-            entry_payload["user_routine_exercise"] = UserRoutineExercise.objects.filter(
+            assigned_ure = UserRoutineExercise.objects.filter(
                 routine=user_routine,
                 exercise=exercise,
             ).first()
+            entry_payload["user_routine_exercise"] = assigned_ure
+        duplicate_qs = session.entries.filter(user_routine_exercise=assigned_ure) if assigned_ure else session.entries.filter(exercise=exercise)
+        existing_entry = duplicate_qs.order_by("created_at").first()
+        if existing_entry:
+            payload = self._response_payload(
+                request,
+                log_date=log_date,
+                age=age,
+                entry=existing_entry,
+                counts_toward_engine=False,
+                duplicate=True,
+            )
+            payload["message"] = "This workout is already completed for today."
+            return Response(payload, status=status.HTTP_200_OK)
         entry = session.entries.create(**entry_payload)
         apply_engine_routing(
             user=request.user,
@@ -183,66 +248,13 @@ class WorkoutLogViewSet(viewsets.ViewSet):
         )
         # Spec alignment UX: make dashboard numbers update immediately after logging.
         rebuild_ledger_from_date(request.user, log_date)
-
-        # Count total workouts logged today
-        total_workouts_today = WorkoutSession.objects.filter(
-            user=request.user,
-            date=log_date
-        ).aggregate(total=Count("entries"))["total"] or 0
-        daily = DailyLog.objects.filter(user=request.user, log_date=log_date).first()
-        daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)
-        daily_hgh_pts_today = int((daily.engine2_points if daily else 0) or 0)
-        # Match POST /api/nutra-logs: capped traceable food from entries (DailyLog.food_points
-        # stays 0 for many adults until engine rules; teens looked "correct" by coincidence).
-        raw_food_pts = float(
-            NutraEntry.objects.filter(
-                session__user=request.user,
-                session__date=log_date,
-                food__isnull=False,
-            ).aggregate(total=Sum("score"))["total"]
-            or 0
+        payload = self._response_payload(
+            request,
+            log_date=log_date,
+            age=age,
+            entry=entry,
+            counts_toward_engine=True,
         )
-        if int(age or 0) >= 21:
-            from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
-
-            exercise_any = WorkoutEntry.objects.filter(
-                session__user=request.user,
-                session__date=log_date,
-            ).exists()
-            posture_pts = float(
-                WorkoutEntry.objects.filter(
-                    session__user=request.user,
-                    session__date=log_date,
-                    session__user_routine__routine_type__iexact="posture",
-                ).aggregate(total=Sum("points"))["total"]
-                or 0
-            )
-            entries = NutraEntry.objects.filter(
-                session__user=request.user,
-                session__date=log_date,
-                food__isnull=False,
-            ).select_related("module")
-            d_ids, m_ids = adult_disc_muscle_food_id_sets(entries)
-            traceable = adult_engine_nutrition_points(posture_pts, d_ids, m_ids) if exercise_any else 0.0
-            daily_nutrition_pts_today = int(round(traceable))
-        else:
-            cap_limit = 35.0
-            daily_nutrition_pts_today = int(round(min(raw_food_pts, cap_limit)))
-        daily_lifestyle_pts_today = int((daily.lifestyle_points if daily else 0) or 0)
-
-        payload = {
-            "logged": True,
-            "log_date": str(log_date),
-            "counts_toward_engine": True,
-            "daily_posture_pts_today": daily_posture_pts_today,
-            "daily_hgh_pts_today": daily_hgh_pts_today,
-            "daily_nutrition_pts_today": daily_nutrition_pts_today,
-            "daily_lifestyle_pts_today": daily_lifestyle_pts_today,
-            "exercises_done": bool(total_workouts_today > 0),
-            "entry": WorkoutEntryReadSerializer(entry).data,
-            "total_workouts_today": total_workouts_today,
-        }
-        payload["dashboard_new"] = build_dashboard_new_embed(request.user, log_date, request=request)
         return Response(payload, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):

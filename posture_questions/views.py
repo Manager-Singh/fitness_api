@@ -106,12 +106,17 @@ from utils.posture.teen_genetic_average import (
     compute_daily_genetic_average_gain_cm,
     compute_genetic_average_cm,
 )
+from utils.reassess_lock import reassess_block_response, reassess_lock_status
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upsert_posture_questions(request):
     user = request.user
+    lock_payload, lock_status = reassess_block_response(user)
+    if lock_payload:
+        return Response(lock_payload, status=lock_status)
+
     try:
         profile = UserProfile.objects.get(user=user)
     except UserProfile.DoesNotExist:
@@ -256,7 +261,7 @@ def upsert_posture_questions(request):
                 issue9_result = compute_issue9_visual_results(
                     issue9_letters,
                     height_cm=current_height,
-                    clamp_min_cm=1.0 if is_adult else 0.0,
+                    clamp_min_cm=0.0,
                 )
                 total_recoverable = float(issue9_result["total_recoverable_loss_cm"])
                 target_height = round(base_height + total_recoverable, 2)
@@ -1034,6 +1039,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     except Exception:
         trial_cutoff_date = None
     user_local_today = user_today(user)
+    reassess_status = reassess_lock_status(user)
     if is_teen_track:
         qs = HeightLedger.objects.filter(user=user, entry_type="daily_compute")
 
@@ -1345,14 +1351,17 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                 "email": user.email,
             },
             "scan_access": {
-                "can_scan": can_scan,
+                "can_scan": bool(can_scan and reassess_status["can_reassess"]),
                 "remaining_scans": remaining_scans,
-                "scan_message": scan_message,
+                "scan_message": reassess_status["reassess_message"] or scan_message,
                 "rescan_days": rescan_days,
                 "days_since_scan": days_since_scan,
                 "teen_scan_required": teen_scan_required,
                 "scan_completed": canonical_scan_completed,
                 "Re_Scan_Timer": rescan_timer_days,
+                "can_reassess": reassess_status["can_reassess"],
+                "workouts_logged_today": reassess_status["workouts_logged_today"],
+                "reassess_message": reassess_status["reassess_message"],
             },
             "subscription": subscription_data,
             "today_total_score": today_total_score,

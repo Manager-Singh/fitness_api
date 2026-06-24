@@ -13,6 +13,9 @@ class DashboardNewScanSerializer(serializers.Serializer):
     scan_message = serializers.CharField(allow_blank=True, allow_null=True)
     rescan_timer_days = serializers.IntegerField(allow_null=True)
     teen_scan_required = serializers.BooleanField()
+    can_reassess = serializers.BooleanField(required=False)
+    workouts_logged_today = serializers.IntegerField(required=False)
+    reassess_message = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class DashboardNewTopGraphSerializer(serializers.Serializer):

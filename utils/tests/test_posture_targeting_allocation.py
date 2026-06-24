@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
-from utils.exercise_assignment import allocate_variable_slots, select_adult_recommended_beast
+from utils.exercise_assignment import (
+    allocate_variable_slots,
+    select_adult_recommended_beast,
+    select_teen_recommended_beast,
+)
 from workouts.exercise_assignment_data import EXERCISE_ASSIGNMENT_SPEC
 
 
@@ -57,3 +61,54 @@ class PostureTargetingAllocationTests(SimpleTestCase):
         self.assertTrue(selected)
         self.assertTrue(all(not ex.teen_only for ex in selected))
         self.assertIn("Standing Posture Reset", {ex.name for ex in selected})
+
+    def test_teen_13_to_18_gets_guaranteed_hgh_final_variable_slot(self):
+        pool = [
+            _ex("decompression hang", 10),
+            _ex("standing posture reset", 11),
+            _ex("doorway chest stretch", 12),
+            _ex("glute bridges", 13),
+            _ex("hamstring stretch", 14),
+            _ex("box jumps", 15),
+            _ex("high knees", 16),
+        ]
+        core = [_ex("jump rope", 20), _ex("wall angels", 21), _ex("glute bridges", 22)]
+        losses = {"spinal": 2.0, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
+
+        rec, beast = select_teen_recommended_beast(pool, losses, 14, core)
+
+        self.assertEqual(len(rec + beast), 4)
+        self.assertTrue(beast[-1].teen_only)
+
+    def test_all_optimized_teen_variable_slots_become_hgh(self):
+        pool = [
+            _ex("box jumps", 10),
+            _ex("high knees", 11),
+            _ex("mountain climbers", 12),
+            _ex("lunges", 13),
+            _ex("standing posture reset", 14),
+        ]
+        core = [_ex("jump rope", 20), _ex("wall angels", 21)]
+        losses = {"spinal": 0, "collapse": 0, "pelvic": 0, "legs": 0}
+
+        rec, beast = select_teen_recommended_beast(pool, losses, 14, core)
+
+        self.assertEqual(len(rec + beast), 4)
+        self.assertTrue(all(ex.teen_only for ex in rec + beast))
+
+    def test_twenty_year_old_has_no_forced_hgh_variable_slot(self):
+        pool = [
+            _ex("decompression hang", 10),
+            _ex("standing posture reset", 11),
+            _ex("doorway chest stretch", 12),
+            _ex("glute bridges", 13),
+            _ex("hamstring stretch", 14),
+            _ex("box jumps", 15),
+        ]
+        core = [_ex("jump rope", 20), _ex("wall angels", 21), _ex("glute bridges", 22)]
+        losses = {"spinal": 2.0, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}
+
+        rec, beast = select_teen_recommended_beast(pool, losses, 20, core)
+
+        self.assertTrue(rec + beast)
+        self.assertTrue(all(not ex.teen_only for ex in rec + beast))
