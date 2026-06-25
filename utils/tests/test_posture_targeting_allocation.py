@@ -45,9 +45,9 @@ class PostureTargetingAllocationTests(SimpleTestCase):
     def test_selection_excludes_hgh_and_fills_primary_pillar_pool(self):
         pool = [
             _ex("wall angels", 10),
-            _ex("standing posture reset", 11),
+            _ex("foam roller thoracic extension", 11),
             _ex("doorway chest stretch", 12),
-            _ex("box jumps", 13),
+            _ex("box jumps / jump squats", 13),
             _ex("decompression hang", 14),
             _ex("glute bridges", 15),
             _ex("hamstring stretch", 16),
@@ -60,16 +60,19 @@ class PostureTargetingAllocationTests(SimpleTestCase):
 
         self.assertTrue(selected)
         self.assertTrue(all(not ex.teen_only for ex in selected))
-        self.assertIn("Standing Posture Reset", {ex.name for ex in selected})
+        self.assertTrue(
+            {"Foam Roller Thoracic Extension", "Doorway Chest Stretch", "Wall Angels"}
+            & {ex.name for ex in selected}
+        )
 
     def test_teen_13_to_18_gets_guaranteed_hgh_final_variable_slot(self):
         pool = [
             _ex("decompression hang", 10),
-            _ex("standing posture reset", 11),
+            _ex("foam roller thoracic extension", 11),
             _ex("doorway chest stretch", 12),
             _ex("glute bridges", 13),
             _ex("hamstring stretch", 14),
-            _ex("box jumps", 15),
+            _ex("box jumps / jump squats", 15),
             _ex("high knees", 16),
         ]
         core = [_ex("jump rope", 20), _ex("wall angels", 21), _ex("glute bridges", 22)]
@@ -82,11 +85,11 @@ class PostureTargetingAllocationTests(SimpleTestCase):
 
     def test_all_optimized_teen_variable_slots_become_hgh(self):
         pool = [
-            _ex("box jumps", 10),
+            _ex("box jumps / jump squats", 10),
             _ex("high knees", 11),
             _ex("mountain climbers", 12),
             _ex("lunges", 13),
-            _ex("standing posture reset", 14),
+            _ex("wall angels", 14),
         ]
         core = [_ex("jump rope", 20), _ex("wall angels", 21)]
         losses = {"spinal": 0, "collapse": 0, "pelvic": 0, "legs": 0}
@@ -99,11 +102,11 @@ class PostureTargetingAllocationTests(SimpleTestCase):
     def test_twenty_year_old_has_no_forced_hgh_variable_slot(self):
         pool = [
             _ex("decompression hang", 10),
-            _ex("standing posture reset", 11),
+            _ex("foam roller thoracic extension", 11),
             _ex("doorway chest stretch", 12),
             _ex("glute bridges", 13),
             _ex("hamstring stretch", 14),
-            _ex("box jumps", 15),
+            _ex("box jumps / jump squats", 15),
         ]
         core = [_ex("jump rope", 20), _ex("wall angels", 21), _ex("glute bridges", 22)]
         losses = {"spinal": 2.0, "collapse": 1.0, "pelvic": 0.8, "legs": 0.4}

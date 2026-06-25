@@ -1,138 +1,195 @@
 """
-Exercise Assignment Spec (Parts 1–2) — canonical metadata for backfill and scoring.
-Keys are normalized lookup names (lowercase); display `name` is the canonical label.
+Exercise Assignment Spec — canonical metadata for the real 29-exercise catalog
+(workoutassignments.md + EXERCISE_SPEC_SHEET.md). Phantom exercises are excluded
+from assignment pools.
 """
 
+def _pillar_pcts(primary: str, secondary: str) -> dict[str, int]:
+    pcts = {"spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 0, "legs_pct": 0}
+    field = {
+        "spinal": "spinal_pct",
+        "collapse": "collapse_pct",
+        "pelvic": "pelvic_pct",
+        "legs": "legs_pct",
+    }
+    pcts[field[primary]] = 70
+    pcts[field[secondary]] = 30
+    return pcts
+
+
 TEEN_ONLY_HGH_NAMES = frozenset({
+    "box jumps / jump squats",
     "box jumps",
-    "burpees",
-    "deep squat hold",
+    "hgh boost (sprint & burpees)",
+    "hgh boost",
     "high knees",
     "jump rope",
-    "jump squats",
     "lunges",
     "mountain climbers",
-    "sprints",
-    "squats",
     "bodyweight squats",
+    "squats",
 })
 
-# canonical_key -> spec row
-EXERCISE_ASSIGNMENT_SPEC = {
+# canonical_key -> spec row (real catalog only)
+EXERCISE_ASSIGNMENT_SPEC: dict[str, dict] = {
+    # ── Posture (21) ──
     "decompression hang": {
         "name": "Decompression Hang",
         "age_group": "both",
-        "spinal_pct": 80, "collapse_pct": 15, "pelvic_pct": 5, "legs_pct": 0,
+        **_pillar_pcts("spinal", "collapse"),
         "potency": 10, "hgh_score": 2, "beast_bonus": 3, "teen_only": False,
         "category": "posture", "points": 9,
     },
     "cobra stretch": {
         "name": "Cobra Stretch",
         "age_group": "both",
-        "spinal_pct": 70, "collapse_pct": 25, "pelvic_pct": 5, "legs_pct": 0,
+        **_pillar_pcts("spinal", "collapse"),
         "potency": 8, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
-        "category": "posture", "points": 7,
-    },
-    "hip flexor stretch": {
-        "name": "Hip Flexor Stretch",
-        "age_group": "both",
-        "spinal_pct": 10, "collapse_pct": 0, "pelvic_pct": 75, "legs_pct": 15,
-        "potency": 9, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
-        "category": "posture", "points": 7,
-    },
-    "wall angels": {
-        "name": "Wall Angels",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 65, "pelvic_pct": 5, "legs_pct": 0,
-        "potency": 9, "hgh_score": 1, "beast_bonus": 2, "teen_only": False,
-        "category": "posture", "points": 7,
-    },
-    "glute bridges": {
-        "name": "Glute Bridges",
-        "age_group": "both",
-        "spinal_pct": 10, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 20,
-        "potency": 8, "hgh_score": 3, "beast_bonus": 2, "teen_only": False,
         "category": "posture", "points": 7,
     },
     "cat-cow stretch": {
         "name": "Cat-Cow Stretch",
         "age_group": "both",
-        "spinal_pct": 60, "collapse_pct": 30, "pelvic_pct": 10, "legs_pct": 0,
+        **_pillar_pcts("spinal", "collapse"),
         "potency": 6, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
         "category": "posture", "points": 6,
     },
-    "hamstring stretch": {
-        "name": "Hamstring Stretch",
-        "age_group": "both",
-        "spinal_pct": 5, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 65,
-        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "tadasana (mountain pose)": {
-        "name": "Tadasana (Mountain Pose)",
-        "age_group": "both",
-        "spinal_pct": 40, "collapse_pct": 40, "pelvic_pct": 15, "legs_pct": 5,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "doorway chest stretch": {
-        "name": "Doorway Chest Stretch",
-        "age_group": "both",
-        "spinal_pct": 20, "collapse_pct": 75, "pelvic_pct": 5, "legs_pct": 0,
-        "potency": 8, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
     "child's pose with arm walks": {
-        "name": "Child's Pose with Arm Walks",
+        "name": "child's Pose with Arm Walks",
         "age_group": "both",
-        "spinal_pct": 50, "collapse_pct": 35, "pelvic_pct": 15, "legs_pct": 0,
+        **_pillar_pcts("spinal", "collapse"),
+        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "child's pose": {
+        "name": "Child's Pose",
+        "age_group": "both",
+        **_pillar_pcts("spinal", "collapse"),
         "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
         "category": "posture", "points": 6,
     },
     "spinal twist stretch": {
         "name": "Spinal Twist Stretch",
         "age_group": "both",
-        "spinal_pct": 70, "collapse_pct": 15, "pelvic_pct": 15, "legs_pct": 0,
+        **_pillar_pcts("spinal", "pelvic"),
         "potency": 6, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
         "category": "posture", "points": 6,
     },
-    "butterfly stretch": {
-        "name": "Butterfly Stretch",
+    "seated forward fold": {
+        "name": "Seated Forward Fold",
         "age_group": "both",
-        "spinal_pct": 5, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 25,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 5,
+        **_pillar_pcts("spinal", "legs"),
+        "potency": 8, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
+        "category": "posture", "points": 8,
+    },
+    "wall angels": {
+        "name": "Wall Angels",
+        "age_group": "both",
+        **_pillar_pcts("collapse", "spinal"),
+        "potency": 9, "hgh_score": 1, "beast_bonus": 2, "teen_only": False,
+        "category": "posture", "points": 7,
+    },
+    "doorway chest stretch": {
+        "name": "Doorway Chest Stretch",
+        "age_group": "both",
+        **_pillar_pcts("collapse", "spinal"),
+        "potency": 8, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
+        "category": "posture", "points": 6,
     },
     "chin tucks": {
         "name": "Chin Tucks",
         "age_group": "both",
-        "spinal_pct": 65, "collapse_pct": 30, "pelvic_pct": 5, "legs_pct": 0,
+        **_pillar_pcts("collapse", "spinal"),
         "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
         "category": "posture", "points": 5,
     },
     "superman hold": {
         "name": "Superman Hold",
         "age_group": "both",
-        "spinal_pct": 45, "collapse_pct": 50, "pelvic_pct": 5, "legs_pct": 0,
+        **_pillar_pcts("collapse", "spinal"),
         "potency": 7, "hgh_score": 4, "beast_bonus": 2, "teen_only": False,
         "category": "posture", "points": 7,
+    },
+    "tadasana (mountain pose)": {
+        "name": "Tadasana (Mountain Pose)",
+        "age_group": "both",
+        **_pillar_pcts("collapse", "spinal"),
+        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "foam roller thoracic extension": {
+        "name": "Foam Roller Thoracic Extension",
+        "age_group": "both",
+        **_pillar_pcts("collapse", "spinal"),
+        "potency": 9, "hgh_score": 1, "beast_bonus": 2, "teen_only": False,
+        "category": "posture", "points": 9,
+    },
+    "glute bridges": {
+        "name": "Glute Bridges",
+        "age_group": "both",
+        **_pillar_pcts("pelvic", "legs"),
+        "potency": 8, "hgh_score": 3, "beast_bonus": 2, "teen_only": False,
+        "category": "posture", "points": 7,
+    },
+    "hip flexor stretch": {
+        "name": "Hip Flexor Stretch",
+        "age_group": "both",
+        **_pillar_pcts("pelvic", "legs"),
+        "potency": 9, "hgh_score": 1, "beast_bonus": 1, "teen_only": False,
+        "category": "posture", "points": 7,
+    },
+    "pelvic tilts": {
+        "name": "Pelvic Tilts",
+        "age_group": "both",
+        **_pillar_pcts("pelvic", "spinal"),
+        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
     },
     "plank": {
         "name": "Plank",
         "age_group": "both",
-        "spinal_pct": 35, "collapse_pct": 25, "pelvic_pct": 35, "legs_pct": 5,
+        **_pillar_pcts("pelvic", "spinal"),
         "potency": 7, "hgh_score": 5, "beast_bonus": 3, "teen_only": False,
         "category": "posture", "points": 7,
     },
+    "bird-dog": {
+        "name": "Bird-Dog",
+        "age_group": "both",
+        **_pillar_pcts("pelvic", "spinal"),
+        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 5,
+    },
+    "hamstring stretch": {
+        "name": "Hamstring Stretch",
+        "age_group": "both",
+        **_pillar_pcts("legs", "pelvic"),
+        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 6,
+    },
+    "butterfly stretch": {
+        "name": "Butterfly Stretch",
+        "age_group": "both",
+        **_pillar_pcts("legs", "pelvic"),
+        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
+        "category": "posture", "points": 5,
+    },
     "deep squat hold": {
         "name": "Deep Squat Hold",
-        "age_group": "teen",
-        "spinal_pct": 10, "collapse_pct": 5, "pelvic_pct": 40, "legs_pct": 45,
-        "potency": 8, "hgh_score": 9, "beast_bonus": 2, "teen_only": True,
-        "category": "hgh", "points": 8,
+        "age_group": "both",
+        **_pillar_pcts("legs", "pelvic"),
+        "potency": 8, "hgh_score": 2, "beast_bonus": 1, "teen_only": False,
+        "category": "posture", "points": 8,
     },
-    "box jumps": {
-        "name": "Box Jumps",
+    # ── HGH (8) — teen only ──
+    "jump rope": {
+        "name": "Jump Rope",
+        "age_group": "teen",
+        "spinal_pct": 15, "collapse_pct": 10, "pelvic_pct": 20, "legs_pct": 55,
+        "potency": 6, "hgh_score": 9, "beast_bonus": 2, "teen_only": True,
+        "category": "hgh", "points": 9,
+    },
+    "box jumps / jump squats": {
+        "name": "Box Jumps / Jump Squats",
         "age_group": "teen",
         "spinal_pct": 10, "collapse_pct": 5, "pelvic_pct": 30, "legs_pct": 55,
         "potency": 7, "hgh_score": 10, "beast_bonus": 3, "teen_only": True,
@@ -152,14 +209,14 @@ EXERCISE_ASSIGNMENT_SPEC = {
         "potency": 6, "hgh_score": 9, "beast_bonus": 3, "teen_only": True,
         "category": "hgh", "points": 8,
     },
-    "jump rope": {
-        "name": "Jump Rope",
-        "age_group": "teen",
-        "spinal_pct": 15, "collapse_pct": 10, "pelvic_pct": 20, "legs_pct": 55,
-        "potency": 6, "hgh_score": 9, "beast_bonus": 2, "teen_only": True,
-        "category": "hgh", "points": 9,
-    },
     "bodyweight squats": {
+        "name": "Bodyweight Squats",
+        "age_group": "teen",
+        "spinal_pct": 5, "collapse_pct": 5, "pelvic_pct": 35, "legs_pct": 55,
+        "potency": 7, "hgh_score": 8, "beast_bonus": 1, "teen_only": True,
+        "category": "hgh", "points": 8,
+    },
+    "squats": {
         "name": "Squats",
         "age_group": "teen",
         "spinal_pct": 5, "collapse_pct": 5, "pelvic_pct": 35, "legs_pct": 55,
@@ -173,187 +230,69 @@ EXERCISE_ASSIGNMENT_SPEC = {
         "potency": 6, "hgh_score": 7, "beast_bonus": 1, "teen_only": True,
         "category": "hgh", "points": 7,
     },
-    "pelvic tilts": {
-        "name": "Posterior Pelvic Tilt (Pelvic Tilts)",
-        "age_group": "both",
-        "spinal_pct": 15, "collapse_pct": 10, "pelvic_pct": 70, "legs_pct": 5,
-        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
+    "hgh boost (sprint & burpees)": {
+        "name": "HGH Boost (Sprint & Burpees)",
+        "age_group": "teen",
+        "spinal_pct": 10, "collapse_pct": 10, "pelvic_pct": 30, "legs_pct": 50,
+        "potency": 8, "hgh_score": 10, "beast_bonus": 3, "teen_only": True,
+        "category": "hgh", "points": 15,
     },
 }
+
+REAL_CATALOG_SPEC_KEYS = frozenset(EXERCISE_ASSIGNMENT_SPEC.keys())
 
 # DB name aliases -> canonical spec key
 EXERCISE_NAME_ALIASES = {
     "hanging from bar": "decompression hang",
     "hanging form bar": "decompression hang",
-    "squats": "bodyweight squats",
-    "bodyweight squats": "bodyweight squats",
-    "box jumps / jump squats": "box jumps",
-    "jump squats": "box jumps",
-    "burpees": "burpees",
-    "sprints": "sprints",
+    "hanging": "decompression hang",
+    "box jumps": "box jumps / jump squats",
+    "jump squats": "box jumps / jump squats",
     "child's pose w/ arm walks": "child's pose with arm walks",
-    "child’s pose with arm walks": "child's pose with arm walks",
     "child's pose with arm walks": "child's pose with arm walks",
     "tadasana / mountain": "tadasana (mountain pose)",
-    "tadasana (mountain pose)": "tadasana (mountain pose)",
     "cat-cow": "cat-cow stretch",
     "doorways chest stretch": "doorway chest stretch",
     "mountain climber": "mountain climbers",
-    "hanging from bar": "decompression hang",
-    "hanging": "decompression hang",
-    "knees-to-chest rock": "knees-to-chest rock",
-    "knees to chest rock": "knees-to-chest rock",
-    "standing posture reset": "standing posture reset",
-    "hamstring hinge": "hamstring hinge",
-    "bird dog": "bird dog",
-    "dead bug": "dead bug",
-    "side plank": "side plank",
-    "pigeon pose": "pigeon pose",
-    "wall calf stretch": "wall calf stretch",
-    "ankle mobility": "ankle mobility",
-    "child's pose": "child's pose",
-    "wall chin tuck": "wall chin tuck",
-    "mcgill curl-up": "mcgill curl-up",
-    "mcgill curl up": "mcgill curl-up",
+    "bird dog": "bird-dog",
     "posterior pelvic tilt (pelvic tilts)": "pelvic tilts",
     "posterior pelvic tilt": "pelvic tilts",
+    "hgh boost": "hgh boost (sprint & burpees)",
 }
 
-# Monday work order: Recommended/Beast are display labels only, not whitelists.
 BEAST_MODE_CANONICAL_KEYS = frozenset()
 
-EXERCISE_ASSIGNMENT_SPEC.update({
-    "standing posture reset": {
-        "name": "Standing Posture Reset",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 70, "pelvic_pct": 0, "legs_pct": 0,
-        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 7,
-    },
-    "knees-to-chest rock": {
-        "name": "Knees-to-Chest Rock",
-        "age_group": "both",
-        "spinal_pct": 70, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 0,
-        "potency": 7, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 7,
-    },
-    "hamstring hinge": {
-        "name": "Hamstring Hinge",
-        "age_group": "both",
-        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
-        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "bird dog": {
-        "name": "Bird Dog",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 0,
-        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "dead bug": {
-        "name": "Dead Bug",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 0,
-        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "side plank": {
-        "name": "Side Plank",
-        "age_group": "both",
-        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 30,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 5,
-    },
-    "pigeon pose": {
-        "name": "Pigeon Pose",
-        "age_group": "both",
-        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 30,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 5,
-    },
-    "wall calf stretch": {
-        "name": "Wall Calf Stretch",
-        "age_group": "both",
-        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
-        "potency": 4, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 4,
-    },
-    "ankle mobility": {
-        "name": "Ankle Mobility",
-        "age_group": "both",
-        "spinal_pct": 0, "collapse_pct": 0, "pelvic_pct": 30, "legs_pct": 70,
-        "potency": 4, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 4,
-    },
-    "child's pose": {
-        "name": "Child's Pose",
-        "age_group": "both",
-        "spinal_pct": 50, "collapse_pct": 35, "pelvic_pct": 15, "legs_pct": 0,
-        "potency": 6, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 6,
-    },
-    "wall chin tuck": {
-        "name": "Wall Chin Tuck",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 65, "pelvic_pct": 5, "legs_pct": 0,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 5,
-    },
-    "mcgill curl-up": {
-        "name": "McGill Curl-Up",
-        "age_group": "both",
-        "spinal_pct": 30, "collapse_pct": 0, "pelvic_pct": 70, "legs_pct": 0,
-        "potency": 5, "hgh_score": 1, "beast_bonus": 0, "teen_only": False,
-        "category": "posture", "points": 5,
-    },
-    "burpees": {
-        "name": "Burpees",
-        "age_group": "teen",
-        "spinal_pct": 10, "collapse_pct": 10, "pelvic_pct": 30, "legs_pct": 50,
-        "potency": 8, "hgh_score": 10, "beast_bonus": 3, "teen_only": True,
-        "category": "hgh", "points": 9,
-    },
-    "sprints": {
-        "name": "Sprints",
-        "age_group": "teen",
-        "spinal_pct": 5, "collapse_pct": 5, "pelvic_pct": 25, "legs_pct": 65,
-        "potency": 8, "hgh_score": 10, "beast_bonus": 3, "teen_only": True,
-        "category": "hgh", "points": 9,
-    },
-})
+
+def _primary_from_pcts(spec: dict) -> str:
+    pairs = [
+        ("spinal", spec.get("spinal_pct", 0) or 0),
+        ("collapse", spec.get("collapse_pct", 0) or 0),
+        ("pelvic", spec.get("pelvic_pct", 0) or 0),
+        ("legs", spec.get("legs_pct", 0) or 0),
+    ]
+    return max(pairs, key=lambda item: item[1])[0]
+
+
+def _secondary_from_pcts(spec: dict) -> str:
+    pairs = sorted(
+        [
+            ("spinal", spec.get("spinal_pct", 0) or 0),
+            ("collapse", spec.get("collapse_pct", 0) or 0),
+            ("pelvic", spec.get("pelvic_pct", 0) or 0),
+            ("legs", spec.get("legs_pct", 0) or 0),
+        ],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return pairs[1][0] if len(pairs) > 1 else pairs[0][0]
+
 
 SPEC_PRIMARY_SECONDARY = {
-    "decompression hang": ("spinal", "collapse"),
-    "wall angels": ("collapse", "spinal"),
-    "glute bridges": ("pelvic", "legs"),
-    "hip flexor stretch": ("pelvic", "legs"),
-    "cobra stretch": ("spinal", "pelvic"),
-    "knees-to-chest rock": ("spinal", "pelvic"),
-    "standing posture reset": ("collapse", "spinal"),
-    "cat-cow stretch": ("spinal", "pelvic"),
-    "hamstring stretch": ("legs", "pelvic"),
-    "hamstring hinge": ("legs", "pelvic"),
-    "tadasana (mountain pose)": ("collapse", "spinal"),
-    "doorway chest stretch": ("collapse", "spinal"),
-    "child's pose with arm walks": ("spinal", "collapse"),
-    "child's pose": ("spinal", "collapse"),
-    "spinal twist stretch": ("spinal", "pelvic"),
-    "pelvic tilts": ("pelvic", "spinal"),
-    "bird dog": ("pelvic", "spinal"),
-    "dead bug": ("pelvic", "spinal"),
-    "mcgill curl-up": ("pelvic", "spinal"),
-    "chin tucks": ("collapse", "spinal"),
-    "wall chin tuck": ("collapse", "spinal"),
-    "superman hold": ("collapse", "pelvic"),
-    "plank": ("pelvic", "spinal"),
-    "butterfly stretch": ("legs", "pelvic"),
-    "side plank": ("pelvic", "legs"),
-    "pigeon pose": ("pelvic", "legs"),
-    "wall calf stretch": ("legs", "pelvic"),
-    "ankle mobility": ("legs", "pelvic"),
+    key: (_primary_from_pcts(spec), _secondary_from_pcts(spec))
+    for key, spec in EXERCISE_ASSIGNMENT_SPEC.items()
+    if spec.get("category") == "posture"
 }
+
 
 TEEN_CORE_BASE_NAMES = [
     "Jump Rope",
@@ -365,7 +304,7 @@ TEEN_CORE_BASE_NAMES = [
 
 TEEN_CORE_6_NAMES = TEEN_CORE_BASE_NAMES
 
-# Master spec §4.4 — Core 6 exercise names by age bracket min_age (adults 21+).
+# Master spec §3.1 — Core 6 by age bracket (adults 21+).
 ADULT_CORE_6_BY_MIN_AGE = {
     21: [
         "Decompression Hang",
@@ -395,37 +334,32 @@ ADULT_CORE_6_BY_MIN_AGE = {
         "Decompression Hang",
         "Cobra Stretch",
         "Wall Angels",
-        "Cat-Cow Stretch",
+        "Doorway Chest Stretch",
         "Hip Flexor Stretch",
-        "Wall Calf Stretch",
+        "Butterfly Stretch",
     ],
     60: [
         "Decompression Hang",
         "Cobra Stretch",
         "Wall Angels",
-        "Cat-Cow Stretch",
+        "Doorway Chest Stretch",
         "Hip Flexor Stretch",
-        "Ankle Mobility",
+        "Butterfly Stretch",
     ],
 }
 
-# Posture exercises attachable as rec/beast pool rows on variants (prescriptions + GIFs).
 ADULT_POSTURE_POOL_CANONICAL_NAMES = [
-    spec["name"]
-    for key, spec in EXERCISE_ASSIGNMENT_SPEC.items()
-    if not spec.get("teen_only")
+    EXERCISE_ASSIGNMENT_SPEC[k]["name"]
+    for k in REAL_CATALOG_SPEC_KEYS
+    if not EXERCISE_ASSIGNMENT_SPEC[k].get("teen_only")
 ]
 
-TEEN_POSTURE_POOL_CANONICAL_NAMES = [
-    spec["name"]
-    for key, spec in EXERCISE_ASSIGNMENT_SPEC.items()
-    if not spec.get("teen_only")
-]
+TEEN_POSTURE_POOL_CANONICAL_NAMES = list(ADULT_POSTURE_POOL_CANONICAL_NAMES)
 
 TEEN_HGH_POOL_CANONICAL_NAMES = [
-    spec["name"]
-    for key, spec in EXERCISE_ASSIGNMENT_SPEC.items()
-    if spec.get("teen_only")
+    EXERCISE_ASSIGNMENT_SPEC[k]["name"]
+    for k in REAL_CATALOG_SPEC_KEYS
+    if EXERCISE_ASSIGNMENT_SPEC[k].get("teen_only")
 ]
 
 
@@ -445,6 +379,12 @@ def dedupe_name_key(name: str) -> str:
     return spec_key_for_name(name) or normalize_exercise_name(name)
 
 
+def is_real_catalog_exercise(exercise_or_name) -> bool:
+    name = exercise_or_name if isinstance(exercise_or_name, str) else getattr(exercise_or_name, "name", "")
+    key = spec_key_for_name(name)
+    return bool(key and key in REAL_CATALOG_SPEC_KEYS)
+
+
 def is_teen_only_exercise(exercise) -> bool:
     """True for HGH teen exclusives (flag or known spec/name)."""
     if getattr(exercise, "teen_only", False):
@@ -454,7 +394,7 @@ def is_teen_only_exercise(exercise) -> bool:
 
 
 def primary_secondary_for_exercise(exercise_or_name) -> tuple[str | None, str | None]:
-    """Return Monday spec primary/secondary posture pillars for an exercise."""
+    """Return primary/secondary posture pillars for an exercise."""
     name = exercise_or_name if isinstance(exercise_or_name, str) else getattr(exercise_or_name, "name", "")
     key = spec_key_for_name(name)
     if key and key in SPEC_PRIMARY_SECONDARY:

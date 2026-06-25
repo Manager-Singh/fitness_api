@@ -8,6 +8,7 @@ from typing import Any, Iterable, Sequence
 
 from workouts.exercise_assignment_data import (
     BEAST_MODE_CANONICAL_KEYS,
+    REAL_CATALOG_SPEC_KEYS,
     TEEN_ONLY_HGH_NAMES,
     dedupe_name_key,
     normalize_exercise_name,
@@ -501,8 +502,19 @@ def _assert_no_teen_only(exercises: Sequence[Any], context: str) -> None:
             raise ValueError(f"teen_only exercise {ex.name!r} in {context} Rec/Beast")
 
 
+def _real_catalog_exercise_ids(ExerciseModel) -> set[int]:
+    ids: set[int] = set()
+    for ex in ExerciseModel.objects.filter(spinal_pct__isnull=False, potency__isnull=False):
+        key = spec_key_for_name(getattr(ex, "name", "") or "")
+        if key in REAL_CATALOG_SPEC_KEYS:
+            ids.add(ex.id)
+    return ids
+
+
 def adult_scoring_pool_queryset(ExerciseModel):
+    catalog_ids = _real_catalog_exercise_ids(ExerciseModel)
     return ExerciseModel.objects.filter(
+        id__in=catalog_ids,
         teen_only=False,
         spinal_pct__isnull=False,
         potency__isnull=False,
@@ -510,7 +522,9 @@ def adult_scoring_pool_queryset(ExerciseModel):
 
 
 def teen_scoring_pool_queryset(ExerciseModel):
+    catalog_ids = _real_catalog_exercise_ids(ExerciseModel)
     return ExerciseModel.objects.filter(
+        id__in=catalog_ids,
         spinal_pct__isnull=False,
         potency__isnull=False,
     )

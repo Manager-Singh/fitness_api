@@ -258,11 +258,11 @@ def _default_type_for_exercise(name: str):
     from workouts.models import Type
 
     key = spec_key_for_name(name) or normalize_exercise_name(name)
-    if key in ("hamstring stretch", "deep squat hold", "butterfly stretch", "lunges", "box jumps", "bodyweight squats"):
+    if key in ("hamstring stretch", "deep squat hold", "butterfly stretch", "lunges", "box jumps / jump squats", "bodyweight squats", "squats", "seated forward fold"):
         return Type.LEGHAMSTRING
-    if key in ("doorway chest stretch", "tadasana (mountain pose)", "chin tucks", "wall angels"):
+    if key in ("doorway chest stretch", "tadasana (mountain pose)", "chin tucks", "wall angels", "foam roller thoracic extension", "superman hold"):
         return Type.POSTURALCOLLAPSE
-    if key in ("hip flexor stretch", "glute bridges", "pelvic tilts", "mountain climbers"):
+    if key in ("hip flexor stretch", "glute bridges", "pelvic tilts", "plank", "bird-dog"):
         return Type.PELCIVTILTBACK
     return Type.SPINALCPMPRESSION
 
