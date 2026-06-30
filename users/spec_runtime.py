@@ -163,8 +163,8 @@ def set_daily_validated(user, log_date):
     """
     from workouts.models import RoutineType, Tier as RoutineTier, UserRoutineExercise
     from nutration.models_log import NutraEntry
-    from workouts.models import WorkoutEntry
     from users.models import DailyLog
+    from workouts.set_progress import fully_completed_assignment_ids
 
     daily, _ = DailyLog.objects.get_or_create(user=user, log_date=log_date)
     try:
@@ -180,14 +180,7 @@ def set_daily_validated(user, log_date):
     is_teen_for_day = is_teen_age(age_years=age, user=user)
 
     def _core_done(routine_type):
-        completed = set(
-            WorkoutEntry.objects.filter(
-                session__user=user,
-                session__date=log_date,
-                session__user_routine__routine_type=routine_type,
-                user_routine_exercise__tier=RoutineTier.CORE,
-            ).values_list("user_routine_exercise_id", flat=True)
-        )
+        completed = fully_completed_assignment_ids(user, log_date, routine_type=routine_type)
         required = set(
             UserRoutineExercise.objects.filter(
                 routine__user=user,
@@ -365,6 +358,7 @@ def compute_targeted_engine1_recovery(user, log_date, age, state, adult_nutritio
     """
     from workouts.exercise_assignment_data import primary_secondary_for_exercise
     from workouts.models import ExerciseCategory
+    from workouts.set_progress import iter_credited_workout_units
 
     shares = {p: 0 for p in PILLAR_TO_STATE_FIELD}
     exercise_shares = {p: 0 for p in PILLAR_TO_STATE_FIELD}
@@ -372,17 +366,12 @@ def compute_targeted_engine1_recovery(user, log_date, age, state, adult_nutritio
     trained_today: set[str] = set()
     workouts_done = False
 
-    workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
-        "exercise",
-        "session__user_routine",
-    )
-    for entry in workout_qs:
+    for unit in iter_credited_workout_units(user, log_date):
         workouts_done = True
-        ex = getattr(entry, "exercise", None)
+        ex = getattr(unit, "exercise", None)
         if not ex:
             continue
-        routine = getattr(getattr(entry, "session", None), "user_routine", None)
-        routine_type = str(getattr(routine, "routine_type", "") or "").lower()
+        routine_type = str(getattr(unit, "routine_type", "") or "").lower()
         category = str(getattr(ex, "category", "") or "").lower()
         if routine_type == "hgh" or category == ExerciseCategory.HGH or getattr(ex, "teen_only", False):
             continue
@@ -391,7 +380,7 @@ def compute_targeted_engine1_recovery(user, log_date, age, state, adult_nutritio
             continue
         trained_today.add(primary)
         secondary = secondary or primary
-        pts = max(0.0, float(getattr(entry, "points", 0) or 0))
+        pts = max(0.0, float(getattr(unit, "points", 0) or 0))
         recovery_um = int(round(pts * 10.0))
         primary_um = int(round(recovery_um * 0.70))
         secondary_um = max(0, recovery_um - primary_um)
@@ -552,11 +541,16 @@ def rebuild_ledger_from_date(user, from_date):
         .distinct()
     )
     from nutration.models_log import NutraEntry
-    from workouts.models import WorkoutEntry
+    from workouts.models import WorkoutEntry, WorkoutSetCompletion
 
     workout_days = list(
         WorkoutEntry.objects.filter(session__user=user, session__date__gte=from_date)
         .values_list("session__date", flat=True)
+        .distinct()
+    )
+    workout_set_days = list(
+        WorkoutSetCompletion.objects.filter(user=user, log_date__gte=from_date)
+        .values_list("log_date", flat=True)
         .distinct()
     )
     nutra_days = list(
@@ -571,7 +565,7 @@ def rebuild_ledger_from_date(user, from_date):
         .values_list("log_date", flat=True)
         .distinct()
     )
-    days = sorted({from_date, *dailylog_days, *workout_days, *nutra_days, *habit_days})
+    days = sorted({from_date, *dailylog_days, *workout_days, *workout_set_days, *nutra_days, *habit_days})
     results = []
     for d in days:
         results.append(compute_daily_height_for_user(user, log_date=d, force_recompute=True))
@@ -620,20 +614,17 @@ def _daily_raw_source_points(user, log_date):
         posture, hgh, food, sleep, sun, meditation, hydration
     Monday work order: HGH routes to Engine 2 and has no per-category cap.
     """
-    workout_qs = WorkoutEntry.objects.filter(session__user=user, session__date=log_date).select_related(
-        "session__user_routine"
-    )
+    from workouts.set_progress import iter_credited_workout_units
+
     posture_pts = 0.0
     hgh_pts = 0.0
     from workouts.models import ExerciseCategory
 
-    for w in workout_qs:
-        session = getattr(w, "session", None)
-        user_routine = getattr(session, "user_routine", None)
-        rt = str(getattr(user_routine, "routine_type", "") or "").lower()
-        ex = getattr(w, "exercise", None)
+    for unit in iter_credited_workout_units(user, log_date):
+        rt = str(getattr(unit, "routine_type", "") or "").lower()
+        ex = getattr(unit, "exercise", None)
         category = str(getattr(ex, "category", "") or "").lower()
-        pts = float(w.points or 0)
+        pts = float(getattr(unit, "points", 0) or 0)
         if rt == "hgh" or category == ExerciseCategory.HGH or bool(getattr(ex, "teen_only", False)):
             hgh_pts += pts
         else:

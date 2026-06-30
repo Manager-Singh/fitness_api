@@ -17,7 +17,7 @@ from .serializers_log import (
 )
 from utils.age import get_user_age
 from utils.monetization_gate import logging_locked_payload
-from workouts.models import WorkoutEntry
+from workouts.set_progress import credited_points_for_day, workout_activity_exists
 from users.models import DailyLog
 from users.models import NotificationEventLog
 from utils.user_time import user_localize_dt, user_today
@@ -69,16 +69,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         """Adult flat nutrition: 1 pt per unique Disc + Muscle food, gated by posture work logged."""
         from utils.adult_nutrition import adult_disc_muscle_food_id_sets, adult_engine_nutrition_points
 
-        posture_pts = 0.0
-        if exercise_logged_today:
-            posture_pts = float(
-                WorkoutEntry.objects.filter(
-                    session__user=user,
-                    session__date=log_date,
-                    session__user_routine__routine_type__iexact="posture",
-                ).aggregate(total=Sum("points"))["total"]
-                or 0.0
-            )
+        posture_pts = float(credited_points_for_day(user, log_date, routine_type="posture")) if exercise_logged_today else 0.0
         entries = NutraEntry.objects.filter(
             session__user=user,
             session__date=log_date,
@@ -282,10 +273,7 @@ class NutraLogViewSet(viewsets.ViewSet):
         ]
         # print(total_today_score)
         # print(cleaned_log)
-        exercise_logged_today = WorkoutEntry.objects.filter(
-            session__user=request.user,
-            session__date=log_date,
-        ).exists()
+        exercise_logged_today = workout_activity_exists(request.user, log_date)
         raw_food_points = float(total_today_food_score or 0)
         if is_adult_flat_food_user(request.user, age):
             effective_food_points = self._adult_traceable_food_points(request.user, log_date, exercise_logged_today)

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import UserRoutine, UserRoutineExercise, WorkoutEntry
+from .models import UserRoutine, UserRoutineExercise
 from user_profile.models import UserProfile
 from django.forms.models import model_to_dict
 from utils.exercise_library import section6_display_copy_for_exercise
@@ -73,6 +73,16 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     primary_timer_dosage = serializers.SerializerMethodField()
+    completed_sets = serializers.SerializerMethodField()
+    total_sets = serializers.SerializerMethodField()
+    progress_fraction = serializers.SerializerMethodField()
+    partially_completed = serializers.SerializerMethodField()
+    is_unilateral = serializers.SerializerMethodField()
+    unilateral_label = serializers.SerializerMethodField()
+    switch_prompt_text = serializers.SerializerMethodField()
+    switch_prompt_subtext = serializers.SerializerMethodField()
+    switch_countdown_seconds = serializers.SerializerMethodField()
+    credit_unit = serializers.SerializerMethodField()
     # Item 1 (robust fix): serve dosage LIVE from the linked catalog prescription
     # (VariantExercise) instead of the frozen UserRoutineExercise snapshot, so
     # existing users see current catalog numbers (sets/reps/unit) without needing
@@ -111,6 +121,16 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "seconds_per_rep",
             "primary_timer_dosage",
             "completed",
+            "completed_sets",
+            "total_sets",
+            "progress_fraction",
+            "partially_completed",
+            "is_unilateral",
+            "unilateral_label",
+            "switch_prompt_text",
+            "switch_prompt_subtext",
+            "switch_countdown_seconds",
+            "credit_unit",
             "section6_display_copy",
         )
 
@@ -157,11 +177,36 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             return False
 
         today = user_today(request.user)
-        return WorkoutEntry.objects.filter(
-            session__user=request.user,
-            session__date=today,
-            exercise=obj.exercise
-        ).exists()
+        return self._progress(obj, request.user, today)["completed"]
+
+    def _progress(self, obj, user, today):
+        from workouts.set_progress import progress_for_assignment
+
+        return progress_for_assignment(user, today, obj)
+
+    def get_completed_sets(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return 0
+        return self._progress(obj, request.user, user_today(request.user))["completed_sets"]
+
+    def get_total_sets(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return self._dosage_source(obj)["sets"]
+        return self._progress(obj, request.user, user_today(request.user))["total_sets"]
+
+    def get_progress_fraction(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return 0.0
+        return self._progress(obj, request.user, user_today(request.user))["progress_fraction"]
+
+    def get_partially_completed(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return self._progress(obj, request.user, user_today(request.user))["partially_completed"]
 
     def get_section6_display_copy(self, obj):
         return section6_display_copy_for_exercise(getattr(obj.exercise, "name", None))
@@ -220,8 +265,8 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
 
         src = self._dosage_source(obj)
         note_src = (src["notes"] or "").lower()
-        per_side = "per" in note_src
-        per_side_word = "leg" if "leg" in note_src else "side"
+        per_side = self._is_unilateral(obj) or "per" in note_src
+        per_side_word = self._unilateral_label(obj) or ("leg" if "leg" in note_src else "side")
         return format_primary_timer_dosage(
             sets=src["sets"],
             quantity_min=src["qty_min"],
@@ -238,6 +283,49 @@ class UserRoutineExerciseSerializer(serializers.ModelSerializer):
             "beast": "BEAST MODE",
         }
         return mapping.get(str(obj.tier or "").lower(), str(obj.tier or "").upper() or "STANDARD")
+
+    def _is_unilateral(self, obj):
+        ve = getattr(obj, "variant_exercise", None)
+        if ve is not None:
+            return bool(getattr(ve, "is_unilateral", False))
+        note_src = str(getattr(obj, "notes", "") or "").lower()
+        return any(token in note_src for token in ("per side", "per leg", "per arm", "each side", "each leg"))
+
+    def _unilateral_label(self, obj):
+        ve = getattr(obj, "variant_exercise", None)
+        label = str(getattr(ve, "unilateral_label", "") or "").strip().lower() if ve is not None else ""
+        if label:
+            return label
+        note_src = str(getattr(ve, "notes", "") if ve is not None else getattr(obj, "notes", "") or "").lower()
+        if "leg" in note_src:
+            return "leg"
+        if "arm" in note_src:
+            return "arm"
+        return "side" if self._is_unilateral(obj) else ""
+
+    def get_is_unilateral(self, obj):
+        return self._is_unilateral(obj)
+
+    def get_unilateral_label(self, obj):
+        return self._unilateral_label(obj)
+
+    def get_switch_prompt_text(self, obj):
+        if not self._is_unilateral(obj):
+            return ""
+        label = self._unilateral_label(obj)
+        return "SWITCH LEGS" if label == "leg" else "SWITCH SIDES"
+
+    def get_switch_prompt_subtext(self, obj):
+        if not self._is_unilateral(obj):
+            return ""
+        label = self._unilateral_label(obj)
+        return "Get into position on your other leg" if label == "leg" else "Get into position on your other side"
+
+    def get_switch_countdown_seconds(self, obj):
+        return 3 if self._is_unilateral(obj) else 0
+
+    def get_credit_unit(self, obj):
+        return "set"
 
 class UserRoutineSerializer(serializers.ModelSerializer):
     exercises = UserRoutineExerciseSerializer(many=True, read_only=True)

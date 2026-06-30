@@ -1,8 +1,8 @@
 from users.models import DailyLog
 from django.apps import apps
 from django.db.models import Q, Sum
+from workouts.set_progress import iter_credited_workout_units
 
-WorkoutEntry = apps.get_model("workouts", "WorkoutEntry")
 NutraEntry = apps.get_model("nutration", "NutraEntry")
 
 
@@ -40,12 +40,11 @@ def apply_engine_routing(user, log_date, age_exact, points=0, routine_type=None,
         daily.engine1_points = max(0, int(daily.engine1_points))
     else:
         # Monday work order teen per-channel caps: HGH has no cap; food/lifestyle do.
-        raw_hgh_points = WorkoutEntry.objects.filter(
-            session__user=user,
-            session__date=log_date,
-        ).filter(
-            Q(exercise__category__iexact="hgh") | Q(exercise__teen_only=True)
-        ).aggregate(total=Sum("points"))["total"] or 0
+        raw_hgh_points = 0.0
+        for unit in iter_credited_workout_units(user, log_date):
+            ex = getattr(unit, "exercise", None)
+            if str(getattr(unit, "routine_type", "") or "").lower() == "hgh" or bool(getattr(ex, "teen_only", False)):
+                raw_hgh_points += float(unit.points or 0)
 
         life_qs = NutraEntry.objects.filter(
             session__user=user,

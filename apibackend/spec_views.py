@@ -73,14 +73,9 @@ def _adult_food_points_for_engine(user, log_date):
     Adult traceable nutrition points for Engine 1 (flat 1 per unique Disc/Muscle food / day),
     gated by same-day posture workout points.
     """
-    posture_pts = float(
-        WorkoutEntry.objects.filter(
-            session__user=user,
-            session__date=log_date,
-            session__user_routine__routine_type__iexact="posture",
-        ).aggregate(total=Sum("points"))["total"]
-        or 0.0
-    )
+    from workouts.set_progress import credited_points_for_day
+
+    posture_pts = float(credited_points_for_day(user, log_date, routine_type="posture"))
     entries = NutraEntry.objects.filter(
         session__user=user,
         session__date=log_date,
@@ -99,10 +94,9 @@ def _daily_totals_payload(user, log_date, *, age_exact):
         age = int(get_user_age(user) or 0)
     except Exception:
         age = 0
-    exercise_logged_today = WorkoutEntry.objects.filter(
-        session__user=user,
-        session__date=log_date,
-    ).exists()
+    from workouts.set_progress import workout_activity_exists
+
+    exercise_logged_today = workout_activity_exists(user, log_date)
     daily = DailyLog.objects.filter(user=user, log_date=log_date).first()
 
     daily_posture_pts_today = int((daily.engine1_points if daily else 0) or 0)

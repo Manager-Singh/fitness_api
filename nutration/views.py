@@ -355,7 +355,7 @@ class MyPlanView(APIView):
             cap_reached = bool(raw_today_food_points >= cap_limit)
             diary_note = TEEN_CAP_MESSAGE_EXACT if cap_reached else None
         else:
-            from workouts.models import WorkoutEntry
+            from workouts.set_progress import credited_points_for_day
             from utils.adult_nutrition import (
                 ADULT_NUTRITION_POINTS_CAP,
                 adult_nutrition_points_today,
@@ -364,14 +364,7 @@ class MyPlanView(APIView):
             # Part 2 adult nutrition = protein + hydration points from
             # AdultNutritionDay (server-authoritative), gated by posture work so
             # this matches users/spec_runtime.py and /api/adult-nutrition exactly.
-            posture_pts = float(
-                WorkoutEntry.objects.filter(
-                    session__user=request.user,
-                    session__date=log_date,
-                    session__user_routine__routine_type__iexact="posture",
-                ).aggregate(total=Sum("points"))["total"]
-                or 0.0
-            )
+            posture_pts = float(credited_points_for_day(request.user, log_date, routine_type="posture"))
             adult_points = int(adult_nutrition_points_today(request.user, log_date))
             traceable_today_food_points = float(adult_points if posture_pts > 0 else 0.0)
             cap_limit = float(ADULT_NUTRITION_POINTS_CAP)

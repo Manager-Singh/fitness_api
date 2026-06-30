@@ -34,8 +34,9 @@ from utils.routine_genrate import generate_user_routines
 from workouts.models import (
     UserRoutine, UserRoutineExercise,
     VariantExercise, RoutineVariant, AgeBracket,
-    Tier, Type, Track, Exercise, RoutineType, WorkoutEntry, WorkoutSession
+    Tier, Type, Track, Exercise, RoutineType
 )
+from workouts.set_progress import credited_points_for_day, fully_completed_assignment_ids
 from utils.check_payment import check_subscription_or_response
 from utils.streaks import get_user_streaks
 
@@ -1154,14 +1155,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     today_block = score_summary.get("today", {}) if isinstance(score_summary, dict) else {}
     today_workout_points = float(today_block.get("workout_score", 0) or 0)
     today_food_points = float(today_block.get("food_score", 0) or 0)
-    posture_pts_today = float(
-        WorkoutEntry.objects.filter(
-            session__user=user,
-            session__date=user_local_today,
-            session__user_routine__routine_type=RoutineType.POSTURE,
-        ).aggregate(total=Sum("points"))["total"]
-        or 0
-    )
+    posture_pts_today = float(credited_points_for_day(user, user_local_today, routine_type=RoutineType.POSTURE))
     today_entries_n = NutraEntry.objects.filter(
         session__user=user,
         session__date=user_local_today,
@@ -1213,29 +1207,9 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
     assigned_rec_count = assigned_posture_qs.filter(tier=Tier.RECOMMENDED).count()
     assigned_beast_count = assigned_posture_qs.filter(tier=Tier.BEAST).count()
     assigned_posture_total = assigned_posture_qs.count()
-    completed_posture_qs_all = WorkoutEntry.objects.filter(
-        session__user=user,
-        session__date=today_local,
-        session__user_routine__routine_type=RoutineType.POSTURE,
-    )
-    # Primary path (preferred): count distinct assigned routine exercises via FK.
-    completed_posture_qs = completed_posture_qs_all.filter(user_routine_exercise__isnull=False)
-    completed_posture_total_fk = completed_posture_qs.values("user_routine_exercise_id").distinct().count()
-    completed_core_count_fk = completed_posture_qs.filter(user_routine_exercise__tier=Tier.CORE).values(
-        "user_routine_exercise_id"
-    ).distinct().count()
-
-    # Fallback path: older rows may have user_routine_exercise=NULL; count by exercise_id intersect.
-    assigned_exercise_ids = set(assigned_posture_qs.values_list("exercise_id", flat=True))
-    completed_exercise_ids = set(completed_posture_qs_all.values_list("exercise_id", flat=True).distinct())
-    completed_posture_total_ex = len(assigned_exercise_ids.intersection(completed_exercise_ids))
-    completed_core_exercise_ids = set(
-        assigned_posture_qs.filter(tier=Tier.CORE).values_list("exercise_id", flat=True)
-    )
-    completed_core_count_ex = len(completed_core_exercise_ids.intersection(completed_exercise_ids))
-
-    completed_posture_total = max(completed_posture_total_fk, completed_posture_total_ex)
-    completed_core_count = max(completed_core_count_fk, completed_core_count_ex)
+    completed_posture_ids = fully_completed_assignment_ids(user, today_local, routine_type=RoutineType.POSTURE)
+    completed_posture_total = len(completed_posture_ids)
+    completed_core_count = assigned_posture_qs.filter(id__in=completed_posture_ids, tier=Tier.CORE).count()
 
     # Teen dashboard progress includes HGH routine as well (POSTURE + HGH combined).
     assigned_hgh_total = 0
@@ -1248,19 +1222,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
         )
         assigned_hgh_total = assigned_hgh_qs.count()
 
-        completed_hgh_qs_all = WorkoutEntry.objects.filter(
-            session__user=user,
-            session__date=today_local,
-            session__user_routine__routine_type=RoutineType.HGH,
-        )
-        completed_hgh_qs = completed_hgh_qs_all.filter(user_routine_exercise__isnull=False)
-        completed_hgh_total_fk = completed_hgh_qs.values("user_routine_exercise_id").distinct().count()
-
-        assigned_hgh_exercise_ids = set(assigned_hgh_qs.values_list("exercise_id", flat=True))
-        completed_hgh_exercise_ids = set(completed_hgh_qs_all.values_list("exercise_id", flat=True).distinct())
-        completed_hgh_total_ex = len(assigned_hgh_exercise_ids.intersection(completed_hgh_exercise_ids))
-
-        completed_hgh_total = max(completed_hgh_total_fk, completed_hgh_total_ex)
+        completed_hgh_total = len(fully_completed_assignment_ids(user, today_local, routine_type=RoutineType.HGH))
 
     # Spec lock: if teen initial scan is required, force fully locked posture state.
     if teen_scan_required:
@@ -1392,7 +1354,7 @@ def build_dashboard_base_payload(user, *, rescan=None, date_str=None):
                     "ui_to_code_variable_names": UI_TO_CODE_VARIABLE_NAMES,
                 },
                 "adult_dashboard_mapping": {
-                    "daily_gains_formula": "(posture_pts + traceable_nutrition_pts) * 0.001",
+                    "daily_gains_formula": "HeightLedger.engine1_delta_um(today) / 10000",
                     "daily_gains_cm": adult_daily_gains_cm,
                     "top_graph_height_formula": "Base_Height + SUM(Daily_Gains)",
                     "target_height_formula": "Base_Height + Total_Recoverable_Loss",

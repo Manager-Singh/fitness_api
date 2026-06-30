@@ -307,6 +307,8 @@ class VariantExercise(models.Model):
     )
 
     notes         = models.CharField(max_length=120, blank=True)
+    is_unilateral = models.BooleanField(default=False)
+    unilateral_label = models.CharField(max_length=12, blank=True, default="")
 
     class Meta:
         unique_together = [("variant", "exercise")]
@@ -370,6 +372,51 @@ class WorkoutEntry(models.Model):
         ordering = ("-created_at",)
     def __str__(self):
         return f"{self.session} – {self.exercise}"
+
+
+class WorkoutSetCompletion(models.Model):
+    """One credited set for an assigned exercise on a user's local day."""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="workout_set_completions",
+    )
+    session = models.ForeignKey(
+        WorkoutSession,
+        on_delete=models.CASCADE,
+        related_name="set_completions",
+    )
+    workout_entry = models.ForeignKey(
+        WorkoutEntry,
+        on_delete=models.CASCADE,
+        related_name="set_completions",
+        null=True,
+        blank=True,
+    )
+    user_routine_exercise = models.ForeignKey(
+        "UserRoutineExercise",
+        on_delete=models.CASCADE,
+        related_name="set_completions",
+        null=True,
+        blank=True,
+    )
+    exercise = models.ForeignKey("Exercise", on_delete=models.PROTECT)
+    log_date = models.DateField()
+    set_index = models.PositiveSmallIntegerField(validators=[MinValueValidator(1)])
+    points_credited = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("log_date", "set_index", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "log_date", "user_routine_exercise", "set_index"],
+                name="uniq_workout_set_per_assignment_day",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} · {self.exercise_id} · {self.log_date} · set {self.set_index}"
 
 
 class RoutineType(models.TextChoices):

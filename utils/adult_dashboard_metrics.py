@@ -6,7 +6,6 @@ from habits.models import MicroHabitLog
 from user_profile.models import UserProfile
 from users.models import DailyLog, HeightLedger
 from users.spec_runtime import LEDGER_ENTRY_DAILY_COMPUTE, get_user_runtime_state_snapshot
-from utils.posture.height_constants import POINTS_TO_CM_ENGINE1
 from utils.user_time import user_today
 
 
@@ -54,10 +53,27 @@ def adult_engine1_points_today(user, log_date=None) -> int:
     return int((daily.engine1_points if daily else 0) or 0)
 
 
+def adult_engine1_ledger_delta_cm_today(user, log_date=None) -> float:
+    log_date = log_date or user_today(user)
+    qs = HeightLedger.objects.filter(
+        user=user,
+        log_date=log_date,
+        entry_type=LEDGER_ENTRY_DAILY_COMPUTE,
+    )
+    engine1_um = int(qs.aggregate(total=Sum("engine1_delta_um")).get("total") or 0)
+    if engine1_um == 0 and qs.exists():
+        for row in qs.only("metadata").iterator(chunk_size=200):
+            try:
+                engine1_um += int((row.metadata or {}).get("engine1_delta_um", 0) or 0)
+            except Exception:
+                continue
+    return round(max(0, engine1_um) / 10000.0, 4)
+
+
 def adult_daily_gains_cm_today(user, log_date=None, *, conversion_enabled: bool = True) -> float:
     if not conversion_enabled:
         return 0.0
-    return round(adult_engine1_points_today(user, log_date) * POINTS_TO_CM_ENGINE1, 4)
+    return adult_engine1_ledger_delta_cm_today(user, log_date)
 
 
 def adult_chart_series(user, target_height_cm: float, days_window: int = 90) -> list:
