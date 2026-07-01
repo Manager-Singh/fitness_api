@@ -83,6 +83,24 @@ EXERCISE_SPEC_SHEET_ROWS: dict[str, dict] = {
             "Hang fully relaxed and let your spine decompress under your bodyweight.",
             "Stay still — don't swing or kick.",
         ],
+        "methods": [
+            {
+                "title": "Bar",
+                "steps": [
+                    "Grip a pull-up bar shoulder-width apart with palms facing away.",
+                    "Hang fully relaxed and let your spine decompress under your bodyweight.",
+                    "Stay still — don't swing or kick.",
+                ],
+            },
+            {
+                "title": "Door Frame",
+                "steps": [
+                    "Find the sturdiest door in your home, open it 90° and place a towel over the top edge to protect the door.",
+                    "Place one hand near the top corner closest to the hinges (strongest side), other hand about 14 inches next to it along the top edge.",
+                    "Bend your knees to take all weight off your feet — hang and feel your spine decompress.",
+                ],
+            },
+        ],
         "safety_note": (
             "Use only a solid wood or solid-core door. Stop if the door creaks, "
             "shifts, or shows any sign of stress."

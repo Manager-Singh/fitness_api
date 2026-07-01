@@ -14,16 +14,28 @@ def exercise_fields_from_spec_row(row: dict) -> dict:
     name = row["name"]
     dosage = row["dosage"]
     steps = list(row["steps"])
-    return {
-        "description": row["description"],
-        "instruction_content": "",
-        "instruction_steps": steps,
-        "instruction_methods": [
+    raw_methods = row.get("methods")
+    if isinstance(raw_methods, list) and raw_methods:
+        instruction_methods = [
+            {
+                "title": str(m.get("title") or "").strip(),
+                "steps": [str(s).strip() for s in (m.get("steps") or []) if str(s).strip()],
+            }
+            for m in raw_methods
+            if isinstance(m, dict)
+        ]
+    else:
+        instruction_methods = [
             {
                 "title": _method_title(name, dosage),
                 "steps": steps,
             }
-        ],
+        ]
+    return {
+        "description": row["description"],
+        "instruction_content": "",
+        "instruction_steps": steps,
+        "instruction_methods": instruction_methods,
         "safety_note": row.get("safety_note") or "",
     }
 
